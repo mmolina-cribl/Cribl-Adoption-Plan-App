@@ -1,6 +1,6 @@
-import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { WorkerGroupEditor, usePatchWorkerGroup } from './WorkerGroupEditor'
-import type { PlanState } from '../types/planTypes'
+import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
 import { SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
@@ -118,6 +118,137 @@ function MiniBars({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+type AttachSourceCandidate = {
+  row: SourceSummaryRow
+  currentWgName: string | null
+}
+
+function AttachSourceCombobox({
+  candidates,
+  onAttach,
+}: {
+  candidates: AttachSourceCandidate[]
+  onAttach: (sourceId: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const ranked = candidates
+      .filter((c) => {
+        if (!needle) {
+          return true
+        }
+        const name = (c.row.displayName || '').toLowerCase()
+        const src = (c.row.source || '').toLowerCase()
+        const tile = (c.row.sourceTile || '').toLowerCase()
+        const wg = (c.currentWgName || '').toLowerCase()
+        return (
+          name.includes(needle) ||
+          src.includes(needle) ||
+          tile.includes(needle) ||
+          wg.includes(needle)
+        )
+      })
+      // Unassigned sources surface first; assigned-elsewhere sources after.
+      .sort((a, b) => {
+        const au = a.currentWgName ? 1 : 0
+        const bu = b.currentWgName ? 1 : 0
+        return au - bu
+      })
+    return ranked.slice(0, 12)
+  }, [candidates, q])
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  return (
+    <div ref={wrapRef} className="relative mb-3">
+      <label className="sr-only" htmlFor="wg-attach-source">
+        Attach a source to this worker group
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id="wg-attach-source"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder="Attach a source… (search by name, sourcetype, or current group)"
+          autoComplete="off"
+          className="h-9 w-full"
+        />
+      </div>
+      {open && matches.length > 0 ? (
+        <ul className="absolute left-0 right-0 z-20 mt-1 max-h-80 list-none overflow-auto rounded-lg border border-cribl-border bg-white p-1 shadow-card-float">
+          {matches.map((c) => {
+            const name = c.row.displayName?.trim() || 'Source'
+            const tile = c.row.sourceTile?.trim()
+            const src = c.row.source?.trim()
+            const subtitleBits = [tile, src].filter(Boolean) as string[]
+            const subtitle = subtitleBits
+              .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
+              .join(' · ')
+            return (
+              <li key={c.row.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAttach(c.row.id)
+                    setQ('')
+                    setOpen(false)
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded-md border-0 bg-transparent px-3 py-2 text-left hover:bg-cribl-elevate"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-cribl-ink">{name}</span>
+                    {subtitle ? (
+                      <span className="block truncate text-xs text-cribl-muted">{subtitle}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-[11px] font-medium">
+                    {c.currentWgName ? (
+                      <span className="rounded-md bg-cribl-card-body px-2 py-0.5 text-cribl-muted">
+                        in {c.currentWgName}
+                      </span>
+                    ) : (
+                      <span className="rounded-md bg-cribl-primary-soft px-2 py-0.5 text-cribl-primary-ink">
+                        Unassigned
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : open && q.trim() ? (
+        <p className="absolute left-0 right-0 z-20 mt-1 rounded-lg border border-cribl-border bg-white p-3 text-xs text-cribl-muted shadow-card-float">
+          No sources match “{q.trim()}”.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -269,6 +400,28 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
     }))
   }
 
+  const assignSourceToThisGroup = (sourceId: string) => {
+    setPlan((p) => {
+      const target = p.sourceSummary.find((r) => r.id === sourceId)
+      if (!target) {
+        return p
+      }
+      const sourceName = (target.source || '').trim()
+      return {
+        ...p,
+        sourceSummary: p.sourceSummary.map((r) =>
+          r.id === sourceId ? { ...r, workerGroupId: g.id } : r,
+        ),
+        sourceVolume: p.sourceVolume.map((r) => {
+          if (sourceName && (r.source || '').trim() === sourceName) {
+            return { ...r, workerGroupId: g.id, wg: g.wg || r.wg }
+          }
+          return r
+        }),
+      }
+    })
+  }
+
   return (
     <div className="min-w-0 space-y-4 sm:space-y-5">
       <SectionBox
@@ -294,9 +447,21 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
         title={`Sources in this worker group (${sources.length})`}
         defaultOpen={expandByDefault}
       >
+        <AttachSourceCombobox
+          candidates={plan.sourceSummary
+            .filter((r) => r.workerGroupId !== g.id)
+            .map((r) => {
+              const wg = r.workerGroupId
+                ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || null
+                : null
+              return { row: r, currentWgName: wg }
+            })}
+          onAttach={assignSourceToThisGroup}
+        />
         {sources.length === 0 ? (
           <p className="m-0 text-sm text-cribl-muted">
-            No sources are assigned to this worker group yet. Assign sources from each Source summary page.
+            No sources are assigned to this worker group yet. Use the search box above to attach an existing
+            source, or open a Source summary page directly.
           </p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
