@@ -22,14 +22,47 @@ import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
 import { usePlanStorage } from './hooks/usePlanStorage'
 import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from './lib/postAddPreference'
-import { newId, type SourceSummaryRow } from './types/planTypes'
+import { newId, type PlanState, type SourceSummaryRow } from './types/planTypes'
 import { fetchAdoptionPlanEmptyBufferIfMissing } from './lib/adoptionPlanTemplateExport'
 import { hydrateImportShellFromIdb } from './lib/importShellStore'
 
 type PostAddFlow = null | { kind: 'choice'; sourceDisplayName: string } | { kind: 'wizard' }
 
+interface AppContentProps {
+  plan: PlanState
+  setPlan: React.Dispatch<React.SetStateAction<PlanState>>
+  reset: () => void
+}
+
+/**
+ * Loading state shown while `usePlanStorage` is awaiting the initial KV read.
+ * See CRIBL_DEV_NOTES.md "Decision 1": the main plan is the only thing we
+ * gate the entire UI on, because flashing an empty plan to a populated one
+ * is jarring. Small UI prefs (sidebar width, etc.) flash-of-default instead.
+ */
+function LoadingScreen() {
+  return (
+    <div className="flex h-svh min-h-0 flex-col items-center justify-center bg-cribl-canvas text-cribl-muted">
+      <div className="text-sm">Loading…</div>
+    </div>
+  )
+}
+
 function App() {
   const { plan, setPlan, reset } = usePlanStorage()
+  if (plan === null) {
+    return <LoadingScreen />
+  }
+  return (
+    <AppContent
+      plan={plan}
+      setPlan={setPlan as React.Dispatch<React.SetStateAction<PlanState>>}
+      reset={reset}
+    />
+  )
+}
+
+function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
     useResizableRail()
   const [mainView, setMainView] = useState<MainView>('source')
