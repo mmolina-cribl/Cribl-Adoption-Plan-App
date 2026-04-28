@@ -15,7 +15,6 @@ import {
 } from '../lib/sizing'
 import type { PlanState, WorkerGroupRow } from '../types/planTypes'
 import { LabeledField, NumberWithSuffix, SectionBox } from './FormControls'
-import { HostingPicker } from './HostingPicker'
 
 type PatchWg = (k: keyof WorkerGroupRow, v: string) => void
 
@@ -387,26 +386,6 @@ export function WorkerGroupEditor({
                   Clear override
                 </button>
               ) : null}
-            </LabeledField>
-
-            <LabeledField id={`${idPrefix}-${r.id}-3`} label="Worker hosting">
-              <HostingPicker
-                id={`${idPrefix}-${r.id}-3`}
-                value={r.workerHosting}
-                onChange={(v) => s('workerHosting', v)}
-              />
-            </LabeledField>
-            <LabeledField id={`${idPrefix}-${r.id}-4`} label="Worker count">
-              <input
-                type="text"
-                id={`${idPrefix}-${r.id}-4`}
-                value={r.workerCount}
-                onChange={(e) => s('workerCount', e.target.value)}
-                placeholder={sizing.nodes ? `Auto: ${sizing.nodes}` : 'Auto'}
-              />
-            </LabeledField>
-            <LabeledField className="sm:col-span-2" id={`${idPrefix}-${r.id}-5`} label="Worker detail">
-              <input type="text" id={`${idPrefix}-${r.id}-5`} value={r.workerDetail} onChange={(e) => s('workerDetail', e.target.value)} />
             </LabeledField>
 
           </div>

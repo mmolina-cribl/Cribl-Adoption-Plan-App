@@ -61,6 +61,29 @@ export function pqDiskGb(opts: {
   return (egressGbPerDay * d) / c
 }
 
+/**
+ * Baseline-default node suggestion for a worker group, given a
+ * computed throughput (GB/day). Uses the canonical defaults:
+ * x86 HT (200 GB/d per vCPU), 20% headroom, 16 vCPU/node, N-1
+ * sizing. Intended for surfaces (like the WG header card) that
+ * need a quick "Auto: N" hint without dragging in the full
+ * sizing-engine assumption state from the Capacity editor.
+ *
+ * Returns 0 when throughput is missing/zero so callers can fall
+ * back to a generic placeholder.
+ */
+export function baselineNodesForThroughput(throughputGbPerDay: number | null | undefined): number {
+  if (throughputGbPerDay == null || !Number.isFinite(throughputGbPerDay) || throughputGbPerDay <= 0) {
+    return 0
+  }
+  const v = requiredVcpus({
+    throughputGbPerDay,
+    gbPerVcpuPerDay: gbPerVcpuPerDay('x86_ht', 200),
+    headroomPct: 20,
+  })
+  return nodesNeeded({ requiredVcpus: v, vcpusPerNode: 16, nMinusOne: true })
+}
+
 export function formatGbOrTb(nGb: number): string {
   if (!Number.isFinite(nGb) || nGb < 0) return '—'
   if (nGb >= 1024) {

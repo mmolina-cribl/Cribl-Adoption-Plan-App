@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { WorkerGroupEditor, usePatchWorkerGroup } from './WorkerGroupEditor'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
-import { SectionBox } from './FormControls'
+import { LabeledField, SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
 import { HostingPicker } from './HostingPicker'
+import { effectiveIngestEgressGbdForWg } from '../lib/workerGroupRollup'
+import { baselineNodesForThroughput } from '../lib/sizing'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { ConfirmRemoveWorkerGroupDialog } from './ConfirmRemoveWorkerGroupDialog'
@@ -439,23 +441,52 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
         }
         collapsible={false}
       >
-        <div className="flex flex-col gap-1.5 sm:max-w-md">
-          <label
-            className="text-[11px] font-medium uppercase tracking-wide text-cribl-muted"
-            htmlFor={`wg-header-hosting-${g.id}`}
-          >
-            Hosting
-          </label>
-          <HostingPicker
-            id={`wg-header-hosting-${g.id}`}
-            value={g.workerHosting}
-            onChange={(v) => s('workerHosting', v)}
-          />
-          <p className="m-0 text-xs text-cribl-muted">
-            Same field as <span className="text-cribl-ink">Capacity → Worker hosting</span>; edits sync both ways and
-            are written to the <span className="text-cribl-ink">Worker Hosting</span> column on Excel export.
-          </p>
-        </div>
+        {(() => {
+          const cap = effectiveIngestEgressGbdForWg(plan, g)
+          const ingest = cap?.ingestGb ?? 0
+          const egress = cap?.egressGb ?? 0
+          const throughput = (ingest || 0) + (egress || 0)
+          const baselineNodes = baselineNodesForThroughput(throughput)
+          return (
+            <div className="space-y-3">
+              <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">Topology</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <LabeledField id={`wg-header-hosting-${g.id}`} label="Hosting">
+                  <HostingPicker
+                    id={`wg-header-hosting-${g.id}`}
+                    value={g.workerHosting}
+                    onChange={(v) => s('workerHosting', v)}
+                  />
+                </LabeledField>
+                <LabeledField id={`wg-header-count-${g.id}`} label="Worker count">
+                  <input
+                    type="text"
+                    id={`wg-header-count-${g.id}`}
+                    value={g.workerCount}
+                    onChange={(e) => s('workerCount', e.target.value)}
+                    placeholder={baselineNodes ? `Auto: ${baselineNodes}` : 'e.g. 4'}
+                  />
+                </LabeledField>
+                <LabeledField id={`wg-header-detail-${g.id}`} label="Worker detail">
+                  <input
+                    type="text"
+                    id={`wg-header-detail-${g.id}`}
+                    value={g.workerDetail}
+                    onChange={(e) => s('workerDetail', e.target.value)}
+                    placeholder="e.g. c6i.4xlarge, 16 vCPU/32 GB"
+                  />
+                </LabeledField>
+              </div>
+              <p className="m-0 text-xs text-cribl-muted">
+                Topology fields describe what the worker group <em>is</em> (customer reality). Capacity numbers and
+                sizing assumptions live in the <span className="text-cribl-ink">Capacity</span> card. All three fields
+                round-trip to Excel via the <span className="text-cribl-ink">Worker Hosting</span> /
+                <span className="text-cribl-ink"> Worker Count</span> /
+                <span className="text-cribl-ink"> Worker Detail</span> columns.
+              </p>
+            </div>
+          )
+        })()}
       </SectionBox>
 
       <SectionBox
