@@ -7,6 +7,34 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
 
+function ChevronToggle({
+  open,
+  onClick,
+  label,
+}: {
+  open: boolean
+  onClick: () => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={open ? `Collapse ${label}` : `Expand ${label}`}
+      aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
+      aria-expanded={open}
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-transparent text-cribl-rail-ink hover:bg-white/70 hover:text-cribl-ink"
+    >
+      <svg
+        viewBox="0 0 16 16"
+        className={`h-3.5 w-3.5 transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+        aria-hidden="true"
+      >
+        <path d="M5 3l6 5-6 5V3z" fill="currentColor" />
+      </svg>
+    </button>
+  )
+}
 
 type Props = {
   plan: PlanState
@@ -317,6 +345,8 @@ export function PlanSidebarRail({
   const sources = plan.sourceSummary
   const canRemove = sources.length > 0
   const noSources = sources.length === 0
+  const [wgListOpen, setWgListOpen] = useState(true)
+  const [sourcesListOpen, setSourcesListOpen] = useState(true)
 
   return (
     <nav
@@ -331,84 +361,116 @@ export function PlanSidebarRail({
         Plan
       </NavButton>
 
-      <NavButton
-        active={mainView === 'workerGroups'}
-        onClick={onSelectWorkerGroups}
-        className="mt-3"
-      >
-        Worker Groups
-      </NavButton>
-      <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
-        {wgs.map((r, i) => {
-          const isWg =
-            mainView === 'workerGroup' && activeWorkerGroupId === r.id
-          return (
-            <WorkerGroupRowRail
-              key={r.id}
-              row={r}
-              index={i}
-              isActive={isWg}
-              canRemove={canRemoveWg}
-              onSelect={() => onSelectWorkerGroup(r.id)}
-              onRemove={() => onRemoveWorkerGroup(r.id)}
-              onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
-            />
-          )
-        })}
-        <div className="ml-3">
-          <button
-            type="button"
-            onClick={onAddWorkerGroup}
-            className={[
-              'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
-              noWgs ? 'mt-1' : 'mt-0.5',
-            ].join(' ')}
-          >
-            + Add Worker Group
-          </button>
-        </div>
+      <div className="mt-3 flex items-center gap-1">
+        <NavButton
+          active={mainView === 'workerGroups'}
+          onClick={onSelectWorkerGroups}
+          className="flex-1"
+        >
+          <span className="flex items-center gap-2">
+            <span>Worker Groups</span>
+            {wgs.length > 0 ? (
+              <span className="text-xs font-normal text-cribl-muted">({wgs.length})</span>
+            ) : null}
+          </span>
+        </NavButton>
+        {wgs.length > 0 ? (
+          <ChevronToggle
+            open={wgListOpen}
+            onClick={() => setWgListOpen((v) => !v)}
+            label="Worker Groups list"
+          />
+        ) : null}
       </div>
+      {wgListOpen ? (
+        <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+          {wgs.map((r, i) => {
+            const isWg =
+              mainView === 'workerGroup' && activeWorkerGroupId === r.id
+            return (
+              <WorkerGroupRowRail
+                key={r.id}
+                row={r}
+                index={i}
+                isActive={isWg}
+                canRemove={canRemoveWg}
+                onSelect={() => onSelectWorkerGroup(r.id)}
+                onRemove={() => onRemoveWorkerGroup(r.id)}
+                onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
+              />
+            )
+          })}
+          <div className="ml-3">
+            <button
+              type="button"
+              onClick={onAddWorkerGroup}
+              className={[
+                'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
+                noWgs ? 'mt-1' : 'mt-0.5',
+              ].join(' ')}
+            >
+              + Add Worker Group
+            </button>
+          </div>
+        </div>
+      ) : null}
 
-      <NavButton
-        active={mainView === 'sources'}
-        onClick={onSelectSources}
-        className="mt-3"
-      >
-        Sources
-      </NavButton>
-      <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
-        {sources.map((r, i) => {
-          const isSrc = mainView === 'source' && activeSourceId === r.id
-          const wgName = r.workerGroupId
-            ? wgs.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
-            : undefined
-          return (
-            <SourceRowRail
-              key={r.id}
-              row={r}
-              index={i}
-              isActive={isSrc}
-              canRemove={canRemove}
-              workerGroupName={wgName}
-              onSelect={() => onSelectSource(r.id)}
-              onRemove={() => onRemoveSource(r.id)}
-              onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
-            />
-          )
-        })}
-        <div className="ml-3">
-          <button
-            type="button"
-            onClick={onAddSource}
-            className={[
-              'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
-              noSources ? 'mt-1' : 'mt-0.5',
-            ].join(' ')}
-          >
-            + Add source
-          </button>
-        </div>
+      <div className="mt-3 flex items-center gap-1">
+        <NavButton
+          active={mainView === 'sources'}
+          onClick={onSelectSources}
+          className="flex-1"
+        >
+          <span className="flex items-center gap-2">
+            <span>Sources</span>
+            {sources.length > 0 ? (
+              <span className="text-xs font-normal text-cribl-muted">({sources.length})</span>
+            ) : null}
+          </span>
+        </NavButton>
+        {sources.length > 0 ? (
+          <ChevronToggle
+            open={sourcesListOpen}
+            onClick={() => setSourcesListOpen((v) => !v)}
+            label="Sources list"
+          />
+        ) : null}
       </div>
+      {sourcesListOpen ? (
+        <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+          {sources.map((r, i) => {
+            const isSrc = mainView === 'source' && activeSourceId === r.id
+            const wgName = r.workerGroupId
+              ? wgs.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
+              : undefined
+            return (
+              <SourceRowRail
+                key={r.id}
+                row={r}
+                index={i}
+                isActive={isSrc}
+                canRemove={canRemove}
+                workerGroupName={wgName}
+                onSelect={() => onSelectSource(r.id)}
+                onRemove={() => onRemoveSource(r.id)}
+                onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
+              />
+            )
+          })}
+          <div className="ml-3">
+            <button
+              type="button"
+              onClick={onAddSource}
+              className={[
+                'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
+                noSources ? 'mt-1' : 'mt-0.5',
+              ].join(' ')}
+            >
+              + Add source
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <NavButton
         active={mainView === 'import'}
