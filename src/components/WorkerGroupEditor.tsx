@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   reductionGbFromSourceSummaryForWg,
   sumAvgDailyFromSourceSummaryForWg,
@@ -15,8 +15,7 @@ import {
 } from '../lib/sizing'
 import type { PlanState, WorkerGroupRow } from '../types/planTypes'
 import { LabeledField, NumberWithSuffix, SectionBox } from './FormControls'
-
-type PatchWg = (k: keyof WorkerGroupRow, v: string) => void
+import type { PatchWg } from '../hooks/usePatchWorkerGroup'
 
 type Props = {
   plan: PlanState
@@ -409,25 +408,5 @@ export function WorkerGroupEditor({
     >
       {form}
     </SectionBox>
-  )
-}
-
-export function usePatchWorkerGroup(
-  setPlan: Dispatch<SetStateAction<PlanState>>,
-  groupId: string,
-): PatchWg {
-  return useCallback(
-    (k, v) => {
-      setPlan((p) => {
-        if (!p.workerGroups.some((x) => x.id === groupId)) {
-          return p
-        }
-        return {
-          ...p,
-          workerGroups: p.workerGroups.map((x) => (x.id === groupId ? { ...x, [k]: v } : x)),
-        }
-      })
-    },
-    [setPlan, groupId],
   )
 }

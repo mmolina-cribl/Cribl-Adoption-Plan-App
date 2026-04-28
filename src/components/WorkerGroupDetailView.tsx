@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { WorkerGroupEditor, usePatchWorkerGroup } from './WorkerGroupEditor'
+import { WorkerGroupEditor } from './WorkerGroupEditor'
+import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
 import { LabeledField, SectionBox } from './FormControls'
