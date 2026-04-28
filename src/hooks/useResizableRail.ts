@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { kvGet, kvSet } from '../lib/kvStore'
 
-const W_KEY = 'cribl-adoption-rail-px'
-const C_KEY = 'cribl-adoption-rail-collapsed'
+const W_KEY = 'prefs/rail/px'
+const C_KEY = 'prefs/rail/collapsed'
 
 const DEFAULT_W = 224
 const MIN_W = 200
@@ -14,36 +15,36 @@ function clampW(n: number) {
 export function useResizableRail() {
   const [width, setWidth] = useState(DEFAULT_W)
   const [collapsed, setCollapsed] = useState(false)
+  // Gate writes until the initial KV read completes. Without this, the write
+  // effects below would fire on first render with the default values, racing
+  // (and potentially overwriting) the read of the persisted value.
+  const [hasHydrated, setHasHydrated] = useState(false)
 
   useEffect(() => {
-    try {
-      const w = localStorage.getItem(W_KEY)
-      if (w) {
-        setWidth(clampW(parseInt(w, 10) || DEFAULT_W))
-      }
-      if (localStorage.getItem(C_KEY) === '1') {
-        setCollapsed(true)
-      }
-    } catch {
-      // ignore
-    }
+    void (async () => {
+      const [w, c] = await Promise.all([
+        kvGet<number>(W_KEY, DEFAULT_W),
+        kvGet<boolean>(C_KEY, false),
+      ])
+      setWidth(clampW(typeof w === 'number' ? w : DEFAULT_W))
+      setCollapsed(Boolean(c))
+      setHasHydrated(true)
+    })()
   }, [])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(W_KEY, String(width))
-    } catch {
-      // ignore
+    if (!hasHydrated) {
+      return
     }
-  }, [width])
+    void kvSet(W_KEY, width)
+  }, [width, hasHydrated])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(C_KEY, collapsed ? '1' : '0')
-    } catch {
-      // ignore
+    if (!hasHydrated) {
+      return
     }
-  }, [collapsed])
+    void kvSet(C_KEY, collapsed)
+  }, [collapsed, hasHydrated])
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((c) => !c)
