@@ -1,12 +1,21 @@
-import { useMemo, useState } from 'react'
-import type { PlanState } from '../types/planTypes'
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import type { PlanState, WorkerGroupRow } from '../types/planTypes'
+import { newId } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { effectiveIngestEgressGbdForWg, sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
+import { PopoverButton } from './PopoverButton'
+import { WORKER_HOSTING_OPTIONS, classifyHosting } from '../lib/workerHosting'
 
 type Props = {
   plan: PlanState
+  setPlan: Dispatch<SetStateAction<PlanState>>
   onOpenGroup: (id: string) => void
 }
+
+const NO_CHANGE = '__nochange__'
+const HOSTING_FILTER_ALL = '__all__'
+const HOSTING_FILTER_OTHER = '__other__'
+const HOSTING_FILTER_UNSET = '__unset__'
 
 function fmtGb(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'
@@ -26,12 +35,32 @@ type WgIndexRow = {
   detail: string
 }
 
-export function WorkerGroupsIndexView({ plan, onOpenGroup }: Props) {
+export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
   const [q, setQ] = useState('')
   const [onlyWithSources, setOnlyWithSources] = useState(false)
+  const [onlyEmpty, setOnlyEmpty] = useState(false)
   const [onlyOver1Tb, setOnlyOver1Tb] = useState(false)
+  const [hostingFilter, setHostingFilter] = useState<string>(HOSTING_FILTER_ALL)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
 
   const groups = plan.workerGroups
+
+  // Drop selections that no longer exist (after a bulk delete or external edit).
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set<string>()
+      const valid = new Set(groups.map((g) => g.id))
+      for (const id of prev) {
+        if (valid.has(id)) {
+          next.add(id)
+        }
+      }
+      return next.size === prev.size ? prev : next
+    })
+  }, [groups])
+
   const rows: WgIndexRow[] = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return groups
@@ -57,42 +86,395 @@ export function WorkerGroupsIndexView({ plan, onOpenGroup }: Props) {
       })
       .filter((r) => (!needle ? true : r.name.toLowerCase().includes(needle)))
       .filter((r) => (!onlyWithSources ? true : r.nSources > 0))
+      .filter((r) => (!onlyEmpty ? true : r.nSources === 0))
       .filter((r) => (!onlyOver1Tb ? true : r.volGb >= 1024))
+      .filter((r) => {
+        if (hostingFilter === HOSTING_FILTER_ALL) {
+          return true
+        }
+        const c = classifyHosting(r.hosting)
+        if (hostingFilter === HOSTING_FILTER_UNSET) {
+          return c.kind === 'unset'
+        }
+        if (hostingFilter === HOSTING_FILTER_OTHER) {
+          return c.kind === 'other'
+        }
+        return c.kind === 'canonical' && c.value === hostingFilter
+      })
       .sort((a, b) => b.volGb - a.volGb)
-  }, [groups, plan, q, onlyWithSources, onlyOver1Tb])
+  }, [groups, plan, q, onlyWithSources, onlyEmpty, onlyOver1Tb, hostingFilter])
 
   const maxSources = Math.max(0, ...rows.map((r) => r.nSources))
 
+  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows])
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
+
+  const activeFilterCount =
+    (onlyWithSources ? 1 : 0) +
+    (onlyEmpty ? 1 : 0) +
+    (onlyOver1Tb ? 1 : 0) +
+    (hostingFilter !== HOSTING_FILTER_ALL ? 1 : 0) +
+    (q.trim() ? 1 : 0)
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const selectAllMatching = () => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const id of visibleIds) {
+        next.add(id)
+      }
+      return next
+    })
+    setFilterOpen(false)
+  }
+
+  const clearFilters = () => {
+    setOnlyWithSources(false)
+    setOnlyEmpty(false)
+    setOnlyOver1Tb(false)
+    setHostingFilter(HOSTING_FILTER_ALL)
+    setQ('')
+  }
+
+  const clearSelection = () => setSelected(new Set())
+
+  const bulkPatchGroups = (patch: (g: WorkerGroupRow) => WorkerGroupRow) => {
+    setPlan((p) => ({
+      ...p,
+      workerGroups: p.workerGroups.map((g) => (selected.has(g.id) ? patch(g) : g)),
+    }))
+  }
+
+  const bulkSetHosting = (value: string) => {
+    bulkPatchGroups((g) => ({ ...g, workerHosting: value }))
+  }
+
+  const bulkClearOverrides = () => {
+    bulkPatchGroups((g) => ({
+      ...g,
+      ingestGbd: '',
+      egressGbd: '',
+      throughputGbd: '',
+      diskOneDayGb: '',
+    }))
+  }
+
+  const bulkUnassignSources = () => {
+    const count = selected.size
+    if (count === 0) {
+      return
+    }
+    const ok = window.confirm(
+      `Unassign every source from ${count} worker group${count === 1 ? '' : 's'}? The worker group${
+        count === 1 ? '' : 's'
+      } will remain; sources will go back to the unassigned pool.`,
+    )
+    if (!ok) {
+      return
+    }
+    setPlan((p) => ({
+      ...p,
+      sourceSummary: p.sourceSummary.map((r) =>
+        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '' } : r,
+      ),
+      sourceVolume: p.sourceVolume.map((v) =>
+        selected.has(v.workerGroupId) ? { ...v, workerGroupId: '', wg: '' } : v,
+      ),
+    }))
+    setActionsOpen(false)
+  }
+
+  const bulkDuplicate = () => {
+    const count = selected.size
+    if (count === 0) {
+      return
+    }
+    if (count > 5) {
+      const ok = window.confirm(`Duplicate ${count} worker groups? Sources are not cloned.`)
+      if (!ok) {
+        return
+      }
+    }
+    setPlan((p) => {
+      const targets = p.workerGroups.filter((g) => selected.has(g.id))
+      const copies: WorkerGroupRow[] = targets.map((g) => ({
+        ...g,
+        id: newId(),
+        wg: `${(g.wg || 'Unnamed worker group').trim()} (copy)`,
+      }))
+      return { ...p, workerGroups: [...p.workerGroups, ...copies] }
+    })
+    setActionsOpen(false)
+  }
+
+  const bulkDelete = () => {
+    const count = selected.size
+    if (count === 0) {
+      return
+    }
+    const sourcesAffected = plan.sourceSummary.filter((r) => selected.has(r.workerGroupId)).length
+    const sourceLine = sourcesAffected
+      ? ` ${sourcesAffected} assigned source${sourcesAffected === 1 ? '' : 's'} will be unassigned (not deleted).`
+      : ''
+    const ok = window.confirm(
+      `Delete ${count} worker group${count === 1 ? '' : 's'}?${sourceLine} This cannot be undone.`,
+    )
+    if (!ok) {
+      return
+    }
+    setPlan((p) => ({
+      ...p,
+      workerGroups: p.workerGroups.filter((g) => !selected.has(g.id)),
+      sourceSummary: p.sourceSummary.map((r) =>
+        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '' } : r,
+      ),
+      sourceVolume: p.sourceVolume.map((v) =>
+        selected.has(v.workerGroupId) ? { ...v, workerGroupId: '', wg: '' } : v,
+      ),
+    }))
+    setSelected(new Set())
+    setActionsOpen(false)
+  }
+
+  const selectionCount = selected.size
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
           <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Worker Groups</h2>
-          <p className="m-0 mt-1.5 text-sm text-cribl-muted">Browse all worker groups. Search and filter.</p>
+          <p className="m-0 mt-1.5 text-sm text-cribl-muted">
+            Browse all worker groups. Filter to narrow the list, then use Bulk Actions to apply changes across many at
+            once.
+          </p>
         </div>
-        <div className="w-full sm:w-80">
-          <label className="sr-only" htmlFor="wg-index-q">
-            Search worker groups
-          </label>
-          <input
-            id="wg-index-q"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search worker groups…"
-            autoComplete="off"
-          />
-        </div>
-      </div>
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
+          <div className="w-full sm:w-72">
+            <label className="sr-only" htmlFor="wg-index-q">
+              Search worker groups
+            </label>
+            <input
+              id="wg-index-q"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search worker groups…"
+              autoComplete="off"
+              className="h-9 w-full"
+            />
+          </div>
+          <div className="flex items-center gap-2 self-end">
+            <PopoverButton
+              label="Filter"
+              badge={activeFilterCount}
+              open={filterOpen}
+              onToggle={() => {
+                setFilterOpen((v) => !v)
+                setActionsOpen(false)
+              }}
+            >
+              <div className="space-y-3">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wider text-cribl-muted">Filters</p>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyWithSources}
+                    onChange={(e) => {
+                      setOnlyWithSources(e.target.checked)
+                      if (e.target.checked) {
+                        setOnlyEmpty(false)
+                      }
+                    }}
+                  />
+                  Only with sources
+                </label>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyEmpty}
+                    onChange={(e) => {
+                      setOnlyEmpty(e.target.checked)
+                      if (e.target.checked) {
+                        setOnlyWithSources(false)
+                      }
+                    }}
+                  />
+                  Empty (no sources) only
+                </label>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyOver1Tb}
+                    onChange={(e) => setOnlyOver1Tb(e.target.checked)}
+                  />
+                  ≥ 1 TB/d (from sources)
+                </label>
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-cribl-muted" htmlFor="wg-hosting-filter">
+                    Hosting
+                  </label>
+                  <select
+                    id="wg-hosting-filter"
+                    value={hostingFilter}
+                    onChange={(e) => setHostingFilter(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                  >
+                    <option value={HOSTING_FILTER_ALL}>All</option>
+                    {WORKER_HOSTING_OPTIONS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                    <option value={HOSTING_FILTER_OTHER}>Other (free-text)</option>
+                    <option value={HOSTING_FILTER_UNSET}>Not set</option>
+                  </select>
+                </div>
+                {q.trim() ? (
+                  <p className="m-0 rounded-md bg-cribl-card-body px-2 py-1.5 text-xs text-cribl-muted">
+                    Search filter active: <span className="text-cribl-ink">“{q.trim()}”</span>
+                  </p>
+                ) : null}
+                <div className="border-t border-cribl-border/70 pt-3">
+                  <p className="m-0 text-xs text-cribl-muted">
+                    {visibleIds.length} of {groups.length} match{visibleIds.length === 1 ? '' : 'es'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllMatching}
+                      disabled={visibleIds.length === 0 || allVisibleSelected}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl enabled:hover:bg-cribl-elevate disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {allVisibleSelected
+                        ? 'All matching selected'
+                        : `Select all ${visibleIds.length} matching`}
+                    </button>
+                    {activeFilterCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={clearFilters}
+                        className="h-9 rounded-lg border border-cribl-border/80 bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </PopoverButton>
 
-      <div className="flex flex-wrap gap-2">
-        <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm text-cribl-ink shadow-ctrl">
-          <input type="checkbox" checked={onlyWithSources} onChange={(e) => setOnlyWithSources(e.target.checked)} />
-          Only with sources
-        </label>
-        <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm text-cribl-ink shadow-ctrl">
-          <input type="checkbox" checked={onlyOver1Tb} onChange={(e) => setOnlyOver1Tb(e.target.checked)} />
-          ≥ 1 TB/d (from sources)
-        </label>
+            <PopoverButton
+              label="Bulk Actions"
+              badge={selectionCount}
+              open={actionsOpen}
+              onToggle={() => {
+                setActionsOpen((v) => !v)
+                setFilterOpen(false)
+              }}
+              panelClassName="min-w-[20rem]"
+            >
+              {selectionCount === 0 ? (
+                <div className="space-y-2 text-sm text-cribl-muted">
+                  <p className="m-0 font-medium text-cribl-ink">No worker groups selected</p>
+                  <p className="m-0">
+                    Tick the checkbox on a worker group card, or open <span className="text-cribl-ink">Filter</span> →
+                    <span className="text-cribl-ink"> Select all matching</span>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="m-0 text-sm font-semibold text-cribl-ink">{selectionCount} selected</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearSelection()
+                        setActionsOpen(false)
+                      }}
+                      className="text-xs font-medium text-cribl-muted hover:text-cribl-ink"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <select
+                      defaultValue={NO_CHANGE}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === NO_CHANGE) {
+                          return
+                        }
+                        bulkSetHosting(v === '__clear__' ? '' : v)
+                        e.currentTarget.value = NO_CHANGE
+                      }}
+                      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                      aria-label="Set hosting"
+                    >
+                      <option value={NO_CHANGE}>Set hosting…</option>
+                      {WORKER_HOSTING_OPTIONS.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                      <option value="__clear__">Clear (Not set)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 border-t border-cribl-border/70 pt-3">
+                    <button
+                      type="button"
+                      onClick={bulkClearOverrides}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
+                      title="Blank ingest, egress, throughput, and 1-day disk so values auto-derive from assigned sources"
+                    >
+                      Clear capacity overrides
+                    </button>
+                    <button
+                      type="button"
+                      onClick={bulkDuplicate}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
+                      title="Clone each selected worker group with a (copy) suffix; sources are not cloned"
+                    >
+                      Duplicate
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={bulkUnassignSources}
+                      className="h-9 w-full rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                      title="Detach every source from the selected worker groups; the worker groups remain"
+                    >
+                      Unassign all sources…
+                    </button>
+                  </div>
+
+                  <div className="border-t border-cribl-border/70 pt-3">
+                    <button
+                      type="button"
+                      onClick={bulkDelete}
+                      className="h-9 w-full rounded-lg border border-rose-200 bg-rose-600 px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700"
+                    >
+                      Delete {selectionCount}…
+                    </button>
+                  </div>
+                </div>
+              )}
+            </PopoverButton>
+          </div>
+        </div>
       </div>
 
       {groups.length === 0 ? (
@@ -101,7 +483,20 @@ export function WorkerGroupsIndexView({ plan, onOpenGroup }: Props) {
         </p>
       ) : rows.length === 0 ? (
         <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">
-          No matches.
+          No worker groups match the current filters.
+          {activeFilterCount > 0 ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="font-medium text-cribl-ink underline"
+              >
+                Clear filters
+              </button>
+              .
+            </>
+          ) : null}
         </p>
       ) : (
         <ul className="m-0 grid list-none gap-5 p-0 lg:grid-cols-2">
@@ -109,16 +504,32 @@ export function WorkerGroupsIndexView({ plan, onOpenGroup }: Props) {
             const srcBarPct = maxSources > 0 ? Math.round((g.nSources / maxSources) * 100) : 0
             const volLine =
               Number.isFinite(g.volGb) && g.volGb > 0 ? formatGbOrTbPerDayStr(g.volGb) : '—'
+            const isSelected = selected.has(g.id)
             return (
               <li key={g.id} className="min-w-0">
-                <div className="min-w-0 overflow-hidden rounded-2xl border border-cribl-border/80 bg-white p-5 text-left shadow-ctrl sm:p-6">
+                <div
+                  className={[
+                    'min-w-0 overflow-hidden rounded-2xl border border-cribl-border/80 bg-white p-5 text-left shadow-ctrl sm:p-6',
+                    isSelected ? 'ring-2 ring-cribl-primary/60' : '',
+                  ].join(' ')}
+                >
                   <div className="flex min-w-0 items-start justify-between gap-3">
-                    <h3
-                      className="m-0 min-w-0 break-words text-lg font-semibold leading-snug tracking-tight text-cribl-ink"
-                      id={`wg-index-title-${g.id}`}
-                    >
-                      {g.name}
-                    </h3>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <label className="flex shrink-0 cursor-pointer select-none items-center pt-1">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleOne(g.id)}
+                          aria-label={`Select ${g.name}`}
+                        />
+                      </label>
+                      <h3
+                        className="m-0 min-w-0 break-words text-lg font-semibold leading-snug tracking-tight text-cribl-ink"
+                        id={`wg-index-title-${g.id}`}
+                      >
+                        {g.name}
+                      </h3>
+                    </div>
                     {g.nSources > 0 ? (
                       <span className="shrink-0 rounded-lg bg-cribl-primary-soft px-2.5 py-1 text-sm font-medium text-cribl-primary-ink">
                         {g.nSources} source{g.nSources === 1 ? '' : 's'}

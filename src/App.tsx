@@ -496,6 +496,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               {mainView === 'workerGroups' && (
                 <WorkerGroupsIndexView
                   plan={plan}
+                  setPlan={setPlan}
                   onOpenGroup={(id) => {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')
