@@ -4,6 +4,7 @@ import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
 import { SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
+import { HostingPicker } from './HostingPicker'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { ConfirmRemoveWorkerGroupDialog } from './ConfirmRemoveWorkerGroupDialog'
@@ -438,7 +439,23 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
         }
         collapsible={false}
       >
-        {null}
+        <div className="flex flex-col gap-1.5 sm:max-w-md">
+          <label
+            className="text-[11px] font-medium uppercase tracking-wide text-cribl-muted"
+            htmlFor={`wg-header-hosting-${g.id}`}
+          >
+            Hosting
+          </label>
+          <HostingPicker
+            id={`wg-header-hosting-${g.id}`}
+            value={g.workerHosting}
+            onChange={(v) => s('workerHosting', v)}
+          />
+          <p className="m-0 text-xs text-cribl-muted">
+            Same field as <span className="text-cribl-ink">Capacity → Worker hosting</span>; edits sync both ways and
+            are written to the <span className="text-cribl-ink">Worker Hosting</span> column on Excel export.
+          </p>
+        </div>
       </SectionBox>
 
       <SectionBox

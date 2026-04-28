@@ -15,10 +15,7 @@ import {
 } from '../lib/sizing'
 import type { PlanState, WorkerGroupRow } from '../types/planTypes'
 import { LabeledField, NumberWithSuffix, SectionBox } from './FormControls'
-import {
-  WORKER_HOSTING_OPTIONS,
-  classifyHosting,
-} from '../lib/workerHosting'
+import { HostingPicker } from './HostingPicker'
 
 type PatchWg = (k: keyof WorkerGroupRow, v: string) => void
 
@@ -433,66 +430,6 @@ export function WorkerGroupEditor({
     >
       {form}
     </SectionBox>
-  )
-}
-
-/**
- * Hosting picker: canonical select + "Other…" escape hatch.
- *
- * Stored value remains a free-text string in `WorkerGroupRow.workerHosting`
- * for workbook compatibility. When the value matches one of
- * `WORKER_HOSTING_OPTIONS` (case-insensitive) we pre-select it; otherwise
- * the dropdown shows "Other…" and an inline text input lets the user keep
- * or refine the original wording.
- */
-function HostingPicker({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const classification = classifyHosting(value)
-  const isOther = classification.kind === 'other'
-  const selectValue =
-    classification.kind === 'canonical' ? classification.value : isOther ? '__other__' : ''
-
-  return (
-    <div className="space-y-2">
-      <select
-        id={id}
-        value={selectValue}
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === '') {
-            onChange('')
-          } else if (v === '__other__') {
-            onChange(isOther ? value : 'Other')
-          } else {
-            onChange(v)
-          }
-        }}
-        className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
-      >
-        <option value="">— Not set —</option>
-        {WORKER_HOSTING_OPTIONS.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-        <option value="__other__">Other…</option>
-      </select>
-      {isOther ? (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Describe the hosting model"
-        />
-      ) : null}
-    </div>
   )
 }
 
