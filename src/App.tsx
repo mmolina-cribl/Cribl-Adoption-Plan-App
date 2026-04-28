@@ -506,6 +506,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               {mainView === 'sources' && (
                 <SourcesIndexView
                   plan={plan}
+                  setPlan={setPlan}
                   onOpenSource={(id) => {
                     setActiveSourceId(id)
                     setMainView('source')
