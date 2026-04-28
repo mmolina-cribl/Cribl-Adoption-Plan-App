@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { xlsxSheets } from '../data/planDataMap'
 import { formatGbOrTbPerDayStr } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import { buildDashboardSnapshot } from '../lib/planDashboardStats'
@@ -176,6 +175,8 @@ export function PlanDataOverview({
   const customer = plan.customerName.trim()
   const unassignedSources = plan.sourceSummary.filter((s) => !s.workerGroupId).length
   const [wgPage, setWgPage] = useState(0)
+  const [recentSrcQ, setRecentSrcQ] = useState('')
+  const [recentWgQ, setRecentWgQ] = useState('')
   const wgStats = useMemo(
     () =>
       plan.workerGroups.map((w) => {
@@ -193,18 +194,44 @@ export function PlanDataOverview({
       }),
     [plan],
   )
+  // When the user is actively filtering, drop pagination and show all
+  // matches up to a safety cap so the result list stays scannable.
+  const wgFiltered = useMemo(() => {
+    const needle = recentWgQ.trim().toLowerCase()
+    if (!needle) {
+      return wgStats
+    }
+    return wgStats.filter((w) => w.name.toLowerCase().includes(needle))
+  }, [wgStats, recentWgQ])
+  const wgSearchActive = recentWgQ.trim().length > 0
   const wgPageCount = Math.max(1, Math.ceil(wgStats.length / WG_SNAPSHOT_PAGE_SIZE))
   const wgPageSafe = Math.min(wgPage, Math.max(0, wgPageCount - 1))
-  const wgPageSlice = useMemo(
-    () => wgStats.slice(wgPageSafe * WG_SNAPSHOT_PAGE_SIZE, wgPageSafe * WG_SNAPSHOT_PAGE_SIZE + WG_SNAPSHOT_PAGE_SIZE),
-    [wgStats, wgPageSafe],
-  )
+  const wgPageSlice = useMemo(() => {
+    if (wgSearchActive) {
+      return wgFiltered.slice(0, 12)
+    }
+    return wgStats.slice(
+      wgPageSafe * WG_SNAPSHOT_PAGE_SIZE,
+      wgPageSafe * WG_SNAPSHOT_PAGE_SIZE + WG_SNAPSHOT_PAGE_SIZE,
+    )
+  }, [wgFiltered, wgSearchActive, wgStats, wgPageSafe])
   useEffect(() => {
     setWgPage((p) => {
       const maxP = Math.max(0, wgPageCount - 1)
       return Math.min(p, maxP)
     })
   }, [wgPageCount, wgStats.length])
+
+  const filteredRecentSources = useMemo(() => {
+    const needle = recentSrcQ.trim().toLowerCase()
+    if (!needle) {
+      return snap.sourceRows.slice(0, 4)
+    }
+    return snap.sourceRows
+      .filter((row) => row.name.toLowerCase().includes(needle) || row.label.toLowerCase().includes(needle))
+      .slice(0, 12)
+  }, [snap.sourceRows, recentSrcQ])
+  const recentSrcSearchActive = recentSrcQ.trim().length > 0
   const totalIngest = wgStats.reduce((a, x) => a + (x.effIngest ?? 0), 0)
   const totalEgress = wgStats.reduce((a, x) => a + (x.effEgress ?? 0), 0)
 
@@ -385,15 +412,38 @@ export function PlanDataOverview({
         <div className="min-w-0 space-y-3 lg:col-span-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="m-0 text-sm font-semibold text-cribl-ink sm:text-base">Recent sources</h3>
-            <span className="text-xs text-cribl-muted">Top rows you’ve started</span>
+            <span className="text-xs text-cribl-muted">
+              {recentSrcSearchActive
+                ? `${filteredRecentSources.length} match${filteredRecentSources.length === 1 ? '' : 'es'}`
+                : 'Top rows you’ve started'}
+            </span>
           </div>
+          {nSources > 0 ? (
+            <div>
+              <label className="sr-only" htmlFor="recent-src-q">
+                Filter recent sources
+              </label>
+              <input
+                id="recent-src-q"
+                value={recentSrcQ}
+                onChange={(e) => setRecentSrcQ(e.target.value)}
+                placeholder="Search sources by name or sourcetype…"
+                autoComplete="off"
+                className="h-9 w-full"
+              />
+            </div>
+          ) : null}
           {nSources === 0 ? (
             <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
               No sources yet — use <strong>+ Add source</strong> in the left nav.
             </p>
+          ) : filteredRecentSources.length === 0 ? (
+            <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-5 text-center text-sm text-cribl-muted">
+              No matches for “{recentSrcQ.trim()}”.
+            </p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
-              {snap.sourceRows.slice(0, 4).map((row) => (
+              {filteredRecentSources.map((row) => (
                 <li key={row.id} className="min-w-0">
                   <div className="card-axiom flex min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 shadow-ctrl sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
                     <div className="min-w-0 flex-1">
@@ -424,7 +474,7 @@ export function PlanDataOverview({
               ))}
             </ul>
           )}
-          {nSources > 4 ? (
+          {!recentSrcSearchActive && nSources > 4 ? (
             <p className="m-0 mt-2 text-xs text-cribl-muted">+{nSources - 4} more sources in the sidebar…</p>
           ) : null}
           <div className="pt-1">
@@ -445,8 +495,27 @@ export function PlanDataOverview({
               Capacity and source assignment · {unassignedSources} unassigned
             </p>
             {wgStats.length > 0 ? (
+              <div className="mt-3">
+                <label className="sr-only" htmlFor="recent-wg-q">
+                  Filter worker groups
+                </label>
+                <input
+                  id="recent-wg-q"
+                  value={recentWgQ}
+                  onChange={(e) => setRecentWgQ(e.target.value)}
+                  placeholder="Search worker groups…"
+                  autoComplete="off"
+                  className="h-9 w-full"
+                />
+              </div>
+            ) : null}
+            {wgStats.length > 0 ? (
               <div className="mt-4">
-                {/** One column: sidebar is narrow; two abreast over-compresses. Full detail lives on Worker Groups. */}
+                {wgSearchActive && wgPageSlice.length === 0 ? (
+                  <p className="m-0 rounded-lg border border-cribl-border/80 bg-white px-3 py-4 text-center text-sm text-cribl-muted">
+                    No worker groups match “{recentWgQ.trim()}”.
+                  </p>
+                ) : null}
                 <div className="grid grid-cols-1 gap-3">
                   {wgPageSlice.map((w) => {
                     const volLine =
@@ -491,7 +560,7 @@ export function PlanDataOverview({
                     )
                   })}
                 </div>
-                {wgPageCount > 1 ? (
+                {!wgSearchActive && wgPageCount > 1 ? (
                   <div className="mt-4 flex flex-col items-stretch gap-2 border-t border-cribl-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
                     <p className="m-0 text-center text-xs text-cribl-muted sm:text-left">
                       Page {wgPageSafe + 1} of {wgPageCount} · {wgStats.length} group{wgStats.length === 1 ? '' : 's'}
@@ -531,20 +600,6 @@ export function PlanDataOverview({
             </div>
           </div>
 
-          <div className="card-axiom border-cribl-border/80 bg-white p-4 sm:p-5">
-            <h3 className="m-0 text-sm font-semibold text-cribl-ink">What’s in the download</h3>
-            <p className="m-0 mt-0.5 text-xs text-cribl-muted">When you export, the file is organized to match how teams review a plan</p>
-            <ul className="m-0 mt-2.5 list-none space-y-2.5 p-0">
-              {xlsxSheets.map((s) => (
-                <li key={s.name} className="min-w-0 text-sm leading-relaxed text-cribl-ink/95">
-                  {s.role}
-                </li>
-              ))}
-            </ul>
-            <p className="m-0 mt-2.5 text-[10px] leading-relaxed text-cribl-muted">
-              Shared picklists in the file keep dropdowns aligned with the choices in this app.
-            </p>
-          </div>
         </div>
       </div>
     </div>
