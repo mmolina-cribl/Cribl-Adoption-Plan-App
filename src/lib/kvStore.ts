@@ -9,6 +9,20 @@
  * So all we do here is fetch with the right method/body and let the platform
  * handle auth and per-app scoping.
  *
+ * ## Wire format (verified against staging tenant 2026-04-28)
+ *
+ * - `PUT /kvstore/<key>` with `content-type: text/plain` and the raw value
+ *   in the body. Returns 201 Created. **JSON content-type is rejected with
+ *   400 Bad Request** (don't ask me why — the server just doesn't like it).
+ * - `GET /kvstore/<key>` returns 200 with `text/plain` body, or 404 if absent.
+ * - Multi-segment keys with literal `/` are supported: `users/abc/plan` is
+ *   stored verbatim. **Do not URL-encode the slashes** (`users%2Fabc%2Fplan`)
+ *   — the platform's route matcher doesn't decode them and returns 404.
+ *
+ * We always `JSON.stringify` on write and `JSON.parse` on read so the helper
+ * stays generic over `T`. Side effect: string values appear quoted (`"wizard"`)
+ * in the KV admin UI. That's cosmetic; round-trips are correct.
+ *
  * ## Per-user namespacing
  *
  * The platform's KV store is per-app shared across users (confirmed via
@@ -104,7 +118,8 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
       return fallback
     }
     if (!r.ok) {
-      console.warn(`[kvStore] GET ${nsKey} failed: ${r.status} ${r.statusText}`)
+      const body = await r.text().catch(() => '')
+      console.warn(`[kvStore] GET ${nsKey} failed: ${r.status} ${r.statusText}`, body.slice(0, 200))
       return fallback
     }
     const text = await r.text()
@@ -114,7 +129,7 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
     try {
       return JSON.parse(text) as T
     } catch {
-      console.warn(`[kvStore] GET ${nsKey}: response was not valid JSON`)
+      console.warn(`[kvStore] GET ${nsKey}: response was not valid JSON`, text.slice(0, 200))
       return fallback
     }
   } catch (e) {
@@ -138,11 +153,12 @@ export async function kvSet<T>(key: string, value: T): Promise<void> {
   try {
     const r = await fetch(`${window.CRIBL_API_URL}/kvstore/${nsKey}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'text/plain' },
       body: JSON.stringify(value),
     })
     if (!r.ok) {
-      console.warn(`[kvStore] PUT ${nsKey} failed: ${r.status} ${r.statusText}`)
+      const body = await r.text().catch(() => '')
+      console.warn(`[kvStore] PUT ${nsKey} failed: ${r.status} ${r.statusText}`, body.slice(0, 200))
     }
   } catch (e) {
     console.warn(`[kvStore] PUT ${nsKey} threw:`, e)
@@ -166,7 +182,8 @@ export async function kvDelete(key: string): Promise<void> {
       method: 'DELETE',
     })
     if (!r.ok && r.status !== 404) {
-      console.warn(`[kvStore] DELETE ${nsKey} failed: ${r.status} ${r.statusText}`)
+      const body = await r.text().catch(() => '')
+      console.warn(`[kvStore] DELETE ${nsKey} failed: ${r.status} ${r.statusText}`, body.slice(0, 200))
     }
   } catch (e) {
     console.warn(`[kvStore] DELETE ${nsKey} threw:`, e)
