@@ -446,6 +446,7 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
         kicker="Overview"
         title={`Sources in this worker group (${sources.length})`}
         defaultOpen={expandByDefault}
+        allowOverflow
       >
         <AttachSourceCombobox
           candidates={plan.sourceSummary

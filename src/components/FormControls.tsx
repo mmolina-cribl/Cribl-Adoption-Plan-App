@@ -767,6 +767,12 @@ type SectionBoxProps = {
   defaultOpen?: boolean
   /** @default true — set false to disable the collapse control (static card) */
   collapsible?: boolean
+  /**
+   * @default false — opt out of the default `overflow-hidden` on the outer
+   * `<section>`. Use when a child renders absolute-positioned popovers,
+   * comboboxes, or menus that need to escape the card bounds.
+   */
+  allowOverflow?: boolean
 }
 
 function ChevronToggle({ open, className }: { open: boolean; className?: string }) {
@@ -801,6 +807,7 @@ export function SectionBox({
   actions,
   defaultOpen = false,
   collapsible = true,
+  allowOverflow = false,
 }: SectionBoxProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [touched, setTouched] = useState(defaultOpen)
@@ -869,11 +876,12 @@ export function SectionBox({
   return (
     <section
       id={id}
-      className={[
-        'card-axiom overflow-hidden',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      // The `card-axiom` utility bakes in `overflow: hidden`, which clips
+      // absolute-positioned children (popovers / comboboxes). When
+      // `allowOverflow` is set, override via inline style so it wins
+      // regardless of Tailwind layer ordering.
+      style={allowOverflow ? { overflow: 'visible' } : undefined}
+      className="card-axiom"
     >
       <div
         className={[
