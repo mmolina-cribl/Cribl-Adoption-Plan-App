@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 
@@ -10,11 +18,92 @@ type Props = {
 
 const NO_CHANGE = '__nochange__'
 
+function ChevronDownIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={`h-3 w-3 ${className}`} aria-hidden="true">
+      <path d="M3 5l5 6 5-6H3z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function PopoverButton({
+  label,
+  badge,
+  open,
+  onToggle,
+  panelClassName = '',
+  children,
+  triggerClassName = '',
+  panelAlign = 'right',
+}: {
+  label: string
+  badge?: string | number
+  open: boolean
+  onToggle: () => void
+  panelClassName?: string
+  children: ReactNode
+  triggerClassName?: string
+  panelAlign?: 'left' | 'right'
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        onToggle()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open, onToggle])
+
+  return (
+    <div ref={wrapRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={[
+          'inline-flex h-9 items-center gap-1.5 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl hover:bg-cribl-elevate',
+          open ? 'border-cribl-primary/50 ring-1 ring-cribl-primary/30' : '',
+          triggerClassName,
+        ].join(' ')}
+      >
+        <span>{label}</span>
+        {badge != null && badge !== '' && Number(badge) !== 0 ? (
+          <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-md bg-cribl-primary-soft px-1.5 text-[11px] font-semibold text-cribl-primary-ink">
+            {badge}
+          </span>
+        ) : null}
+        <ChevronDownIcon className={open ? 'rotate-180' : ''} />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className={[
+            'absolute z-30 mt-2 min-w-[18rem] rounded-xl border border-cribl-border bg-white p-3 shadow-card-float',
+            panelAlign === 'right' ? 'right-0' : 'left-0',
+            panelClassName,
+          ].join(' ')}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const [q, setQ] = useState('')
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [onlyHighPriority, setOnlyHighPriority] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const sources = plan.sourceSummary
 
   // Prune selection when sources change (e.g. after a bulk delete or
@@ -49,7 +138,9 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
 
   const visibleIds = useMemo(() => filtered.map((s) => s.id), [filtered])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
-  const someVisibleSelected = visibleIds.some((id) => selected.has(id))
+
+  const activeFilterCount =
+    (onlyUnassigned ? 1 : 0) + (onlyHighPriority ? 1 : 0) + (q.trim() ? 1 : 0)
 
   const toggleOne = (id: string) => {
     setSelected((prev) => {
@@ -63,20 +154,21 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
     })
   }
 
-  const toggleAllVisible = () => {
+  const selectAllMatching = () => {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (allVisibleSelected) {
-        for (const id of visibleIds) {
-          next.delete(id)
-        }
-      } else {
-        for (const id of visibleIds) {
-          next.add(id)
-        }
+      for (const id of visibleIds) {
+        next.add(id)
       }
       return next
     })
+    setFilterOpen(false)
+  }
+
+  const clearFilters = () => {
+    setOnlyUnassigned(false)
+    setOnlyHighPriority(false)
+    setQ('')
   }
 
   const clearSelection = () => setSelected(new Set())
@@ -93,15 +185,11 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
       return {
         ...p,
         sourceSummary: p.sourceSummary.map((r) => (targetIds.has(r.id) ? patch(r) : r)),
-        // Carry the workerGroupId / wg over to the volume table by
-        // joining on source name, mirroring the unassign + attach
-        // handlers elsewhere in the app.
         sourceVolume: p.sourceVolume.map((v) => {
           const name = (v.source || '').trim()
           if (!name || !targetSourceNames.has(name)) {
             return v
           }
-          // We only re-derive WG fields here; other patches are summary-only.
           const sample = p.sourceSummary.find((r) => targetIds.has(r.id) && (r.source || '').trim() === name)
           if (!sample) {
             return v
@@ -150,170 +238,232 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
       sourceSummary: p.sourceSummary.filter((r) => !selected.has(r.id)),
     }))
     setSelected(new Set())
+    setActionsOpen(false)
   }
 
   const selectionCount = selected.size
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
           <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Sources</h2>
           <p className="m-0 mt-1.5 text-sm text-cribl-muted">
-            Browse all sources. Search by name, tile, or sourcetype. Select multiple to apply bulk actions.
+            Browse all sources. Filter to narrow the list, then use Bulk Actions to apply changes across many at
+            once.
           </p>
         </div>
-        <div className="w-full sm:w-80">
-          <label className="sr-only" htmlFor="src-index-q">
-            Search sources
-          </label>
-          <input
-            id="src-index-q"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search sources…"
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm text-cribl-ink shadow-ctrl">
-          <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} />
-          Unassigned only
-        </label>
-        <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm text-cribl-ink shadow-ctrl">
-          <input
-            type="checkbox"
-            checked={onlyHighPriority}
-            onChange={(e) => setOnlyHighPriority(e.target.checked)}
-          />
-          High priority only
-        </label>
-        {visibleIds.length > 0 ? (
-          <label className="inline-flex cursor-pointer select-none items-center gap-2 rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm text-cribl-ink shadow-ctrl">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
+          <div className="w-full sm:w-72">
+            <label className="sr-only" htmlFor="src-index-q">
+              Search sources
+            </label>
             <input
-              type="checkbox"
-              checked={allVisibleSelected}
-              ref={(el) => {
-                if (el) {
-                  el.indeterminate = !allVisibleSelected && someVisibleSelected
-                }
-              }}
-              onChange={toggleAllVisible}
+              id="src-index-q"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search sources…"
+              autoComplete="off"
+              className="h-9 w-full"
             />
-            Select {allVisibleSelected ? 'none' : 'all visible'} ({visibleIds.length})
-          </label>
-        ) : null}
-      </div>
-
-      {selectionCount > 0 ? (
-        <div className="sticky top-0 z-10 -mx-2 flex flex-wrap items-center gap-2 rounded-xl border border-cribl-primary/40 bg-cribl-primary-soft/95 px-3 py-2.5 shadow-card-float backdrop-blur sm:px-4">
-          <span className="text-sm font-semibold text-cribl-primary-ink">
-            {selectionCount} selected
-          </span>
-
-          <div className="ml-2 flex flex-wrap items-center gap-2">
-            <select
-              defaultValue={NO_CHANGE}
-              onChange={(e) => {
-                const v = e.target.value
-                if (v === NO_CHANGE) {
-                  return
-                }
-                bulkAssignWg(v === '__none__' ? '' : v)
-                e.currentTarget.value = NO_CHANGE
-              }}
-              className="h-9 rounded-lg border border-cribl-border bg-white px-2 text-sm"
-              aria-label="Assign worker group"
-            >
-              <option value={NO_CHANGE}>Assign worker group…</option>
-              <option value="__none__">— Unassign —</option>
-              {plan.workerGroups.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.wg.trim() || 'Unnamed worker group'}
-                </option>
-              ))}
-            </select>
-
-            <select
-              defaultValue={NO_CHANGE}
-              onChange={(e) => {
-                const v = e.target.value
-                if (v === NO_CHANGE) {
-                  return
-                }
-                bulkSetCriticality(v === '__clear__' ? '' : v)
-                e.currentTarget.value = NO_CHANGE
-              }}
-              className="h-9 rounded-lg border border-cribl-border bg-white px-2 text-sm"
-              aria-label="Set criticality / priority"
-            >
-              <option value={NO_CHANGE}>Set criticality…</option>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-              <option value="__clear__">Clear</option>
-            </select>
-
-            <select
-              defaultValue={NO_CHANGE}
-              onChange={(e) => {
-                const v = e.target.value
-                if (v === NO_CHANGE) {
-                  return
-                }
-                if (v === 'On-Prem' || v === 'Cloud/Internet') {
-                  bulkSetType(v)
-                } else {
-                  bulkSetType('')
-                }
-                e.currentTarget.value = NO_CHANGE
-              }}
-              className="h-9 rounded-lg border border-cribl-border bg-white px-2 text-sm"
-              aria-label="Set source context"
-            >
-              <option value={NO_CHANGE}>Set context…</option>
-              <option value="On-Prem">On-Prem</option>
-              <option value="Cloud/Internet">Cloud/Internet</option>
-              <option value="__clear__">Not set</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={() => bulkSetCompliance(true)}
-              className="h-9 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
-              title="Flag selected sources as compliance-related"
-            >
-              Mark compliance
-            </button>
-            <button
-              type="button"
-              onClick={() => bulkSetCompliance(false)}
-              className="h-9 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink"
-              title="Unflag compliance on selected sources"
-            >
-              Unmark compliance
-            </button>
-
-            <button
-              type="button"
-              onClick={bulkDelete}
-              className="h-9 rounded-lg border border-rose-200 bg-rose-600 px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700"
-            >
-              Delete…
-            </button>
           </div>
+          <div className="flex items-center gap-2 self-end">
+            <PopoverButton
+              label="Filter"
+              badge={activeFilterCount}
+              open={filterOpen}
+              onToggle={() => {
+                setFilterOpen((v) => !v)
+                setActionsOpen(false)
+              }}
+            >
+              <div className="space-y-3">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wider text-cribl-muted">Filters</p>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyUnassigned}
+                    onChange={(e) => setOnlyUnassigned(e.target.checked)}
+                  />
+                  Unassigned only
+                </label>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyHighPriority}
+                    onChange={(e) => setOnlyHighPriority(e.target.checked)}
+                  />
+                  High priority only
+                </label>
+                {q.trim() ? (
+                  <p className="m-0 rounded-md bg-cribl-card-body px-2 py-1.5 text-xs text-cribl-muted">
+                    Search filter active: <span className="text-cribl-ink">“{q.trim()}”</span>
+                  </p>
+                ) : null}
+                <div className="border-t border-cribl-border/70 pt-3">
+                  <p className="m-0 text-xs text-cribl-muted">
+                    {visibleIds.length} of {sources.length} match{visibleIds.length === 1 ? '' : 'es'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllMatching}
+                      disabled={visibleIds.length === 0 || allVisibleSelected}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl enabled:hover:bg-cribl-elevate disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {allVisibleSelected
+                        ? 'All matching selected'
+                        : `Select all ${visibleIds.length} matching`}
+                    </button>
+                    {activeFilterCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={clearFilters}
+                        className="h-9 rounded-lg border border-cribl-border/80 bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </PopoverButton>
 
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="ml-auto h-9 rounded-lg border border-cribl-border/80 bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink"
-          >
-            Clear selection
-          </button>
+            <PopoverButton
+              label="Bulk Actions"
+              badge={selectionCount}
+              open={actionsOpen}
+              onToggle={() => {
+                setActionsOpen((v) => !v)
+                setFilterOpen(false)
+              }}
+              panelClassName="min-w-[20rem]"
+            >
+              {selectionCount === 0 ? (
+                <div className="space-y-2 text-sm text-cribl-muted">
+                  <p className="m-0 font-medium text-cribl-ink">No sources selected</p>
+                  <p className="m-0">
+                    Tick the checkbox on a source card, or open <span className="text-cribl-ink">Filter</span> →
+                    <span className="text-cribl-ink"> Select all matching</span>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="m-0 text-sm font-semibold text-cribl-ink">
+                      {selectionCount} selected
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearSelection()
+                        setActionsOpen(false)
+                      }}
+                      className="text-xs font-medium text-cribl-muted hover:text-cribl-ink"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <select
+                      defaultValue={NO_CHANGE}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === NO_CHANGE) {
+                          return
+                        }
+                        bulkAssignWg(v === '__none__' ? '' : v)
+                        e.currentTarget.value = NO_CHANGE
+                      }}
+                      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                      aria-label="Assign worker group"
+                    >
+                      <option value={NO_CHANGE}>Assign worker group…</option>
+                      <option value="__none__">— Unassign —</option>
+                      {plan.workerGroups.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.wg.trim() || 'Unnamed worker group'}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      defaultValue={NO_CHANGE}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === NO_CHANGE) {
+                          return
+                        }
+                        bulkSetCriticality(v === '__clear__' ? '' : v)
+                        e.currentTarget.value = NO_CHANGE
+                      }}
+                      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                      aria-label="Set criticality"
+                    >
+                      <option value={NO_CHANGE}>Set criticality…</option>
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                      <option value="__clear__">Clear</option>
+                    </select>
+
+                    <select
+                      defaultValue={NO_CHANGE}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === NO_CHANGE) {
+                          return
+                        }
+                        if (v === 'On-Prem' || v === 'Cloud/Internet') {
+                          bulkSetType(v)
+                        } else {
+                          bulkSetType('')
+                        }
+                        e.currentTarget.value = NO_CHANGE
+                      }}
+                      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                      aria-label="Set source context"
+                    >
+                      <option value={NO_CHANGE}>Set context…</option>
+                      <option value="On-Prem">On-Prem</option>
+                      <option value="Cloud/Internet">Cloud/Internet</option>
+                      <option value="__clear__">Not set</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 border-t border-cribl-border/70 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => bulkSetCompliance(true)}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
+                    >
+                      Mark compliance
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => bulkSetCompliance(false)}
+                      className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink"
+                    >
+                      Unmark compliance
+                    </button>
+                  </div>
+
+                  <div className="border-t border-cribl-border/70 pt-3">
+                    <button
+                      type="button"
+                      onClick={bulkDelete}
+                      className="h-9 w-full rounded-lg border border-rose-200 bg-rose-600 px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700"
+                    >
+                      Delete {selectionCount}…
+                    </button>
+                  </div>
+                </div>
+              )}
+            </PopoverButton>
+          </div>
         </div>
-      ) : null}
+      </div>
 
       {sources.length === 0 ? (
         <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
@@ -321,7 +471,20 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
         </p>
       ) : filtered.length === 0 ? (
         <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">
-          No matches for “{q.trim()}”.
+          No sources match the current filters.
+          {activeFilterCount > 0 ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="font-medium text-cribl-ink underline"
+              >
+                Clear filters
+              </button>
+              .
+            </>
+          ) : null}
         </p>
       ) : (
         <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
