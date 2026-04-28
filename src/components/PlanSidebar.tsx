@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { CriblMark, CriblRailBrand } from './brand/CriblLogos'
 import type { PlanState, SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
 import { PencilIcon } from './PencilIcon'
 import type { MainView } from './navTypes'
@@ -8,8 +7,6 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
 
-const sectionLabel =
-  'm-0 border-t border-cribl-border/90 px-3 pt-3 pb-1 text-xs font-semibold tracking-wider text-cribl-muted uppercase'
 
 type Props = {
   plan: PlanState
@@ -39,11 +36,13 @@ function NavButton({
   onClick,
   children,
   title,
+  className = '',
 }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
   title?: string
+  className?: string
 }) {
   return (
     <button
@@ -55,6 +54,7 @@ function NavButton({
         active
           ? 'border-cribl-primary bg-white text-cribl-ink shadow-sm'
           : 'border-transparent text-cribl-rail-ink hover:bg-white/70 hover:text-cribl-ink',
+        className,
       ].join(' ')}
       aria-current={active ? 'page' : undefined}
     >
@@ -68,6 +68,7 @@ function SourceRowRail({
   index,
   isActive,
   canRemove,
+  workerGroupName,
   onSelect,
   onRemove,
   onUpdateDisplayName,
@@ -76,6 +77,7 @@ function SourceRowRail({
   index: number
   isActive: boolean
   canRemove: boolean
+  workerGroupName?: string
   onSelect: () => void
   onRemove: () => void
   onUpdateDisplayName: (displayName: string) => void
@@ -143,7 +145,14 @@ function SourceRowRail({
           onClick={onSelect}
           className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-cribl-ink"
         >
-          <span className="block truncate">{label}</span>
+          <span className="block truncate">
+            {label}
+            {workerGroupName ? (
+              <span className="ml-1.5 text-xs font-normal text-cribl-muted">
+                · {workerGroupName}
+              </span>
+            ) : null}
+          </span>
           {showSubtitle ? (
             <span className="mt-0.5 block max-w-full truncate text-xs font-normal text-cribl-muted">
               {subtitle}
@@ -314,140 +323,125 @@ export function PlanSidebarRail({
       className={`flex flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
       aria-label="Plan, Worker Groups, and Sources"
     >
-      <CriblRailBrand className="!mb-0" />
-      <p className="m-0 px-3 pt-0 pb-1 text-xs font-semibold tracking-wider text-cribl-muted uppercase">
-        Plan
-      </p>
       <NavButton
         active={mainView === 'overview'}
         onClick={onSelectOverview}
+        className="mt-2"
       >
-        Overview
+        Plan
       </NavButton>
 
-      <p className={`${sectionLabel} mt-3`}>
+      <NavButton
+        active={mainView === 'workerGroups'}
+        onClick={onSelectWorkerGroups}
+        className="mt-3"
+      >
         Worker Groups
-      </p>
-      <NavButton active={mainView === 'workerGroups'} onClick={onSelectWorkerGroups}>
-        Overview
       </NavButton>
-      {wgs.map((r, i) => {
-        const isWg =
-          mainView === 'workerGroup' && activeWorkerGroupId === r.id
-        return (
-          <WorkerGroupRowRail
-            key={r.id}
-            row={r}
-            index={i}
-            isActive={isWg}
-            canRemove={canRemoveWg}
-            onSelect={() => onSelectWorkerGroup(r.id)}
-            onRemove={() => onRemoveWorkerGroup(r.id)}
-            onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
-          />
-        )
-      })}
-      <div className="ml-3">
-        <button
-          type="button"
-          onClick={onAddWorkerGroup}
-          className={[
-            'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
-            noWgs ? 'mt-3' : 'mt-0.5',
-          ].join(' ')}
-        >
-          + Add Worker Group
-        </button>
+      <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+        {wgs.map((r, i) => {
+          const isWg =
+            mainView === 'workerGroup' && activeWorkerGroupId === r.id
+          return (
+            <WorkerGroupRowRail
+              key={r.id}
+              row={r}
+              index={i}
+              isActive={isWg}
+              canRemove={canRemoveWg}
+              onSelect={() => onSelectWorkerGroup(r.id)}
+              onRemove={() => onRemoveWorkerGroup(r.id)}
+              onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
+            />
+          )
+        })}
+        <div className="ml-3">
+          <button
+            type="button"
+            onClick={onAddWorkerGroup}
+            className={[
+              'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
+              noWgs ? 'mt-1' : 'mt-0.5',
+            ].join(' ')}
+          >
+            + Add Worker Group
+          </button>
+        </div>
       </div>
 
-      <p className={`${sectionLabel} mt-3`}>
-        Sources
-      </p>
-      <NavButton active={mainView === 'sources'} onClick={onSelectSources}>
-        Overview
-      </NavButton>
-      {sources.map((r, i) => {
-        const isSrc = mainView === 'source' && activeSourceId === r.id
-        return (
-          <SourceRowRail
-            key={r.id}
-            row={r}
-            index={i}
-            isActive={isSrc}
-            canRemove={canRemove}
-            onSelect={() => onSelectSource(r.id)}
-            onRemove={() => onRemoveSource(r.id)}
-            onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
-          />
-        )
-      })}
-      <div className="ml-3">
-        <button
-          type="button"
-          onClick={onAddSource}
-          className={[
-            'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
-            noSources ? 'mt-3' : 'mt-0.5',
-          ].join(' ')}
-        >
-          + Add source
-        </button>
-      </div>
-
-      <p className="m-0 mt-4 border-t border-cribl-border/80 px-3 pt-3 pb-1 text-xs font-semibold tracking-wider text-cribl-muted/90 uppercase">
-        File
-      </p>
-      <button
-        type="button"
-        onClick={onSelectImport}
-        className={[
-          'w-full rounded-lg border px-3 py-2 text-left transition',
-          'border-l-2',
-          mainView === 'import'
-            ? 'border-cribl-primary/70 bg-white/80 text-cribl-ink shadow-sm'
-            : 'border-transparent text-cribl-rail-ink/85 hover:border-cribl-border/50 hover:bg-white/60',
-        ].join(' ')}
-        title="Load from an .xlsx file"
+      <NavButton
+        active={mainView === 'sources'}
+        onClick={onSelectSources}
+        className="mt-3"
       >
-        <span className="block text-xs font-medium text-cribl-ink/90">Import</span>
-        <span className="mt-0.5 block text-[10px] font-normal leading-snug text-cribl-muted">From Excel</span>
-      </button>
-      <button
-        type="button"
+        Sources
+      </NavButton>
+      <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+        {sources.map((r, i) => {
+          const isSrc = mainView === 'source' && activeSourceId === r.id
+          const wgName = r.workerGroupId
+            ? wgs.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
+            : undefined
+          return (
+            <SourceRowRail
+              key={r.id}
+              row={r}
+              index={i}
+              isActive={isSrc}
+              canRemove={canRemove}
+              workerGroupName={wgName}
+              onSelect={() => onSelectSource(r.id)}
+              onRemove={() => onRemoveSource(r.id)}
+              onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
+            />
+          )
+        })}
+        <div className="ml-3">
+          <button
+            type="button"
+            onClick={onAddSource}
+            className={[
+              'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
+              noSources ? 'mt-1' : 'mt-0.5',
+            ].join(' ')}
+          >
+            + Add source
+          </button>
+        </div>
+      </div>
+
+      <NavButton
+        active={mainView === 'import'}
+        onClick={onSelectImport}
+        title="Load from an .xlsx file"
+        className="mt-3"
+      >
+        Import
+      </NavButton>
+      <NavButton
+        active={mainView === 'export'}
         onClick={onSelectExport}
-        className={[
-          'mt-0.5 w-full rounded-lg border px-3 py-2 text-left transition',
-          'border-l-2',
-          mainView === 'export'
-            ? 'border-cribl-primary/70 bg-white/80 text-cribl-ink shadow-sm'
-            : 'border-transparent text-cribl-rail-ink/85 hover:border-cribl-border/50 hover:bg-white/60',
-        ].join(' ')}
         title="Download a file you can share"
       >
-        <span className="block text-xs font-medium text-cribl-ink/90">Export</span>
-        <span className="mt-0.5 block text-[10px] font-normal leading-snug text-cribl-muted">
-          Download your plan
-        </span>
-      </button>
+        Export
+      </NavButton>
 
-      <p className="m-0 mt-4 border-t border-cribl-border/80 px-3 pt-3 pb-1 text-xs font-semibold tracking-wider text-cribl-muted/90 uppercase">
-        Settings
-      </p>
-      <NavButton active={mainView === 'settings'} onClick={onSelectSettings}>
+      <NavButton
+        active={mainView === 'settings'}
+        onClick={onSelectSettings}
+        className="mt-3"
+      >
         Preferences
       </NavButton>
 
-      <p className="m-0 mt-4 border-t border-cribl-border/80 px-3 pt-3 pb-1 text-xs font-semibold tracking-wider text-cribl-muted/90 uppercase">
-        Reset
-      </p>
-      <button
-        type="button"
+      <NavButton
+        active={false}
         onClick={onClearPlan}
-        className="w-full rounded-lg border border-cribl-border/60 bg-cribl-canvas/40 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-border hover:bg-rose-50/60 hover:text-rose-700"
         title="Clear all data in this plan"
+        className="mt-3"
       >
         Clear plan…
-      </button>
+      </NavButton>
     </nav>
   )
 }
@@ -693,9 +687,6 @@ export function PlanNavMobile({
     <div
       className={`flex items-stretch gap-1.5 overflow-x-auto border-b border-cribl-border bg-white px-2 py-1.5 ${className}`}
     >
-      <div className="mr-0.5 flex shrink-0 items-center border-0 pr-0.5 sm:pr-1" title="Cribl">
-        <CriblMark className="h-6 w-6" />
-      </div>
       <button
         type="button"
         className={chip(mainView === 'overview')}

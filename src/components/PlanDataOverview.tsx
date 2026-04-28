@@ -253,12 +253,24 @@ export function PlanDataOverview({
     <div className="space-y-6 sm:space-y-8">
       <section className="overflow-hidden rounded-2xl border border-cribl-border/80 bg-gradient-to-br from-cribl-primary-soft/60 via-white to-cribl-canvas/90 px-5 py-5 shadow-card-float sm:px-8 sm:py-6">
         <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-cribl-primary">Adoption plan</p>
+        {/*
+         * TODO: derive the company name from the user's Cribl account details
+         * once the platform exposes that to embedded apps. For now the user
+         * types their own company name into the header (it's *their* org's
+         * name, since their customers will be the ones reading the plan).
+         * See CRIBL_DEV_NOTES.md "User identity inside the iframe".
+         */}
         <h2 className="m-0 mt-1 text-xl font-semibold leading-tight text-cribl-ink sm:text-2xl">
-          {customer || 'Add a customer name in the header above'}
+          {customer || 'Your Company Name'}
         </h2>
+        {!customer && (
+          <p className="m-0 mt-1 text-xs italic text-cribl-muted/80">
+            Edit it in the field at the top right.
+          </p>
+        )}
         <p className="m-0 mt-2 max-w-2xl text-sm leading-relaxed text-cribl-muted">
           A quick snapshot of what you have captured so far. Open any area from the left to keep going. When you want a
-          file to share, use <span className="text-cribl-ink/80">File → Export</span> in the sidebar.
+          file to share, use <span className="text-cribl-ink/80">Export</span> in the sidebar.
         </p>
       </section>
 

@@ -4,7 +4,7 @@ import { kvGet, kvSet } from '../lib/kvStore'
 const W_KEY = 'prefs/rail/px'
 const C_KEY = 'prefs/rail/collapsed'
 
-const DEFAULT_W = 224
+const DEFAULT_W = 300
 const MIN_W = 200
 const MAX_W = 480
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AddSourceDialog } from './components/AddSourceDialog'
 import { AddWorkerGroupDialog } from './components/AddWorkerGroupDialog'
-import { CriblHeaderBrand, CriblMark } from './components/brand/CriblLogos'
 import { HeaderCustomerName } from './components/HeaderCustomerName'
 import { DataSourcesView } from './components/DataSourcesView'
 import { PostAddSourceChoiceDialog } from './components/PostAddSourceChoiceDialog'
@@ -352,16 +351,6 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   »
                 </span>
               </button>
-              <button
-                type="button"
-                onClick={toggleRail}
-                title="Expand sidebar"
-                aria-label="Expand sidebar"
-                aria-expanded="false"
-                className="mt-3 inline-flex w-full min-w-0 min-h-0 shrink-0 flex-1 flex-col items-center justify-start rounded-lg border-0 bg-transparent p-1 text-inherit transition hover:bg-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/35"
-              >
-                <CriblMark className="pointer-events-none h-7 w-7" />
-              </button>
             </div>
           ) : (
             <>
@@ -432,14 +421,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     md:items-center md:justify-center
                   "
                 >
-                  <CriblHeaderBrand
-                    className="flex w-full min-w-0 flex-col items-center text-center"
-                    title={
-                      <h1 className="m-0 text-base font-semibold tracking-wide text-cribl-ink sm:text-lg">
-                        Adoption Plan
-                      </h1>
-                    }
-                  />
+                  <h1 className="m-0 text-base font-semibold tracking-wide text-cribl-ink sm:text-lg">
+                    Adoption Plan
+                  </h1>
                 </div>
                 <div
                   className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
@@ -575,12 +559,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               {mainView === 'import' && <ImportWorkbookView plan={plan} setPlan={setPlan} />}
 
               {mainView === 'export' && <ExportWorkbookView plan={plan} />}
-              <footer className="mt-8 space-y-1 text-center text-xs text-cribl-muted/80">
-                <p className="m-0">Data stays in this browser. Built for Cribl field adoption planning.</p>
-                <p className="m-0 text-cribl-muted/70">
-                  Cribl and the Cribl logo are trademarks of Cribl, Inc. Used with brand assets as reference; follow the
-                  Cribl brand guidelines for public distribution.
-                </p>
+              <footer className="mt-8 text-center text-xs text-cribl-muted/80">
+                <p className="m-0">Built for Cribl field adoption planning.</p>
               </footer>
             </main>
           </div>
