@@ -24,7 +24,7 @@ import { usePlanStorage } from './hooks/usePlanStorage'
 import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from './lib/postAddPreference'
 import { newId, type PlanState, type SourceSummaryRow } from './types/planTypes'
 import { fetchAdoptionPlanEmptyBufferIfMissing } from './lib/adoptionPlanTemplateExport'
-import { hydrateImportShellFromIdb } from './lib/importShellStore'
+import { hydrateImportShell } from './lib/importShellStore'
 
 type PostAddFlow = null | { kind: 'choice'; sourceDisplayName: string } | { kind: 'wizard' }
 
@@ -76,7 +76,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const [postAdd, setPostAdd] = useState<PostAddFlow>(null)
 
   useEffect(() => {
-    void hydrateImportShellFromIdb()
+    void hydrateImportShell()
   }, [])
 
   useEffect(() => {
