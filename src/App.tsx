@@ -1,0 +1,561 @@
+import { useCallback, useEffect, useState } from 'react'
+import { AddSourceDialog } from './components/AddSourceDialog'
+import { AddWorkerGroupDialog } from './components/AddWorkerGroupDialog'
+import { CriblHeaderBrand, CriblMark } from './components/brand/CriblLogos'
+import { HeaderCustomerName } from './components/HeaderCustomerName'
+import { DataSourcesView } from './components/DataSourcesView'
+import { PostAddSourceChoiceDialog } from './components/PostAddSourceChoiceDialog'
+import { SourceFormWizardDialog } from './components/sourceForm/SourceFormWizardDialog'
+import { ExportWorkbookView } from './components/ExportWorkbookView'
+import { ImportWorkbookView } from './components/ImportWorkbookView'
+import { PlanDataOverview } from './components/PlanDataOverview'
+import { WorkerGroupDetailView } from './components/WorkerGroupDetailView'
+import { WorkerGroupsIndexView } from './components/WorkerGroupsIndexView'
+import { SourcesIndexView } from './components/SourcesIndexView'
+import { SettingsView } from './components/SettingsView'
+import { ConfirmClearDialog } from './components/ConfirmClearDialog'
+import { ConfirmRemoveSourceDialog } from './components/ConfirmRemoveSourceDialog'
+import { ConfirmRemoveWorkerGroupDialog } from './components/ConfirmRemoveWorkerGroupDialog'
+import { defaultSourceRow, defaultWorkerGroupRow } from './lib/defaultState'
+import type { MainView } from './components/navTypes'
+import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
+import { useResizableRail } from './hooks/useResizableRail'
+import { usePlanStorage } from './hooks/usePlanStorage'
+import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from './lib/postAddPreference'
+import { newId, type SourceSummaryRow } from './types/planTypes'
+import { fetchAdoptionPlanEmptyBufferIfMissing } from './lib/adoptionPlanTemplateExport'
+import { hydrateImportShellFromIdb } from './lib/importShellStore'
+
+type PostAddFlow = null | { kind: 'choice'; sourceDisplayName: string } | { kind: 'wizard' }
+
+function App() {
+  const { plan, setPlan, reset } = usePlanStorage()
+  const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
+    useResizableRail()
+  const [mainView, setMainView] = useState<MainView>('source')
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
+  const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
+  const [addSourceOpen, setAddSourceOpen] = useState(false)
+  const [addWorkerGroupOpen, setAddWorkerGroupOpen] = useState(false)
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [confirmRemoveWorkerGroupId, setConfirmRemoveWorkerGroupId] = useState<string | null>(null)
+  const [confirmRemoveSourceId, setConfirmRemoveSourceId] = useState<string | null>(null)
+  const [postAdd, setPostAdd] = useState<PostAddFlow>(null)
+
+  useEffect(() => {
+    void hydrateImportShellFromIdb()
+  }, [])
+
+  useEffect(() => {
+    void fetchAdoptionPlanEmptyBufferIfMissing()
+  }, [])
+
+  const nextSourcePlaceholder = `Source ${plan.sourceSummary.length + 1}`
+  const nextWorkerGroupPlaceholder = `Worker group ${plan.workerGroups.length + 1}`
+
+  useEffect(() => {
+    if (plan.sourceSummary.length === 0) {
+      setActiveSourceId(null)
+      return
+    }
+    const first = plan.sourceSummary[0]!.id
+    setActiveSourceId((cur) => {
+      if (cur && plan.sourceSummary.some((r) => r.id === cur)) {
+        return cur
+      }
+      return first
+    })
+  }, [plan.sourceSummary])
+
+  useEffect(() => {
+    if (plan.workerGroups.length === 0) {
+      setActiveWorkerGroupId(null)
+      return
+    }
+    setActiveWorkerGroupId((cur) => {
+      if (cur && plan.workerGroups.some((w) => w.id === cur)) {
+        return cur
+      }
+      return plan.workerGroups[0]!.id
+    })
+  }, [plan.workerGroups])
+
+  const openAddSource = () => setAddSourceOpen(true)
+  const openAddWorkerGroup = () => setAddWorkerGroupOpen(true)
+
+  const addSourceWithName = (displayName: string) => {
+    const id = newId()
+    setPlan((p) => {
+      const s = defaultSourceRow(p.sourceSummary.length, '')
+      s.id = id
+      s.displayName = displayName
+      // Treat the initial "Add source" name as the canonical Source value too.
+      // Users can still change the Source field later if needed.
+      s.source = displayName
+      return { ...p, sourceSummary: [...p.sourceSummary, s] }
+    })
+    setActiveSourceId(id)
+    setMainView('source')
+    const pref = getPostAddPreference()
+    if (pref === 'wizard') {
+      setPostAdd({ kind: 'wizard' })
+    } else if (pref === 'manual') {
+      setPostAdd(null)
+    } else {
+      setPostAdd({ kind: 'choice', sourceDisplayName: displayName })
+    }
+  }
+
+  const removeSource = (id: string) => {
+    setPlan((p) => {
+      const next = p.sourceSummary.filter((r) => r.id !== id)
+      if (id === activeSourceId) {
+        if (next.length === 0) {
+          queueMicrotask(() => setActiveSourceId(null))
+        } else {
+          const idx = p.sourceSummary.findIndex((r) => r.id === id)
+          const pick = next[idx - 1] ?? next[0]!
+          queueMicrotask(() => setActiveSourceId(pick.id))
+        }
+      }
+      return { ...p, sourceSummary: next }
+    })
+  }
+
+  const updateSourceDisplayName = (id: string, displayName: string) => {
+    setPlan((p) => ({
+      ...p,
+      sourceSummary: p.sourceSummary.map((r) => {
+        if (r.id !== id) {
+          return r
+        }
+        const prevName = r.displayName
+        const shouldKeepImpliedSource = (r.source ?? '').trim() === '' || (r.source ?? '') === prevName
+        return { ...r, displayName, source: shouldKeepImpliedSource ? displayName : r.source }
+      }),
+    }))
+  }
+
+  const updateWorkerGroupWg = (id: string, wg: string) => {
+    setPlan((p) => ({
+      ...p,
+      workerGroups: p.workerGroups.map((r) => (r.id === id ? { ...r, wg } : r)),
+    }))
+  }
+
+  const addWorkerGroupWithName = (wg: string) => {
+    const id = newId()
+    setPlan((p) => {
+      const w = defaultWorkerGroupRow()
+      w.id = id
+      w.wg = wg
+      if (p.workerGroups.length > 0) {
+        return { ...p, workerGroups: [...p.workerGroups, w] }
+      }
+      return { ...p, workerGroups: [w] }
+    })
+    setActiveWorkerGroupId(id)
+    setMainView('workerGroup')
+  }
+
+  const removeWorkerGroup = (id: string) => {
+    setPlan((p) => {
+      if (!p.workerGroups.some((w) => w.id === id)) {
+        return p
+      }
+      const rest = p.workerGroups.filter((w) => w.id !== id)
+      queueMicrotask(() => {
+        setActiveWorkerGroupId((c) => (c === id ? (rest[0]?.id ?? null) : c))
+      })
+      return {
+        ...p,
+        workerGroups: rest,
+        sourceVolume: p.sourceVolume.map((v) =>
+          v.workerGroupId === id ? { ...v, workerGroupId: '', wg: v.wg } : v,
+        ),
+        sourceSummary: p.sourceSummary.map((r) =>
+          r.workerGroupId === id ? { ...r, workerGroupId: '' } : r,
+        ),
+      }
+    })
+  }
+
+  const activeRow = plan.sourceSummary.find((r) => r.id === activeSourceId) ?? null
+  const sourceIndex = activeRow
+    ? plan.sourceSummary.findIndex((r) => r.id === activeRow.id)
+    : 0
+
+  const patchSourceRow = useCallback(
+    (id: string) => (k: keyof SourceSummaryRow, v: string | boolean) => {
+      setPlan((p) => {
+        const cur = p.sourceSummary.find((r) => r.id === id)
+        if (!cur) {
+          return p
+        }
+        return {
+          ...p,
+          sourceSummary: p.sourceSummary.map((r) =>
+            r.id === id ? { ...r, [k]: v } : r,
+          ),
+        }
+      })
+    },
+    [setPlan],
+  )
+
+  return (
+    <div className="relative flex h-svh min-h-0 flex-col overflow-hidden text-cribl-ink">
+      <ConfirmClearDialog
+        open={confirmClearOpen}
+        onCancel={() => setConfirmClearOpen(false)}
+        onConfirm={() => {
+          setConfirmClearOpen(false)
+          setPostAdd(null)
+          clearPostAddPreference()
+          reset()
+        }}
+      />
+      <ConfirmRemoveWorkerGroupDialog
+        open={confirmRemoveWorkerGroupId != null}
+        workerGroupName={
+          confirmRemoveWorkerGroupId
+            ? plan.workerGroups.find((w) => w.id === confirmRemoveWorkerGroupId)?.wg ?? 'Worker group'
+            : 'Worker group'
+        }
+        assignedSourcesCount={
+          confirmRemoveWorkerGroupId
+            ? plan.sourceSummary.filter((s) => s.workerGroupId === confirmRemoveWorkerGroupId).length
+            : 0
+        }
+        onCancel={() => setConfirmRemoveWorkerGroupId(null)}
+        onConfirm={() => {
+          const id = confirmRemoveWorkerGroupId
+          setConfirmRemoveWorkerGroupId(null)
+          if (id) {
+            removeWorkerGroup(id)
+          }
+        }}
+      />
+      <ConfirmRemoveSourceDialog
+        open={confirmRemoveSourceId != null}
+        sourceName={
+          confirmRemoveSourceId
+            ? plan.sourceSummary.find((s) => s.id === confirmRemoveSourceId)?.displayName ?? 'Source'
+            : 'Source'
+        }
+        onCancel={() => setConfirmRemoveSourceId(null)}
+        onConfirm={() => {
+          const id = confirmRemoveSourceId
+          setConfirmRemoveSourceId(null)
+          if (id) {
+            removeSource(id)
+          }
+        }}
+      />
+      {addSourceOpen && (
+        <AddSourceDialog
+          nextLabel={nextSourcePlaceholder}
+          onCancel={() => setAddSourceOpen(false)}
+          onConfirm={(name) => {
+            addSourceWithName(name)
+            setAddSourceOpen(false)
+          }}
+        />
+      )}
+      {addWorkerGroupOpen && (
+        <AddWorkerGroupDialog
+          nextLabel={nextWorkerGroupPlaceholder}
+          onCancel={() => setAddWorkerGroupOpen(false)}
+          onConfirm={(name) => {
+            addWorkerGroupWithName(name)
+            setAddWorkerGroupOpen(false)
+          }}
+        />
+      )}
+      <PostAddSourceChoiceDialog
+        open={postAdd?.kind === 'choice'}
+        sourceDisplayName={postAdd?.kind === 'choice' ? postAdd.sourceDisplayName : ''}
+        onChoose={(choice, remember) => {
+          if (remember) {
+            setPostAddPreference(choice)
+          }
+          if (choice === 'wizard') {
+            setPostAdd({ kind: 'wizard' })
+          } else {
+            setPostAdd(null)
+          }
+        }}
+      />
+      {activeRow && postAdd?.kind === 'wizard' && (
+        <SourceFormWizardDialog
+          open
+          row={activeRow}
+          s={patchSourceRow(activeRow.id)}
+          onClose={() => setPostAdd(null)}
+        />
+      )}
+
+      <div className="flex min-h-0 flex-1">
+        <aside
+          className="group/rail relative hidden min-h-0 shrink-0 self-stretch flex-col border-r border-cribl-border/90 bg-cribl-rail lg:flex"
+          style={
+            railCollapsed
+              ? { width: '2.75rem', minWidth: '2.75rem' }
+              : { width: railW, minWidth: 200 }
+          }
+          aria-label="Plan, Worker Groups, and Sources"
+        >
+          {railCollapsed ? (
+            <div className="flex h-full min-h-0 flex-col items-center border-b-0 py-2">
+              <button
+                type="button"
+                title="Expand sidebar"
+                aria-label="Expand sidebar"
+                onClick={toggleRail}
+                className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cribl-border/80 bg-white/80 text-cribl-muted transition hover:border-cribl-border hover:text-cribl-ink"
+                aria-expanded="false"
+              >
+                <span className="text-sm font-semibold" aria-hidden>
+                  »
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleRail}
+                title="Expand sidebar"
+                aria-label="Expand sidebar"
+                aria-expanded="false"
+                className="mt-3 inline-flex w-full min-w-0 min-h-0 shrink-0 flex-1 flex-col items-center justify-start rounded-lg border-0 bg-transparent p-1 text-inherit transition hover:bg-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/35"
+              >
+                <CriblMark className="pointer-events-none h-7 w-7" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-end gap-1 border-b border-cribl-border/50 px-2 py-1.5">
+                <button
+                  type="button"
+                  title="Collapse sidebar"
+                  onClick={toggleRail}
+                  className="inline-flex h-7 items-center justify-center rounded-md px-1.5 text-xs font-medium text-cribl-muted hover:bg-white/60 hover:text-cribl-ink"
+                  aria-expanded="true"
+                >
+                  <span className="sr-only">Collapse sidebar</span>
+                  <span aria-hidden>«</span>
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-0 pb-4 pr-0">
+                <PlanSidebarRail
+                  plan={plan}
+                  mainView={mainView}
+                  activeSourceId={activeSourceId}
+                  activeWorkerGroupId={activeWorkerGroupId}
+                  onSelectOverview={() => setMainView('overview')}
+                  onSelectWorkerGroups={() => setMainView('workerGroups')}
+                  onSelectSources={() => setMainView('sources')}
+                  onSelectSettings={() => setMainView('settings')}
+                  onSelectWorkerGroup={(id) => {
+                    setActiveWorkerGroupId(id)
+                    setMainView('workerGroup')
+                  }}
+                  onAddWorkerGroup={openAddWorkerGroup}
+                  onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
+                  onUpdateWorkerGroupWg={updateWorkerGroupWg}
+                  onSelectSource={(id) => {
+                    setActiveSourceId(id)
+                    setMainView('source')
+                  }}
+                  onAddSource={openAddSource}
+                  onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
+                  onUpdateSourceDisplayName={updateSourceDisplayName}
+                  onSelectImport={() => setMainView('import')}
+                  onSelectExport={() => setMainView('export')}
+                  onClearPlan={() => setConfirmClearOpen(true)}
+                />
+              </div>
+            </>
+          )}
+          {!railCollapsed && (
+            <div
+              role="separator"
+              title="Drag to resize sidebar"
+              onPointerDown={beginResize}
+              className="absolute right-0 top-0 z-20 h-full w-2 cursor-ew-resize select-none border-r border-transparent hover:border-cribl-primary/20 hover:bg-cribl-primary/5 group-hover/rail:bg-cribl-primary/5"
+              aria-label="Resize sidebar"
+            />
+          )}
+        </aside>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-cribl-canvas">
+          <header className="relative z-30 w-full shrink-0 border-b border-cribl-border bg-white">
+            {/* Full width of main (not the overview max-w) so Customer aligns to the true top-right of this panel. */}
+            <div className="w-full px-4 py-3 sm:px-6 sm:py-3.5">
+              <div className="relative w-full min-h-14 sm:min-h-16 max-md:pb-0.5">
+                <div
+                  className="flex w-full max-md:justify-center
+                    md:absolute md:left-1/2 md:top-1/2 md:z-0
+                    md:w-[min(100%-18.5rem,28rem)] md:max-w-[calc(100%-19rem)]
+                    md:-translate-x-1/2 md:-translate-y-1/2
+                    md:items-center md:justify-center
+                  "
+                >
+                  <CriblHeaderBrand
+                    className="flex w-full min-w-0 flex-col items-center text-center"
+                    title={
+                      <h1 className="m-0 text-base font-semibold tracking-wide text-cribl-ink sm:text-lg">
+                        Adoption Plan
+                      </h1>
+                    }
+                  />
+                </div>
+                <div
+                  className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
+                    md:mt-0
+                    md:absolute md:right-0 md:top-1/2 md:z-10 md:mt-0
+                    md:w-64 md:max-w-full
+                    md:-translate-y-1/2
+                  "
+                >
+                  <HeaderCustomerName
+                    className="min-w-0 w-64 max-w-full"
+                    value={plan.customerName}
+                    onChange={(v) => setPlan((p) => ({ ...p, customerName: v }))}
+                  />
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="lg:hidden">
+            <PlanNavMobile
+              plan={plan}
+              mainView={mainView}
+              activeSourceId={activeSourceId}
+              activeWorkerGroupId={activeWorkerGroupId}
+              onSelectOverview={() => setMainView('overview')}
+              onSelectWorkerGroups={() => setMainView('workerGroups')}
+              onSelectSources={() => setMainView('sources')}
+              onSelectSettings={() => setMainView('settings')}
+              onSelectWorkerGroup={(id) => {
+                setActiveWorkerGroupId(id)
+                setMainView('workerGroup')
+              }}
+              onAddWorkerGroup={openAddWorkerGroup}
+              onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
+              onUpdateWorkerGroupWg={updateWorkerGroupWg}
+              onSelectSource={(id) => {
+                setActiveSourceId(id)
+                setMainView('source')
+              }}
+              onAddSource={openAddSource}
+              onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
+              onUpdateSourceDisplayName={updateSourceDisplayName}
+              onSelectImport={() => setMainView('import')}
+              onSelectExport={() => setMainView('export')}
+              onClearPlan={() => setConfirmClearOpen(true)}
+            />
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <main className="mx-auto w-full max-w-[min(100%,80rem)] px-4 py-5 sm:px-8 sm:py-7">
+              {mainView === 'overview' && (
+                <PlanDataOverview
+                  plan={plan}
+                  onGoToWorkers={() => {
+                    setMainView('workerGroups')
+                  }}
+                  onOpenWorkerGroup={(id) => {
+                    setActiveWorkerGroupId(id)
+                    setMainView('workerGroup')
+                  }}
+                  onGoToSources={() => setMainView('sources')}
+                  onSelectSource={(id) => {
+                    setActiveSourceId(id)
+                    setMainView('source')
+                  }}
+                />
+              )}
+
+              {mainView === 'workerGroups' && (
+                <WorkerGroupsIndexView
+                  plan={plan}
+                  onOpenGroup={(id) => {
+                    setActiveWorkerGroupId(id)
+                    setMainView('workerGroup')
+                  }}
+                />
+              )}
+
+              {mainView === 'sources' && (
+                <SourcesIndexView
+                  plan={plan}
+                  onOpenSource={(id) => {
+                    setActiveSourceId(id)
+                    setMainView('source')
+                  }}
+                />
+              )}
+
+              {mainView === 'settings' && <SettingsView />}
+
+              {mainView === 'source' && activeRow && (
+                <DataSourcesView
+                  plan={plan}
+                  setPlan={setPlan}
+                  row={activeRow}
+                  sourceIndex={sourceIndex >= 0 ? sourceIndex : 0}
+                  onOpenGuidedTour={() => setPostAdd({ kind: 'wizard' })}
+                  guidedEntryOpen={postAdd?.kind === 'wizard'}
+                  onExitGuidedEntry={() => setPostAdd(null)}
+                />
+              )}
+
+              {mainView === 'source' && !activeRow && (
+                <p className="m-0 text-sm text-cribl-muted">
+                  {plan.sourceSummary.length === 0
+                    ? 'No data sources yet. Use + Add source in the sidebar to add one.'
+                    : 'Select a data source in the sidebar.'}
+                </p>
+              )}
+
+              {mainView === 'workerGroup' && activeWorkerGroupId && (
+                <WorkerGroupDetailView
+                  plan={plan}
+                  setPlan={setPlan}
+                  groupId={activeWorkerGroupId}
+                  onRemoveGroup={removeWorkerGroup}
+                  onSelectSource={(id) => {
+                    setActiveSourceId(id)
+                    setMainView('source')
+                  }}
+                />
+              )}
+
+              {mainView === 'workerGroup' && !activeWorkerGroupId && (
+                <p className="m-0 text-sm text-cribl-muted">
+                  {plan.workerGroups.length === 0
+                    ? 'No worker groups yet. Use + Add Worker Group in the sidebar to add one.'
+                    : 'Select a worker group in the sidebar.'}
+                </p>
+              )}
+
+              {mainView === 'import' && <ImportWorkbookView plan={plan} setPlan={setPlan} />}
+
+              {mainView === 'export' && <ExportWorkbookView plan={plan} />}
+              <footer className="mt-8 space-y-1 text-center text-xs text-cribl-muted/80">
+                <p className="m-0">Data stays in this browser. Built for Cribl field adoption planning.</p>
+                <p className="m-0 text-cribl-muted/70">
+                  Cribl and the Cribl logo are trademarks of Cribl, Inc. Used with brand assets as reference; follow the
+                  Cribl brand guidelines for public distribution.
+                </p>
+              </footer>
+            </main>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+export default App
