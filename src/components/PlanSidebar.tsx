@@ -234,8 +234,9 @@ function WorkerGroupRowRail({
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const label = row.wg.trim() || `Worker group ${index + 1}`
-  const sub = (row.ingestGbd || '').trim()
-    ? `${row.ingestGbd} GB/d ingest`
+  const ingestGb = parseGb(row.ingestGbd)
+  const sub = Number.isFinite(ingestGb) && ingestGb >= 0
+    ? `${formatGbOrTbPerDayStr(ingestGb)} ingest`
     : null
 
   useEffect(() => {

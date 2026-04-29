@@ -44,9 +44,3 @@ export function sumDailyVolumeForWorkerGroup(
   return { sum, count }
 }
 
-export function formatGb(n: number): string {
-  if (!Number.isFinite(n) || n < 0) {
-    return ''
-  }
-  return String(Math.round(n * 1000) / 1000)
-}

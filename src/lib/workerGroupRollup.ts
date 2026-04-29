@@ -1,4 +1,3 @@
-import { formatGb } from './inheritTopology'
 import type { PlanState, WorkerGroupRow } from '../types/planTypes'
 
 function parseGb(s: string | undefined): number {
@@ -46,16 +45,6 @@ export function autoDiskOneDayGb(w: WorkerGroupRow): number | null {
     return eg / 8
   }
   return null
-}
-
-export function displayThroughputStr(w: WorkerGroupRow): string {
-  const n = autoThroughputGb(w)
-  return n != null && Number.isFinite(n) ? formatGb(n) : ''
-}
-
-export function displayDiskStr(w: WorkerGroupRow): string {
-  const n = autoDiskOneDayGb(w)
-  return n != null && Number.isFinite(n) ? formatGb(n) : '—'
 }
 
 /**

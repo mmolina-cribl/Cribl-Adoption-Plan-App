@@ -84,12 +84,21 @@ export function baselineNodesForThroughput(throughputGbPerDay: number | null | u
   return nodesNeeded({ requiredVcpus: v, vcpusPerNode: 16, nMinusOne: true })
 }
 
+/**
+ * Capacity-style sibling of `formatGbOrTbPerDay` (no `/d` suffix). Used for one-shot
+ * volumes such as PQ disk recommendations. Same rounding rules — see the docblock on
+ * `formatGbOrTbPerDay` in `lib/formatRate.ts` for the full contract.
+ */
 export function formatGbOrTb(nGb: number): string {
   if (!Number.isFinite(nGb) || nGb < 0) return '—'
-  if (nGb >= 1024) {
-    const tb = nGb / 1024
+  if (nGb >= 1000) {
+    const tb = Math.round((nGb / 1000) * 100) / 100
     return `${tb.toLocaleString(undefined, { maximumFractionDigits: 2 })} TB`
   }
-  return `${nGb.toLocaleString(undefined, { maximumFractionDigits: 1 })} GB`
+  if (nGb >= 1) {
+    return `${Math.round(nGb).toLocaleString()} GB`
+  }
+  const sub = Math.round(nGb * 100) / 100
+  return `${sub.toLocaleString(undefined, { maximumFractionDigits: 2 })} GB`
 }
 
