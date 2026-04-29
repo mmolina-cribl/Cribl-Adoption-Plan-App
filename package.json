@@ -1,7 +1,7 @@
 {
   "name": "adoption-plan",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Field-facing planning tool for designing a customer's Cribl Stream adoption — model worker groups, sources, and projected daily volume; import/export Excel workbooks. Runs embedded inside the Cribl App Platform.",
   "author": "Michael Molina <mmolina@cribl.io> (https://cribl.io)",
   "type": "module",

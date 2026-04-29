@@ -2,6 +2,18 @@
  * Option lists from the "input_data" reference sheet in the Cribl adoption plan template.
  * Used for client-side select/datalist filters and for the **static** `input_data` tab on export.
  * That tab is not derived from `PlanState`: it is the same validation / picklist source every time, like the gold .xlsx.
+ *
+ * v1.2 tile refresh:
+ *  - `techTiles` and `destTiles` were modernized against the canonical Cribl Stream + Cribl Edge
+ *    docs (https://docs.cribl.io/stream/sources/, https://docs.cribl.io/stream/destinations/,
+ *    https://docs.cribl.io/edge/sources/, https://docs.cribl.io/edge/destinations/) — outdated
+ *    spellings normalized to the doc names, missing connectors added, and the lists are now
+ *    sorted alphabetically. Underlying fields are still free-text strings, so any older
+ *    workbook (with e.g. `O365`, `Cribl Lake`, `OTEL`, `CS NGSIEM`, `Devnull`) still loads
+ *    and round-trips byte-for-byte; the picker just defaults to the new canonical names.
+ *  - `getInputDataRows()` now sizes the exported `input_data` tab to whichever option list
+ *    is longest, so adding more tiles in the future does not silently truncate the validation
+ *    range in the workbook.
  */
 export const securityDataTypes = [
   'Security',
@@ -39,72 +51,130 @@ export const retentionSuggestions = [
 
 export const inputData = {
   techTiles: [
+    'AmazonCloudWatch',
     'AmazonFirehose',
     'AmazonKinesis',
+    'AmazonMSK',
     'AmazonS3',
+    'AmazonSecurityLake',
     'AmazonSQS',
     'AzureBlob',
     'AzureEventHub',
+    'AzureMonitor',
+    'ConfluentCloud',
     'CriblHTTP',
+    'CriblInternal',
+    'CriblLake',
     'CriblTCP',
-    'CS FDR',
-    'DatabaseColl',
+    'CrowdStrikeFalcon',
+    'CrowdStrikeFDR',
+    'Database',
     'Datadog',
-    'Elastic API',
+    'ElasticBeats',
+    'ElasticsearchAPI',
     'FileSystem',
+    'FluentForward',
     'GoogleCloudStorage',
     'GooglePubSub',
     'Grafana',
     'HTTP',
+    'JournalFiles',
     'Kafka',
+    'KubernetesEvents',
+    'KubernetesLogs',
+    'KubernetesMetrics',
+    'LinuxMetrics',
+    'Loki',
     'Netflow',
-    'O365',
+    'NewRelic',
+    'O365Activity',
+    'O365MGMT',
+    'O365Services',
     'OpenTelemetry',
+    'Prometheus',
+    'PrometheusRemoteWrite',
     'RawHTTP',
+    'RawTCP',
     'REST API',
     'Script',
+    'ServiceNow',
+    'SNMPTrap',
     'SplunkHEC',
     'SplunkSearch',
     'SplunkTCP',
     'Syslog',
     'TCPJSON',
+    'WindowsEvents',
+    'WindowsMetrics',
     'WinEvtFwd',
     'ZscalerCloudNSS',
+    'ZscalerLSS',
   ],
   destTiles: [
-    'AmazonCloudwatch',
+    'AmazonCloudWatch',
     'AmazonKinesis',
     'AmazonMSK',
     'AmazonS3',
     'AmazonSecurityLake',
+    'AmazonSQS',
     'AzureBlob',
     'AzureDataExplorer',
     'AzureEventHub',
+    'AzureMonitor',
+    'ClickHouse',
+    'CloudflareR2',
     'ConfluentCloud',
-    'Cribl Lake',
     'CriblHTTP',
+    'CriblLake',
+    'CriblSearch',
     'CriblTCP',
-    'CS NGSIEM',
+    'CrowdStrikeLogScale',
+    'CrowdStrikeNGSIEM',
+    'Databricks',
     'Datadog',
-    'Devnull',
+    'DataLakeS3',
+    'DevNull',
     'DynatraceHTTP',
+    'DynatraceOTLP',
     'ElasticCloud',
     'Elasticsearch',
     'Exabeam',
+    'FilesystemNFS',
+    'GoogleChronicleAPI',
+    'GoogleCloudLogging',
     'GoogleCloudStorage',
     'GooglePubSub',
     'GoogleSecOps',
     'GrafanaCloud',
     'Graphite',
+    'Honeycomb',
+    'InfluxDB',
     'Kafka',
+    'Loki',
+    'MicrosoftFabric',
     'MicrosoftSentinel',
-    'OTEL',
+    'MinIO',
+    'NetFlow',
+    'NewRelicEvents',
+    'NewRelicLogs',
+    'OpenTelemetry',
+    'Prometheus',
+    'SentinelOneAISIEM',
+    'SentinelOneDataSet',
+    'ServiceNowO11y',
+    'SignalFx',
+    'SNMPTrap',
     'SplunkHEC',
     'SplunkLB',
+    'SplunkSingle',
     'StatsD',
+    'StatsDExtended',
     'SumoLogic',
     'Syslog',
+    'TCPJSON',
+    'Wavefront',
     'Webhook',
+    'WizDefend',
     'XSIAM',
   ],
   pipeline: [
@@ -211,8 +281,25 @@ export function getInputDataRows(): (string | number | null)[][] {
     'Risk reduction value',
     'Strategic value',
   ] as const
-  /** Match `Copy of Adoption plan - v0.8.6.xlsx` (35 rows: header + 34 data). */
-  const n = 34
+  /**
+   * Auto-size to the longest option list so growing tile catalogs (Stream + Edge)
+   * never get silently truncated in the workbook's `input_data` validation range.
+   * Original Cribl template (v0.8.6) was a fixed 34 data rows; v1.2 onward this
+   * grows automatically as new tiles are added in the lists above.
+   */
+  const n = Math.max(
+    h.techTiles.length,
+    h.destTiles.length,
+    h.pipeline.length,
+    h.criticality.length,
+    se.length,
+    h.initiatives.length,
+    h.technicalUsecase.length,
+    h.financial.length,
+    h.operational.length,
+    h.risk.length,
+    h.strategic.length,
+  )
   const out: (string | number | null)[][] = [Array.from(headers)]
   for (let i = 0; i < n; i += 1) {
     out.push([
@@ -220,7 +307,7 @@ export function getInputDataRows(): (string | number | null)[][] {
       h.destTiles[i] ?? null,
       h.pipeline[i] ?? null,
       h.criticality[i] ?? null,
-      i < 2 ? se[i]! : null,
+      se[i] ?? null,
       h.initiatives[i] ?? null,
       h.technicalUsecase[i] ?? null,
       h.financial[i] ?? null,
