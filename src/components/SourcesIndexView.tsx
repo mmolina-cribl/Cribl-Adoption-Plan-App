@@ -11,6 +11,54 @@ type Props = {
 
 const NO_CHANGE = '__nochange__'
 
+type SortBy =
+  | 'default'
+  | 'name'
+  | 'volume'
+  | 'criticality'
+  | 'compliance'
+  | 'workerGroup'
+  | 'sourceTile'
+  | 'onboardStart'
+  | 'onboardEnd'
+  | 'onboardCompleted'
+
+type SortDir = 'asc' | 'desc'
+
+/**
+ * Sort dimensions exposed in the Sort popover. `defaultDir` is the direction
+ * applied automatically when the user picks a dimension — chosen so the first
+ * pick lands on the most-useful order (largest volume first, HIGH criticality
+ * first, alphabetical names, etc.) and a single asc/desc flip handles edge
+ * cases. `label` is what shows up in the dropdown and the trigger badge.
+ */
+const SORT_OPTIONS: { id: SortBy; label: string; defaultDir: SortDir }[] = [
+  { id: 'default', label: 'Default (added order)', defaultDir: 'asc' },
+  { id: 'name', label: 'Name', defaultDir: 'asc' },
+  { id: 'volume', label: 'Daily volume (GB/d)', defaultDir: 'desc' },
+  { id: 'criticality', label: 'Criticality', defaultDir: 'desc' },
+  { id: 'compliance', label: 'Compliance flag', defaultDir: 'desc' },
+  { id: 'workerGroup', label: 'Worker group', defaultDir: 'asc' },
+  { id: 'sourceTile', label: 'Source tile', defaultDir: 'asc' },
+  { id: 'onboardStart', label: 'Onboarding start', defaultDir: 'asc' },
+  { id: 'onboardEnd', label: 'Onboarding end', defaultDir: 'asc' },
+  { id: 'onboardCompleted', label: 'Onboarding completed', defaultDir: 'desc' },
+]
+
+function critOrd(c: string): number {
+  const v = (c || '').trim().toUpperCase()
+  if (v === 'HIGH') return 3
+  if (v === 'MEDIUM') return 2
+  if (v === 'LOW') return 1
+  return 0
+}
+
+function parseDate(s: string | undefined): number {
+  if (!s || !s.trim()) return Number.NaN
+  const t = Date.parse(s.trim())
+  return Number.isFinite(t) ? t : Number.NaN
+}
+
 export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const [q, setQ] = useState('')
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
@@ -18,6 +66,9 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [filterOpen, setFilterOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [sortOpen, setSortOpen] = useState(false)
+  const [sortBy, setSortBy] = useState<SortBy>('default')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const sources = plan.sourceSummary
 
   // Prune selection when sources change (e.g. after a bulk delete or
@@ -67,6 +118,75 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
     }
     return m
   }, [filtered])
+
+  const collator = useMemo(
+    () => new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }),
+    [],
+  )
+
+  /**
+   * Sorted view of `filtered` for the card grid. Sorting is layered on top of
+   * the existing filter pipeline (it never changes set membership), so
+   * `maxVol`, `visibleIds`, the empty state, and Select-all-matching all stay
+   * unchanged whether sort is active or not.
+   *
+   * Missing values (NaN volume, unparseable dates) always sort *last* regardless
+   * of asc/desc so the user never has to scroll past empty rows to find data.
+   * That's why the missing-check happens before the `dir` multiplier.
+   */
+  const sorted = useMemo(() => {
+    if (sortBy === 'default') return filtered
+    const dir = sortDir === 'asc' ? 1 : -1
+    const wgNameById = new Map(plan.workerGroups.map((g) => [g.id, g.wg.trim()]))
+
+    const numericMissingLast = (
+      a: SourceSummaryRow,
+      b: SourceSummaryRow,
+      get: (r: SourceSummaryRow) => number,
+    ): number => {
+      const va = get(a)
+      const vb = get(b)
+      const aFin = Number.isFinite(va)
+      const bFin = Number.isFinite(vb)
+      if (!aFin && !bFin) return 0
+      if (!aFin) return 1
+      if (!bFin) return -1
+      return dir * (va - vb)
+    }
+
+    const cmp = (a: SourceSummaryRow, b: SourceSummaryRow): number => {
+      switch (sortBy) {
+        case 'name':
+          return dir * collator.compare(a.displayName || '', b.displayName || '')
+        case 'volume':
+          return numericMissingLast(a, b, (r) => parseGb(r.avgDailyGb))
+        case 'criticality':
+          return dir * (critOrd(a.dataCriticality) - critOrd(b.dataCriticality))
+        case 'compliance':
+          return dir * (Number(a.complianceRelated) - Number(b.complianceRelated))
+        case 'workerGroup': {
+          const aName = a.workerGroupId ? wgNameById.get(a.workerGroupId) || '' : ''
+          const bName = b.workerGroupId ? wgNameById.get(b.workerGroupId) || '' : ''
+          return dir * collator.compare(aName, bName)
+        }
+        case 'sourceTile':
+          return dir * collator.compare(a.sourceTile || '', b.sourceTile || '')
+        case 'onboardStart':
+          return numericMissingLast(a, b, (r) => parseDate(r.targetOnboardStart))
+        case 'onboardEnd':
+          return numericMissingLast(a, b, (r) => parseDate(r.targetOnboardEnd))
+        case 'onboardCompleted':
+          return numericMissingLast(a, b, (r) => parseDate(r.onboardingCompletedOn))
+        default:
+          return 0
+      }
+    }
+
+    return [...filtered].sort(cmp)
+  }, [filtered, sortBy, sortDir, plan.workerGroups, collator])
+
+  const sortLabel = SORT_OPTIONS.find((o) => o.id === sortBy)?.label ?? 'Default'
+  const sortBadge = sortBy === 'default' ? 0 : 1
 
   const activeFilterCount =
     (onlyUnassigned ? 1 : 0) + (onlyHighPriority ? 1 : 0) + (q.trim() ? 1 : 0)
@@ -204,6 +324,7 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
               onToggle={() => {
                 setFilterOpen((v) => !v)
                 setActionsOpen(false)
+                setSortOpen(false)
               }}
             >
               <div className="space-y-3">
@@ -259,12 +380,115 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
             </PopoverButton>
 
             <PopoverButton
+              label="Sort"
+              badge={sortBadge}
+              open={sortOpen}
+              onToggle={() => {
+                setSortOpen((v) => !v)
+                setFilterOpen(false)
+                setActionsOpen(false)
+              }}
+              panelClassName="min-w-[18rem]"
+            >
+              <div className="space-y-3">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wider text-cribl-muted">
+                  Sort by
+                </p>
+                <select
+                  value={sortBy}
+                  onChange={(e) => {
+                    const next = e.target.value as SortBy
+                    setSortBy(next)
+                    const opt = SORT_OPTIONS.find((o) => o.id === next)
+                    if (opt) {
+                      setSortDir(opt.defaultDir)
+                    }
+                  }}
+                  className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                  aria-label="Sort dimension"
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <div>
+                  <p className="m-0 mb-1.5 text-xs font-semibold uppercase tracking-wider text-cribl-muted">
+                    Direction
+                  </p>
+                  <div className="flex overflow-hidden rounded-lg border border-cribl-border">
+                    <button
+                      type="button"
+                      onClick={() => setSortDir('asc')}
+                      disabled={sortBy === 'default'}
+                      className={[
+                        'h-9 flex-1 px-3 text-sm font-medium',
+                        sortBy === 'default'
+                          ? 'cursor-not-allowed text-cribl-muted/60'
+                          : sortDir === 'asc'
+                            ? 'bg-cribl-primary text-white'
+                            : 'bg-white text-cribl-ink hover:bg-cribl-elevate',
+                      ].join(' ')}
+                      aria-pressed={sortDir === 'asc'}
+                    >
+                      Ascending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSortDir('desc')}
+                      disabled={sortBy === 'default'}
+                      className={[
+                        'h-9 flex-1 border-l border-cribl-border px-3 text-sm font-medium',
+                        sortBy === 'default'
+                          ? 'cursor-not-allowed text-cribl-muted/60'
+                          : sortDir === 'desc'
+                            ? 'bg-cribl-primary text-white'
+                            : 'bg-white text-cribl-ink hover:bg-cribl-elevate',
+                      ].join(' ')}
+                      aria-pressed={sortDir === 'desc'}
+                    >
+                      Descending
+                    </button>
+                  </div>
+                  {sortBy === 'default' ? (
+                    <p className="m-0 mt-1.5 text-xs text-cribl-muted">
+                      Sorted by added order. Pick a dimension above to enable direction.
+                    </p>
+                  ) : null}
+                </div>
+
+                {sortBy !== 'default' ? (
+                  <div className="border-t border-cribl-border/70 pt-3">
+                    <p className="m-0 mb-2 text-xs text-cribl-muted">
+                      Sorted by <span className="text-cribl-ink">{sortLabel}</span>{' '}
+                      ({sortDir === 'asc' ? 'A → Z / low → high' : 'Z → A / high → low'}).
+                      Missing values always sort last.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSortBy('default')
+                        setSortDir('asc')
+                      }}
+                      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
+                    >
+                      Reset to default order
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </PopoverButton>
+
+            <PopoverButton
               label="Bulk Actions"
               badge={selectionCount}
               open={actionsOpen}
               onToggle={() => {
                 setActionsOpen((v) => !v)
                 setFilterOpen(false)
+                setSortOpen(false)
               }}
               panelClassName="min-w-[20rem]"
             >
@@ -417,7 +641,7 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
         </p>
       ) : (
         <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((s) => {
+          {sorted.map((s) => {
             const name = s.displayName?.trim() || 'Source'
             const tile = s.sourceTile?.trim()
             const src = s.source?.trim()
