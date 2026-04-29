@@ -53,6 +53,21 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const visibleIds = useMemo(() => filtered.map((s) => s.id), [filtered])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
 
+  /**
+   * Max GB/d across the *currently visible* set, used to scale the per-card volume bar.
+   * Mirrors how `WorkerGroupsIndexView` scales its blue bar against `maxSources` —
+   * relative-to-the-current-view rather than relative-to-the-whole-plan, so users
+   * can drill into a subset (e.g. "only unassigned") and still get useful contrast.
+   */
+  const maxVol = useMemo(() => {
+    let m = 0
+    for (const s of filtered) {
+      const v = parseGb(s.avgDailyGb)
+      if (Number.isFinite(v) && v > m) m = v
+    }
+    return m
+  }, [filtered])
+
   const activeFilterCount =
     (onlyUnassigned ? 1 : 0) + (onlyHighPriority ? 1 : 0) + (q.trim() ? 1 : 0)
 
@@ -413,6 +428,14 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
               .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
               .join(' · ')
             const isSelected = selected.has(s.id)
+            // Render the bar track for any row that has a numeric GB value, even tiny
+            // sub-GB ones (e.g. 0.5 GB next to a 1 TB peer rounds to 0% but the empty
+            // track is still useful — it tells the CSE "this row participates in the
+            // ranking, it's just small"). The track is hidden only when the field is
+            // truly missing or non-numeric.
+            const hasVol = Number.isFinite(v) && v >= 0
+            const volBarPct =
+              hasVol && maxVol > 0 ? Math.round((v / maxVol) * 100) : 0
             return (
               <li key={s.id} className="min-w-0">
                 <div
@@ -441,6 +464,19 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
                       ) : null}
                     </div>
                     {subtitle ? <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p> : null}
+                    {hasVol ? (
+                      <div
+                        className="mt-2.5"
+                        title={`Share of GB/d vs the largest source in the list (with current filters): ${volStr || '0 GB/d'}`}
+                      >
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-cribl-border/70">
+                          <div
+                            className="h-full rounded-full bg-cribl-blue"
+                            style={{ width: `${volBarPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                     <p className="m-0 mt-2 text-[11px] text-cribl-muted">Click to open</p>
                   </button>
                 </div>
