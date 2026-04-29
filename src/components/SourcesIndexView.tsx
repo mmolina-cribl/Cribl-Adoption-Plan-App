@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
+import { sourceRowProgress } from '../lib/planDashboardStats'
 import { PopoverButton } from './PopoverButton'
 
 type Props = {
@@ -105,19 +106,26 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
 
   /**
-   * Max GB/d across the *currently visible* set, used to scale the per-card volume bar.
-   * Mirrors how `WorkerGroupsIndexView` scales its blue bar against `maxSources` —
-   * relative-to-the-current-view rather than relative-to-the-whole-plan, so users
-   * can drill into a subset (e.g. "only unassigned") and still get useful contrast.
+   * Per-source completion %, keyed by source id. Reuses the same
+   * `sourceRowProgress(row, index0)` definition that the WG detail page uses
+   * for its completion histogram (see `lib/planDashboardStats.ts`), so a
+   * source's "% complete" reads identically here, on its detail page, and in
+   * the WG drill-down — one canonical definition.
+   *
+   * `index0` MUST be the row's index in `plan.sourceSummary` (insertion order),
+   * not in the filtered/sorted view, because the "filled" check on
+   * `displayName` looks for the placeholder `Source ${index0 + 1}` to count it
+   * as unfilled. Using the visible-list index would mis-classify renamed
+   * rows after filter/sort. Computed once per `sourceSummary` change so the
+   * filter/sort pipeline doesn't pay for it.
    */
-  const maxVol = useMemo(() => {
-    let m = 0
-    for (const s of filtered) {
-      const v = parseGb(s.avgDailyGb)
-      if (Number.isFinite(v) && v > m) m = v
-    }
+  const progressById = useMemo(() => {
+    const m = new Map<string, number>()
+    plan.sourceSummary.forEach((r, i) => {
+      m.set(r.id, sourceRowProgress(r, i).pct)
+    })
     return m
-  }, [filtered])
+  }, [plan.sourceSummary])
 
   const collator = useMemo(
     () => new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }),
@@ -652,14 +660,18 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
               .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
               .join(' · ')
             const isSelected = selected.has(s.id)
-            // Render the bar track for any row that has a numeric GB value, even tiny
-            // sub-GB ones (e.g. 0.5 GB next to a 1 TB peer rounds to 0% but the empty
-            // track is still useful — it tells the CSE "this row participates in the
-            // ranking, it's just small"). The track is hidden only when the field is
-            // truly missing or non-numeric.
-            const hasVol = Number.isFinite(v) && v >= 0
-            const volBarPct =
-              hasVol && maxVol > 0 ? Math.round((v / maxVol) * 100) : 0
+            // Completion % is the same definition used by the WG detail page's
+            // histogram — count of populated SourceSummaryRow fields, scored against
+            // the canonical `SOURCE_ROW_KEYS` list in planDashboardStats.ts. Always
+            // render the bar (even at 0%) so the CSE sees that the row exists in the
+            // ranking and just hasn't been filled in yet.
+            const completionPct = Math.max(0, Math.min(100, progressById.get(s.id) ?? 0))
+            const completionLabel =
+              completionPct >= 100
+                ? 'Complete'
+                : completionPct === 0
+                  ? 'Not started'
+                  : `${completionPct}% complete`
             return (
               <li key={s.id} className="min-w-0">
                 <div
@@ -688,19 +700,27 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
                       ) : null}
                     </div>
                     {subtitle ? <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p> : null}
-                    {hasVol ? (
+                    <div
+                      className="mt-2.5 flex items-center gap-2"
+                      title={`Onboarding completeness: ${completionLabel}`}
+                    >
                       <div
-                        className="mt-2.5"
-                        title={`Share of GB/d vs the largest source in the list (with current filters): ${volStr || '0 GB/d'}`}
+                        className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70"
+                        role="progressbar"
+                        aria-valuenow={completionPct}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Onboarding completion ${completionPct}%`}
                       >
-                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-cribl-border/70">
-                          <div
-                            className="h-full rounded-full bg-cribl-blue"
-                            style={{ width: `${volBarPct}%` }}
-                          />
-                        </div>
+                        <div
+                          className="h-full rounded-full bg-cribl-blue"
+                          style={{ width: `${completionPct}%` }}
+                        />
                       </div>
-                    ) : null}
+                      <span className="shrink-0 text-[11px] tabular-nums text-cribl-muted">
+                        {completionLabel}
+                      </span>
+                    </div>
                     <p className="m-0 mt-2 text-[11px] text-cribl-muted">Click to open</p>
                   </button>
                 </div>
