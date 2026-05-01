@@ -7,7 +7,13 @@ import {
   useRef,
   useState,
 } from 'react'
-import { sourceLabel, type PlanState, type SourceSummaryRow, type WorkerGroupRow } from '../types/planTypes'
+import {
+  sourceLabel,
+  type PlanState,
+  type SourceSummaryRow,
+  type WorkerGroupKind,
+  type WorkerGroupRow,
+} from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import {
@@ -46,12 +52,14 @@ type Props = {
    */
   onAddSource?: () => void
   /**
-   * Optional. When provided, surface a "+ New worker group" action in
-   * the resource map header. Wires up to the same global "New worker
-   * group" dialog the left-nav "+ Add Worker Group" button opens, so
-   * customers can grow the topology directly from the map.
+   * Optional. When provided, surface "+ New worker group" / "+ New fleet"
+   * action buttons in the resource map header. Wires up to the same
+   * global "New worker group" dialog the left-nav "+ Add" buttons open,
+   * with `kind` plumbed through so each shortcut spawns the matching
+   * resource (Stream WG vs Edge fleet). Calling without an argument
+   * preserves the legacy single-button behavior (defaults to Stream).
    */
-  onAddWorkerGroup?: () => void
+  onAddWorkerGroup?: (kind?: WorkerGroupKind) => void
   className?: string
 }
 
@@ -782,12 +790,23 @@ export function PlanResourceMap({
             {onAddWorkerGroup ? (
               <button
                 type="button"
-                onClick={onAddWorkerGroup}
+                onClick={() => onAddWorkerGroup('stream')}
                 title="Create a new worker group"
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
               >
                 <span aria-hidden className="text-[13px] leading-none">＋</span>
                 <span>New worker group</span>
+              </button>
+            ) : null}
+            {onAddWorkerGroup ? (
+              <button
+                type="button"
+                onClick={() => onAddWorkerGroup('edge')}
+                title="Create a new fleet"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
+              >
+                <span aria-hidden className="text-[13px] leading-none">＋</span>
+                <span>New fleet</span>
               </button>
             ) : null}
             {onAddSource ? (
@@ -804,7 +823,7 @@ export function PlanResourceMap({
           </div>
         </div>
         <p className="m-0 mt-2 rounded-lg border border-dashed border-cribl-border/80 bg-cribl-card-body p-4 text-sm text-cribl-muted">
-          Add a worker group and a source to see the plan-wide topology branch out here.
+          Add a worker group or fleet and a source to see the plan-wide topology branch out here.
         </p>
       </div>
     )
@@ -825,12 +844,12 @@ export function PlanResourceMap({
         <div>
           <p className="m-0 text-sm font-semibold text-cribl-ink">Resource map</p>
           <p className="m-0 mt-0.5 text-xs text-cribl-muted">
-            Sources branch into the worker groups they feed. Click a row to expand its sources.
+            Sources branch into the worker groups and fleets they feed. Click a row to expand its sources.
             {interactive ? (
               <>
                 {' '}
                 <span className="text-cribl-ink/80">
-                  Drag a connector onto a different worker group to reassign, or click the{' '}
+                  Drag a connector onto a different worker group or fleet to reassign, or click the{' '}
                   <span
                     aria-hidden
                     className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-red-500 align-[-2px] text-[9px] font-bold leading-none text-red-500"
@@ -844,7 +863,7 @@ export function PlanResourceMap({
                   >
                     <span className="block h-1.5 w-1.5 rounded-full bg-cribl-primary" />
                   </span>{' '}
-                  handle on their right edge — drag it to a worker group to assign.
+                  handle on their right edge — drag it to a worker group or fleet to assign.
                 </span>
               </>
             ) : null}
@@ -852,9 +871,24 @@ export function PlanResourceMap({
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] tabular-nums text-cribl-muted">
           <span>
-            {groups.length} {groups.length === 1 ? 'worker group' : 'worker groups'} ·{' '}
-            {totalSources} {totalSources === 1 ? 'source' : 'sources'} ·{' '}
-            {formatGbOrTbPerDayStr(totalGb)}
+            {(() => {
+              const nWg = groups.filter((g) => g.wg?.kind !== 'edge').length
+              const nFleet = groups.filter((g) => g.wg?.kind === 'edge').length
+              const wgLabel = `${nWg} ${nWg === 1 ? 'worker group' : 'worker groups'}`
+              const fleetLabel = `${nFleet} ${nFleet === 1 ? 'fleet' : 'fleets'}`
+              const groupSummary =
+                nWg > 0 && nFleet > 0
+                  ? `${wgLabel} · ${fleetLabel}`
+                  : nFleet > 0
+                  ? fleetLabel
+                  : wgLabel
+              return (
+                <>
+                  {groupSummary} · {totalSources}{' '}
+                  {totalSources === 1 ? 'source' : 'sources'} · {formatGbOrTbPerDayStr(totalGb)}
+                </>
+              )
+            })()}
           </span>
           <button
             type="button"
@@ -873,12 +907,23 @@ export function PlanResourceMap({
           {onAddWorkerGroup ? (
             <button
               type="button"
-              onClick={onAddWorkerGroup}
+              onClick={() => onAddWorkerGroup('stream')}
               title="Create a new worker group"
               className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
             >
               <span aria-hidden className="text-[13px] leading-none">＋</span>
               <span>New worker group</span>
+            </button>
+          ) : null}
+          {onAddWorkerGroup ? (
+            <button
+              type="button"
+              onClick={() => onAddWorkerGroup('edge')}
+              title="Create a new fleet"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
+            >
+              <span aria-hidden className="text-[13px] leading-none">＋</span>
+              <span>New fleet</span>
             </button>
           ) : null}
           {onAddSource ? (
@@ -1041,7 +1086,7 @@ export function PlanResourceMap({
                       strokeWidth={1.6}
                       style={{ pointerEvents: 'auto' }}
                     >
-                      <title>Unassign source from worker group</title>
+                      <title>Unassign source from worker group / fleet</title>
                     </circle>
                     <path
                       d={`M ${detachX - 3.2} ${detachY - 3.2} L ${detachX + 3.2} ${detachY + 3.2} M ${detachX - 3.2} ${detachY + 3.2} L ${detachX + 3.2} ${detachY - 3.2}`}
@@ -1446,7 +1491,11 @@ export function PlanResourceMap({
                         isUnassigned ? 'text-cribl-muted' : 'text-cribl-primary-ink',
                       ].join(' ')}
                     >
-                      {isUnassigned ? 'No worker group' : 'Worker group'}
+                      {isUnassigned
+                        ? 'Unassigned'
+                        : g.wg?.kind === 'edge'
+                        ? 'Fleet'
+                        : 'Worker group'}
                     </p>
                     <p className="m-0 max-w-full truncate text-sm font-semibold text-cribl-ink">
                       {g.name}
@@ -1536,8 +1585,8 @@ export function PlanResourceMap({
 
       <p className="m-0 mt-4 text-[11px] text-cribl-muted">
         Branch thickness scales with daily volume. Source-side branches are dashed when a worker
-        group is collapsed (the chip stands in for the entire group). Tree only renders on wider
-        screens; on narrow viewports rows stack vertically.
+        group or fleet is collapsed (the chip stands in for the entire group). Tree only renders
+        on wider screens; on narrow viewports rows stack vertically.
       </p>
     </div>
   )
@@ -1626,8 +1675,8 @@ function UnassignedSection({
           </p>
           <p className="m-0 mt-0.5 text-xs text-cribl-muted">
             {interactive
-              ? 'Press and drag the dot on the right edge of any source onto a worker group above to assign it.'
-              : 'These sources aren’t attached to any worker group yet.'}
+              ? 'Press and drag the dot on the right edge of any source onto a worker group or fleet above to assign it.'
+              : 'These sources aren’t attached to any worker group or fleet yet.'}
           </p>
         </div>
         <span className="shrink-0 text-[11px] tabular-nums text-cribl-muted">
@@ -1722,8 +1771,8 @@ function UnassignedSection({
               {interactive ? (
                 <button
                   type="button"
-                  aria-label="Drag to a worker group to assign this source"
-                  title="Drag to a worker group to assign"
+                  aria-label="Drag to a worker group or fleet to assign this source"
+                  title="Drag to a worker group or fleet to assign"
                   onClick={(e) => e.stopPropagation()}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return

@@ -539,6 +539,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onGoToWorkers={() => {
                     setMainView('workerGroups')
                   }}
+                  onGoToFleets={() => {
+                    setMainView('fleets')
+                  }}
                   onOpenWorkerGroup={(id) => {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')

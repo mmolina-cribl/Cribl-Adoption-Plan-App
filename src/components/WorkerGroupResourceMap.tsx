@@ -6,11 +6,31 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
+import type { SourceSummaryRow, WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
+
+/**
+ * Kind-aware UI copy used inside the resource map. Fleets and worker
+ * groups share the same map widget, but every user-visible string that
+ * references the hub kind flips through this object so the page reads
+ * naturally for both Stream and Edge plans.
+ */
+function copyForKind(kind: WorkerGroupKind) {
+  const isEdge = kind === 'edge'
+  return {
+    /** Lower-case noun for inline prose ("attached to this worker group"). */
+    inline: isEdge ? 'fleet' : 'worker group',
+    /** Title-case noun for the hub kicker label and headers. */
+    title: isEdge ? 'Fleet' : 'Worker group',
+    /** Generic third-person reference for the unassigned-section drag tooltip. */
+    thisOne: isEdge ? 'this fleet' : 'this worker group',
+    /** Placeholder when `workerGroup.wg` is empty. */
+    untitled: isEdge ? 'Untitled fleet' : 'Untitled',
+  }
+}
 
 type Props = {
   workerGroup: WorkerGroupRow
@@ -81,6 +101,7 @@ export function WorkerGroupResourceMap({
   onAddSource,
   className,
 }: Props) {
+  const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
   /**
    * One-shot fade-in for the connector tree when the resource map
    * first renders (e.g. when the user lands on the worker group
@@ -399,7 +420,7 @@ export function WorkerGroupResourceMap({
         <div>
           <p className="m-0 text-xs font-semibold text-cribl-ink">Resource map</p>
           <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">
-            Sources branching into <span className="text-cribl-ink/80">{workerGroup.wg.trim() || 'this worker group'}</span>
+            Sources branching into <span className="text-cribl-ink/80">{workerGroup.wg.trim() || copy.thisOne}</span>
             . Hover a leaf or its connector to highlight, click the{' '}
             <span
               aria-hidden
@@ -534,7 +555,7 @@ export function WorkerGroupResourceMap({
                       strokeWidth={1.6}
                       style={{ pointerEvents: 'auto' }}
                     >
-                      <title>Unassign source from this worker group</title>
+                      <title>{`Unassign source from ${copy.thisOne}`}</title>
                     </circle>
                     <path
                       d={`M ${detachX - 3.2} ${detachY - 3.2} L ${detachX + 3.2} ${detachY + 3.2} M ${detachX - 3.2} ${detachY + 3.2} L ${detachX + 3.2} ${detachY - 3.2}`}
@@ -597,7 +618,7 @@ export function WorkerGroupResourceMap({
         <div className="relative z-10 mr-auto flex w-full min-w-0 max-w-[360px] flex-col gap-2">
           {sourceNodes.length === 0 ? (
             <div className="rounded-xl border border-dashed border-cribl-border bg-cribl-card-body p-4 text-center text-sm text-cribl-muted">
-              No sources are attached to this worker group yet — use the attach control below
+              No sources are attached to {copy.thisOne} yet — use the attach control below
               to add your first source.
             </div>
           ) : (
@@ -741,10 +762,10 @@ export function WorkerGroupResourceMap({
               </span>
               <div className="min-w-0">
                 <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary-ink">
-                  Worker group
+                  {copy.title}
                 </p>
                 <p className="m-0 max-w-full truncate text-base font-semibold text-cribl-ink">
-                  {workerGroup.wg.trim() || 'Untitled'}
+                  {workerGroup.wg.trim() || copy.untitled}
                 </p>
               </div>
             </div>
@@ -807,7 +828,8 @@ export function WorkerGroupResourceMap({
             interactive={interactive}
             isDragging={isDragging}
             draggedSourceId={drag?.sourceId ?? null}
-            workerGroupName={workerGroup.wg.trim() || 'this worker group'}
+            workerGroupName={workerGroup.wg.trim() || copy.thisOne}
+            unassignedFallbackCopy={copy.inline}
             onOpenSource={onOpenSource}
             onBeginDrag={(sourceId, anchorEl) => {
               const anchor = containerRelativeCenter(anchorEl)
@@ -838,6 +860,11 @@ type UnassignedSectionProps = {
   isDragging: boolean
   draggedSourceId: string | null
   workerGroupName: string
+  /**
+   * Lower-case noun (e.g. "worker group" or "fleet") used to describe
+   * the parent in the static fallback copy when interactivity is off.
+   */
+  unassignedFallbackCopy: string
   onOpenSource: (id: string) => void
   onBeginDrag: (sourceId: string, anchorEl: HTMLElement) => void
 }
@@ -848,6 +875,7 @@ function UnassignedSection({
   isDragging,
   draggedSourceId,
   workerGroupName,
+  unassignedFallbackCopy,
   onOpenSource,
   onBeginDrag,
 }: UnassignedSectionProps) {
@@ -888,7 +916,7 @@ function UnassignedSection({
           <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">
             {interactive
               ? `Drag the dot on the right edge of any source onto ${workerGroupName} above to attach it.`
-              : 'Sources without a worker group yet.'}
+              : `Sources without a ${unassignedFallbackCopy} yet.`}
           </p>
         </div>
         <span className="shrink-0 text-[11px] tabular-nums text-cribl-muted">

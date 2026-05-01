@@ -16,7 +16,10 @@ const WG_SNAPSHOT_PAGE_SIZE = 2
 
 type Props = {
   plan: PlanState
+  /** Open the Stream "Worker groups" index view. */
   onGoToWorkers: () => void
+  /** Open the Edge "Fleets" index view. */
+  onGoToFleets: () => void
   onOpenWorkerGroup: (id: string) => void
   onGoToSources: () => void
   onSelectSource: (id: string) => void
@@ -33,12 +36,14 @@ type Props = {
    */
   onAddSource: () => void
   /**
-   * Open the global "New worker group" dialog (same flow used by the
-   * left sidebar "+ Add Worker Group" button). Surfaces a "+ New worker
-   * group" action in the resource map header so users can spawn new
-   * worker groups right from the plan view.
+   * Open the global "New worker group / fleet" dialog (same flow used by
+   * the left sidebar "+ Add" buttons). Surfaces "+ New worker group" /
+   * "+ New fleet" shortcuts in the resource map header so users can grow
+   * the topology directly from the plan view. The optional `kind` arg
+   * lets each shortcut spawn the matching resource (Stream vs Edge);
+   * omitting it preserves the legacy default ('stream').
    */
-  onAddWorkerGroup: () => void
+  onAddWorkerGroup: (kind?: 'stream' | 'edge') => void
 }
 
 function parseGb(s: string | undefined): number {
@@ -210,6 +215,7 @@ function ProgressMini({ pct }: { pct: number }) {
 export function PlanDataOverview({
   plan,
   onGoToWorkers,
+  onGoToFleets,
   onOpenWorkerGroup,
   onGoToSources,
   onSelectSource,
@@ -219,7 +225,8 @@ export function PlanDataOverview({
 }: Props) {
   const snap = useMemo(() => buildDashboardSnapshot(plan), [plan])
   const nSources = plan.sourceSummary.length
-  const nWg = plan.workerGroups.length
+  const nWgStream = plan.workerGroups.filter((w) => w.kind !== 'edge').length
+  const nWgEdge = plan.workerGroups.filter((w) => w.kind === 'edge').length
   const customer = plan.customerName.trim()
   const unassignedSources = plan.sourceSummary.filter((s) => !s.workerGroupId).length
   const [wgPage, setWgPage] = useState(0)
@@ -234,6 +241,7 @@ export function PlanDataOverview({
         return {
           id: w.id,
           name: w.wg.trim() || 'Unnamed',
+          kind: w.kind,
           sources: sources.length,
           effIngest: cap?.ingestGb ?? null,
           effEgress: cap?.egressGb ?? null,
@@ -369,7 +377,15 @@ export function PlanDataOverview({
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Data sources" value={nSources} hint="Per-source summary rows" />
-        <StatCard label="Worker Groups" value={nWg} hint="Capacity + specs" />
+        <StatCard
+          label="Worker groups & fleets"
+          value={
+            nWgEdge > 0
+              ? `${nWgStream} / ${nWgEdge}`
+              : nWgStream
+          }
+          hint={nWgEdge > 0 ? 'Stream WGs / Edge fleets · capacity + specs' : 'Capacity + specs'}
+        />
         <StatCard
           label="Total ingest"
           value={formatGbOrTbPerDayStr(totalIngest)}
@@ -551,7 +567,7 @@ export function PlanDataOverview({
 
         <div className="min-w-0 space-y-4">
           <div className="card-axiom border-cribl-border/80 bg-cribl-card-body p-4 sm:p-5">
-            <h3 className="m-0 text-sm font-semibold text-cribl-ink">Worker groups</h3>
+            <h3 className="m-0 text-sm font-semibold text-cribl-ink">Worker groups &amp; fleets</h3>
             <p className="m-0 mt-0.5 text-xs text-cribl-muted">
               Capacity and source assignment · {unassignedSources} unassigned
             </p>
@@ -560,8 +576,8 @@ export function PlanDataOverview({
                 id="recent-wg-q"
                 value={recentWgQ}
                 onChange={setRecentWgQ}
-                placeholder="Search worker groups…"
-                ariaLabel="Filter worker groups"
+                placeholder="Search worker groups & fleets…"
+                ariaLabel="Filter worker groups and fleets"
                 className="mt-3"
               />
             ) : null}
@@ -569,11 +585,12 @@ export function PlanDataOverview({
               <div className="mt-4">
                 {wgSearchActive && wgPageSlice.length === 0 ? (
                   <p className="m-0 rounded-lg border border-cribl-border/80 bg-white px-3 py-4 text-center text-sm text-cribl-muted">
-                    No worker groups match “{recentWgQ.trim()}”.
+                    No worker groups or fleets match “{recentWgQ.trim()}”.
                   </p>
                 ) : null}
                 <div className="grid grid-cols-1 gap-3">
                   {wgPageSlice.map((w) => {
+                    const isEdge = w.kind === 'edge'
                     const volLine =
                       Number.isFinite(w.srcVolSum) && w.srcVolSum > 0
                         ? formatGbOrTbPerDayStr(w.srcVolSum)
@@ -584,14 +601,35 @@ export function PlanDataOverview({
                         : [w.effIngest, w.effEgress]
                             .map((n) => (n == null || !Number.isFinite(n) ? '—' : formatGbOrTbPerDayStr(n)))
                             .join(' / ')
+                    /**
+                     * Capacity tooltip mirrors the wording on the WG /
+                     * Fleet detail page so customers recognize the same
+                     * "ingest / egress" Capacity card from this rollup.
+                     */
+                    const capacityTooltip = isEdge
+                      ? 'Same as Fleet → Capacity: ingest and egress (auto or override)'
+                      : 'Same as Worker group → Capacity: ingest and egress (auto or override)'
                     return (
                       <div
                         key={w.id}
                         className="min-w-0 overflow-hidden rounded-xl border border-cribl-border/90 bg-white p-3.5 text-left shadow-ctrl"
                       >
-                        <h4 className="m-0 text-base font-semibold leading-snug text-cribl-ink" title={w.name}>
-                          {w.name}
-                        </h4>
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                          <h4 className="m-0 text-base font-semibold leading-snug text-cribl-ink" title={w.name}>
+                            {w.name}
+                          </h4>
+                          <span
+                            className={[
+                              'shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                              isEdge
+                                ? 'border-cribl-primary/30 bg-cribl-primary-soft text-cribl-primary-ink'
+                                : 'border-cribl-border bg-cribl-card-body text-cribl-muted',
+                            ].join(' ')}
+                            title={isEdge ? 'Edge fleet' : 'Stream worker group'}
+                          >
+                            {isEdge ? 'Fleet' : 'WG'}
+                          </span>
+                        </div>
                         <p className="m-0 mt-1.5 text-xs leading-relaxed text-cribl-ink/85">
                           {w.sources > 0
                             ? `${w.sources} source${w.sources === 1 ? '' : 's'}`
@@ -599,7 +637,7 @@ export function PlanDataOverview({
                           <span className="text-cribl-border/90"> · </span>
                           <span className="tabular-nums">Est. {volLine}</span>
                           <span className="text-cribl-border/90"> · </span>
-                          <span className="text-cribl-ink/90" title="Same as Worker group → Capacity: ingest and egress (auto or override)">
+                          <span className="text-cribl-ink/90" title={capacityTooltip}>
                             in/out {inOutStr}
                           </span>
                         </p>
@@ -619,7 +657,8 @@ export function PlanDataOverview({
                 {!wgSearchActive && wgPageCount > 1 ? (
                   <div className="mt-4 flex flex-col items-stretch gap-2 border-t border-cribl-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
                     <p className="m-0 text-center text-xs text-cribl-muted sm:text-left">
-                      Page {wgPageSafe + 1} of {wgPageCount} · {wgStats.length} group{wgStats.length === 1 ? '' : 's'}
+                      Page {wgPageSafe + 1} of {wgPageCount} · {wgStats.length}{' '}
+                      {wgStats.length === 1 ? 'entry' : 'entries'}
                     </p>
                     <div className="flex items-center justify-center gap-2 sm:justify-end">
                       <button
@@ -643,7 +682,7 @@ export function PlanDataOverview({
                 ) : null}
               </div>
             ) : (
-              <p className="m-0 mt-3 text-sm text-cribl-muted">No worker groups yet.</p>
+              <p className="m-0 mt-3 text-sm text-cribl-muted">No worker groups or fleets yet.</p>
             )}
             <div className="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row">
               <button
@@ -652,6 +691,13 @@ export function PlanDataOverview({
                 className="w-full rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm font-semibold text-cribl-ink shadow-ctrl hover:bg-cribl-elevate"
               >
                 All worker groups
+              </button>
+              <button
+                type="button"
+                onClick={onGoToFleets}
+                className="w-full rounded-lg border border-cribl-border bg-white px-3 py-2 text-sm font-semibold text-cribl-ink shadow-ctrl hover:bg-cribl-elevate"
+              >
+                All fleets
               </button>
             </div>
           </div>
