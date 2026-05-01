@@ -321,8 +321,12 @@ on add. Those are PR B and PR C below.
 
 ### PR B — `feat/v2.0-rc.2-multi-sheet`
 
-Replace `public/adoption-plan-empty.xlsx` with a sanitized v0.9.1
-file. Rewrite [`planWorkbookLayout.ts`](./src/lib/planWorkbookLayout.ts),
+Replace `public/adoption-plan-empty.xlsx` with the gold v0.9.1 file
+(committed verbatim — no in-place sanitization; the importer treats
+the per-WG sheets as the source of truth and ignores the example
+"Non-Prod_*" rows that only exist in the Stream Overview rollup
+table). Rewrite
+[`planWorkbookLayout.ts`](./src/lib/planWorkbookLayout.ts),
 [`importWorkbook.ts`](./src/lib/importWorkbook.ts),
 [`exportWorkbook.ts`](./src/lib/exportWorkbook.ts), and
 [`adoptionPlanShellExceljs.ts`](./src/lib/adoptionPlanShellExceljs.ts)
@@ -333,12 +337,160 @@ to:
   `fl<sanitized-name>_fleet` for `kind === 'edge'`). Adding a new
   worker group / fleet in the UI naturally produces a new sub-sheet
   on the next export — there is no separate "create sheet" action.
-- Roll up `Stream Overview` from every `wg:*` sub-sheet and
-  `Edge Overview` from every `fl:*_fleet` sub-sheet, with hyperlinks
-  back to the source rows.
+- Roll up `Stream Overview` from every `wg*` sub-sheet and
+  `Edge Overview` from every `fl*_fleet` sub-sheet. Static values
+  only — no formulas, no hyperlinks. The gold's original Google-
+  Sheets `=HYPERLINK(...)` approach was applied inconsistently
+  (only some rows had it), so the app rebuilds the overview
+  deterministically every export with the WG / Fleet name written
+  as plain text in column A of the spec table.
 - Auto-detect v0.8.6 vs v0.9.1 by sheet presence on import; always
-  write v0.9.1 on export. The `SAMPLE` and `input_data` sheets are
-  treated as static and emitted verbatim from the shell.
+  write v0.9.1 on export. The `INSTRUCTIONS`, `PS Use Case
+  Worksheet`, and `input_data` sheets are treated as static and
+  emitted verbatim from the shell.
+
+#### v0.9.1 schema audit (captured from gold)
+
+The gold template ships with these sheets (parsed via
+`/tmp/v091_dump.txt` — see commit message of the audit commit):
+
+| Sheet | Role |
+|---|---|
+| `INSTRUCTIONS` | Static. Google-Sheets clone-and-rename ritual; preserved verbatim on export |
+| `PS Use Case Worksheet` | PR C territory; preserved verbatim on export until then |
+| `Stream Overview` | Rolled-up view of Stream worker groups + their sources |
+| `Edge Overview` | Rolled-up view of Edge fleets + their sources |
+| `wg<name>` | One per Stream worker group — full per-source data |
+| `fl<name>_fleet` | One per Edge fleet — same per-source layout as `wg<name>` |
+| `input_data` | Data-validation lookup tables (Tech_tiles, Dest_tiles, Pipeline, Criticality, StreamEdge, Initiatives, Technical use cases, Financial / Operational / Risk reduction / Strategic value lever options) |
+
+The gold seeds `wgdefault`, `wgdefaultHybrid`, and `fldefault_fleet`
+as example sheets so a fresh `adoption-plan-empty.xlsx` open in v2.0
+boots a plan with 2 Stream WGs + 1 Edge Fleet. The names are user-
+renameable.
+
+Per-WG / per-Fleet sheets share the same 30-column layout (A:AD).
+Only column D's title flips: `Worker Group` for Stream sheets,
+`Fleet` for Edge sheets. Headers in row 2; data starts row 3; gold
+seeds 19 blank data rows. Five group banners merge across row 1
+(`SOURCE ONBOARDING`, `PRIMARY DATA POINTS`, `VOLUME & PRIORITY`,
+`PHASE & ROADMAP`, `INITIATIVE, USE CASES, VALUE LEVERS`).
+Constants in [`planWorkbookLayout.ts`](./src/lib/planWorkbookLayout.ts)
+(see `V091_*` exports) capture all of this for reuse by importer +
+exporter.
+
+Stream Overview / Edge Overview each stack two tables:
+
+- Top (rows 2–14): rolled-up sources. Headers `Source / Daily Volume
+  (GB/day) / Physical location(s) / Current Collection / Cribl
+  Collection / WG (or FL) / Use Case(s) / Destination(s) / Notes`.
+- Bottom (rows 16+): per-WG / per-Fleet capacity. Column A is the
+  WG / Fleet name as plain text (matching the per-WG / per-Fleet
+  sheet name body, e.g. `wgdefault` → `default`). The gold pre-
+  fills cells D17:D24 with `=B+C` and H17:H24 with `=C/8` as a
+  fallback for users editing ingest / egress directly in Excel; the
+  exporter writes static computed values into those same cells but
+  leaves the pre-existing formulas intact in any cell it doesn't
+  touch (i.e. unused row slots).
+
+Sheet-name sanitization lives in
+[`v091SheetNames.ts`](./src/lib/v091SheetNames.ts):
+
+- Strip Excel-illegal chars (`: \\ / ? * [ ]`), collapse runs of
+  whitespace, trim.
+- Truncate the body so `prefix + body + suffix` fits in 31 chars.
+- Disambiguate collisions with `-2`, `-3`, … against a
+  case-insensitive set seeded with the static sheet names so a user-
+  named WG can never shadow `Stream Overview` etc.
+- A worker-group / fleet row with an empty `wg` field falls back to a
+  kind-aware default identifier (`wgWorkerGroup` /
+  `flFleet_fleet`).
+
+#### Per-message progress checkpoints
+
+PR B is sized in commits, not one big rewrite:
+
+1. _Foundation_ (done): replace `public/adoption-plan-empty.xlsx` with
+   the gold; add v0.9.1 layout constants to `planWorkbookLayout.ts`;
+   new `v091SheetNames.ts`; rewrite the dev notes section.
+2. _Importer_ (done): detect v0.9.1 by sheet presence, enumerate
+   per-WG / per-Fleet sheets, set `WorkerGroupRow.kind` from the sheet
+   prefix, parse capacity from the overview tables. The v0.8.6 path is
+   preserved verbatim and routed only when the workbook has neither a
+   `Stream Overview` / `Edge Overview` sheet nor any sheet name that
+   parses as `wg<name>` / `fl<name>_fleet`. Every per-WG sheet's source
+   rows are tagged with that sheet's freshly-minted `workerGroupId` at
+   parse time, so `assignWorkerGroupIds` is a no-op fast-path. Overview
+   rollups feed only the seven capacity columns onto each matching WG /
+   Fleet — the top "Sources" table is intentionally ignored because
+   it's a write-only artifact the exporter regenerates each save.
+3. _Exporter_ (done): generate per-WG / per-Fleet sheets, regenerate
+   Stream / Edge Overview rollups as plain-text static values. New
+   module `v091ExportWorkbook.ts` runs three phases:
+     - **JSZip clone pre-pass** ensures the shell has at least one
+       `wg<name>` scaffold per Stream WG and one `fl<name>_fleet`
+       scaffold per Edge fleet. The gold ships 2 + 1 — a plan that
+       needs more triggers OOXML-level cloning of the first scaffold
+       of each kind. Each clone gets a unique placeholder name
+       (`wg_v091Clone<N>` / `fl_v091Clone<N>_fleet`) so the Phase 2
+       scaffold detector still recognizes it; the placeholder is
+       renamed in Phase 2 to the resolved plan-WG sheet name. Clones
+       reuse the source's per-sheet rels (comments / drawings /
+       vmlDrawings) so they inherit Cribl validation hints for free.
+     - **ExcelJS fill** opens the expanded shell, resolves every
+       plan-WG sheet name through `resolveAllSheetNames`, renames
+       scaffolds in plan order, blanks the data rows from row 3 to at
+       least the gold's 19-row scaffold floor (so a shrink doesn't
+       leave phantoms), and writes `sourceSummaryValueForHeaderName`
+       output by header name. Stream / Edge Overview is regenerated
+       from scratch: rows 3..14 (top "Sources, Volume, Region") and
+       rows 17.. (specs) are blanked to the gold's table footprint
+       and re-filled with computed plain-text rollups (no formulas,
+       no hyperlinks). Unused scaffolds are dropped via
+       `wb.removeWorksheet`.
+     - **OOXML post-pass** restores `xl/styles.xml` + `xl/theme/theme1.xml`
+       from the expanded shell (so Cribl colors / fonts / fills
+       survive ExcelJS's round-trip), widens `table4`-`table7` `ref=`
+       attributes when overview data exceeds the gold's footprint,
+       splices the gold's verbatim per-WG `<conditionalFormatting>`
+       blocks into every output `wg*` / `fl*_fleet` sheet (so the
+       Low/Medium/High color rules' `dxfId` references line up with
+       the restored gold styles after ExcelJS re-numbered them), and
+       strips ExcelJS's spurious `operator="notContainsBlanks"` echo
+       so stricter parsers (openpyxl) can validate the file too.
+   Verified via tsx round-trip + openpyxl strict load on five
+   plan shapes: empty / 1S+0E / 0S+1E / 3S+2E (single clone each
+   side) / 5S+3E (heavy clone). Shell version is auto-detected in
+   `workbookDownload.ts#fillShell` so v0.8.6 imports still flow
+   through the legacy `adoptionPlanShellExceljs.ts` pipeline.
+4. _Resource-map kind sweep_ — every kind-sensitive string in
+   `PlanResourceMap`, `WorkerGroupResourceMap`,
+   `WorkerGroupDetailView`, and `PlanDataOverview` now flips at
+   render time off `workerGroup.kind` / `g.kind` / `g.wg?.kind`.
+   Centralized into per-file `copy` objects (and a
+   `copyForKind(kind)` helper in the shared resource map) so a
+   Fleet detail page reads naturally end-to-end — header kicker,
+   SectionBox titles, hub kicker, detach / unassign tooltips,
+   empty-state hints, drag prompts, topology prose, the
+   destructive Remove button, and the confirm-dialog fallback
+   name. The plan-wide map gained a parallel "+ New fleet" CTA
+   next to "+ New worker group" (`onAddWorkerGroup` widened to
+   `(kind?: WorkerGroupKind) => void`), and per-card kickers now
+   read "Worker group" / "Fleet" / "Unassigned" based on the
+   group's `kind`. The plan dashboard renames "Worker Groups" to
+   "Worker groups & fleets" with a Stream/Edge breakdown, adds a
+   per-row WG/Fleet badge, flips the "in/out" capacity tooltip to
+   "Same as Fleet → Capacity…" for Edge rows, and pairs "All
+   worker groups" with a new "All fleets" jump-link wired through
+   a new `onGoToFleets` prop on `PlanDataOverview`. (A follow-up
+   pure-rename PR is filed to rename the WG-prefixed shared
+   modules — `WorkerGroupResourceMap`, `WorkerGroupDetailView`,
+   `WorkerGroupEditor`, etc. — to kind-neutral names; deferred
+   until after rc.2 to keep this commit copy-only.)
+5. _Version bump + smoke_: `2.0.0-rc.1` → `2.0.0-rc.2`. Round-trip
+   smoke tests cover empty / single Stream / single Edge / mixed
+   small / heavy-clone shapes; tsx import + openpyxl strict load
+   pass on every shape.
 
 ### PR C — `feat/v2.0-ps-use-cases`
 

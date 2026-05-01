@@ -13,9 +13,10 @@ also works standalone in a browser for local development.
 
 > **v2.0 in progress.** The app is being aligned to the v0.9.1 gold
 > Excel template (per-WG sheets, Stream + Edge overviews, PS Use Case
-> Worksheet). PR A — data model alignment — is what `2.0.0-rc.1` ships;
-> the multi-sheet I/O rewrite (PR B) and PS Use Case Worksheet (PR C)
-> follow. See [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
+> Worksheet). PR A — data model alignment — shipped in `2.0.0-rc.1`;
+> PR B — multi-sheet `.xlsx` I/O rewrite + kind-aware resource maps —
+> ships in `2.0.0-rc.2`; the PS Use Case Worksheet (PR C) follows.
+> See [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
 > for the full plan.
 
 ## What it does

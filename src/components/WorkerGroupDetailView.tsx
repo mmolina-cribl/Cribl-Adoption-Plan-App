@@ -179,9 +179,49 @@ export function WorkerGroupDetailView({
   if (!g) {
     return (
       <p className="m-0 text-sm text-cribl-muted">
-        This worker group no longer exists. Add one from the sidebar, or select another in the list.
+        This worker group or fleet no longer exists. Add one from the sidebar, or select another in the list.
       </p>
     )
+  }
+
+  /**
+   * Kind-aware copy for the detail view. Stream worker groups and Edge
+   * fleets share the same view component, but every user-visible string
+   * that names the kind flips through this object so the page reads
+   * naturally in both modes.
+   */
+  const isEdge = g.kind === 'edge'
+  const copy = {
+    title: isEdge ? 'Fleet' : 'Worker group',
+    titleLower: isEdge ? 'fleet' : 'worker group',
+    /** Header `aria-label` and editable-name placeholder. */
+    headerAria: isEdge ? 'Fleet title' : 'Worker group title',
+    /** Resource-map SectionBox card title. */
+    resourceMapTitle: isEdge ? 'Fleet resource map' : 'Worker group resource map',
+    /** Dashboard SectionBox card title. */
+    dashboardTitle: isEdge ? 'Fleet dashboard' : 'Worker group dashboard',
+    /** Empty-dashboard hint shown when no sources are attached. */
+    emptyDashboard: isEdge
+      ? 'Add sources to this fleet to see charts and rollups.'
+      : 'Add sources to this worker group to see charts and rollups.',
+    /** Donut/MiniBars hint copy that references "this group". */
+    countsInThisGroup: isEdge ? 'Counts in this fleet' : 'Counts in this worker group',
+    regionsInThisGroup: isEdge ? 'By location tag in this fleet' : 'By location tag in this group',
+    /** Sources-section title (count interpolated). */
+    sourcesTitle: (n: number) =>
+      isEdge ? `Sources in this fleet (${n})` : `Sources in this worker group (${n})`,
+    /** Empty-sources hint copy. */
+    emptySources: isEdge
+      ? 'No sources are assigned to this fleet yet. Use the search box above to attach an existing source, or open a Source summary page directly.'
+      : 'No sources are assigned to this worker group yet. Use the search box above to attach an existing source, or open a Source summary page directly.',
+    /** Per-source-card unassign-button tooltip. */
+    unassignTooltip: isEdge ? 'Remove from this fleet' : 'Remove from this worker group',
+    /** Topology card title and prose subject. */
+    topologyTitle: isEdge ? 'Fleet topology' : 'Worker group topology',
+    topologyProseSubject: isEdge ? 'fleet' : 'worker group',
+    /** Destructive remove button label and confirm-dialog fallback name. */
+    removeButton: isEdge ? 'Remove fleet' : 'Remove worker group',
+    confirmFallbackName: isEdge ? 'Fleet' : 'Worker group',
   }
 
   const sources = sourceSummaryForWg(plan, g)
@@ -345,16 +385,16 @@ export function WorkerGroupDetailView({
       <header
         id="wg-header"
         className="flex min-w-0 flex-col gap-1 px-1"
-        aria-label={g.kind === 'edge' ? 'Fleet title' : 'Worker group title'}
+        aria-label={copy.headerAria}
       >
         <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">
-          {g.kind === 'edge' ? 'Fleet' : 'Worker group'}
+          {copy.title}
         </p>
         <EditableWorkerGroupName
           groupId={g.id}
           value={g.wg}
           onChange={(v) => s('wg', v)}
-          emptyLabel={g.kind === 'edge' ? 'Fleet' : 'Worker group'}
+          emptyLabel={copy.title}
           size="section"
         />
       </header>
@@ -362,7 +402,7 @@ export function WorkerGroupDetailView({
       <SectionBox
         id="wg-resource-map"
         kicker="Diagram"
-        title="Worker group resource map"
+        title={copy.resourceMapTitle}
         defaultOpen={expandByDefault}
         allowOverflow
       >
@@ -381,12 +421,12 @@ export function WorkerGroupDetailView({
       <SectionBox
         id="wg-dashboard"
         kicker="Dashboard"
-        title="Worker group dashboard"
+        title={copy.dashboardTitle}
         defaultOpen={expandByDefault}
         allowOverflow
       >
         {sources.length === 0 ? (
-          <p className="m-0 text-sm text-cribl-muted">Add sources to this worker group to see charts and rollups.</p>
+          <p className="m-0 text-sm text-cribl-muted">{copy.emptyDashboard}</p>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl">
@@ -429,7 +469,7 @@ export function WorkerGroupDetailView({
 
             <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl">
               <p className="m-0 text-xs font-semibold text-cribl-ink">Data criticality mix</p>
-              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">Counts in this worker group</p>
+              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">{copy.countsInThisGroup}</p>
               <div className="mt-3">
                 <DonutChart
                   items={[
@@ -470,7 +510,7 @@ export function WorkerGroupDetailView({
 
             <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl">
               <p className="m-0 text-xs font-semibold text-cribl-ink">Physical locations</p>
-              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">By location tag in this group</p>
+              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">{copy.regionsInThisGroup}</p>
               <div className="mt-3">
                 {topRegions.length === 0 ? (
                   <p className="m-0 text-sm text-cribl-muted">No location tags yet.</p>
@@ -641,7 +681,7 @@ export function WorkerGroupDetailView({
       <SectionBox
         id="wg-sources"
         kicker="Overview"
-        title={`Sources in this worker group (${sources.length})`}
+        title={copy.sourcesTitle(sources.length)}
         defaultOpen={expandByDefault}
         allowOverflow
       >
@@ -658,10 +698,7 @@ export function WorkerGroupDetailView({
           onAttach={assignSourceToThisGroup}
         />
         {sources.length === 0 ? (
-          <p className="m-0 text-sm text-cribl-muted">
-            No sources are assigned to this worker group yet. Use the search box above to attach an existing
-            source, or open a Source summary page directly.
-          </p>
+          <p className="m-0 text-sm text-cribl-muted">{copy.emptySources}</p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
             {sources.map((r) => {
@@ -712,7 +749,7 @@ export function WorkerGroupDetailView({
                       type="button"
                       onClick={() => unassignSource(r.id)}
                       className="h-9 shrink-0 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink sm:px-4"
-                      title="Remove from this worker group"
+                      title={copy.unassignTooltip}
                     >
                       Unassign
                     </button>
@@ -735,7 +772,7 @@ export function WorkerGroupDetailView({
       <SectionBox
         id="wg-topology"
         kicker="Topology"
-        title="Worker group topology"
+        title={copy.topologyTitle}
         defaultOpen={expandByDefault}
       >
         {(() => {
@@ -774,9 +811,10 @@ export function WorkerGroupDetailView({
                 </LabeledField>
               </div>
               <p className="m-0 text-xs text-cribl-muted">
-                Topology fields describe what the worker group <em>is</em> (customer reality). Capacity numbers and
-                sizing assumptions live in the <span className="text-cribl-ink">Capacity</span> card. All three fields
-                round-trip to Excel via the <span className="text-cribl-ink">Worker Hosting</span> /
+                Topology fields describe what the {copy.topologyProseSubject} <em>is</em> (customer reality).
+                Capacity numbers and sizing assumptions live in the{' '}
+                <span className="text-cribl-ink">Capacity</span> card. All three fields round-trip to Excel via
+                the <span className="text-cribl-ink">Worker Hosting</span> /
                 <span className="text-cribl-ink"> Worker Count</span> /
                 <span className="text-cribl-ink"> Worker Detail</span> columns.
               </p>
@@ -791,13 +829,13 @@ export function WorkerGroupDetailView({
           onClick={() => setConfirmRemoveOpen(true)}
           className="h-10 rounded-lg border border-rose-200 bg-rose-600 px-4 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700"
         >
-          Remove worker group
+          {copy.removeButton}
         </button>
       </div>
 
       <ConfirmRemoveWorkerGroupDialog
         open={confirmRemoveOpen}
-        workerGroupName={g.wg.trim() || 'Worker group'}
+        workerGroupName={g.wg.trim() || copy.confirmFallbackName}
         assignedSourcesCount={assignedCount}
         onCancel={() => setConfirmRemoveOpen(false)}
         onConfirm={() => {

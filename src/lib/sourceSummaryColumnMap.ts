@@ -36,7 +36,13 @@ const SOURCE_HEADER_EXTRA_CANDIDATES: Partial<Record<string, string[]>> = {
   'Display name': ['Name', 'Source name', 'Source display name'],
   'Physical location(s)': ['Physical location', 'Physical Locations', 'Region(s)', 'Region', 'Regions'],
   'Region(s)': ['Region', 'Regions'],
-  'Worker Group': ['WG', 'Worker group'],
+  // v0.9.1 per-Fleet sheets put `Fleet` in column D where Stream sheets have
+  // `Worker Group`; both alias to the same internal `workerGroupId` field on
+  // import (and the importer always resolves the WG association from the
+  // sheet name itself, so this map entry is purely defensive — it keeps
+  // `buildSourceSummaryColumnMap` from logging a missing-header warning on
+  // an otherwise well-formed `fl<name>_fleet` sheet).
+  'Worker Group': ['WG', 'Worker group', 'Fleet'],
   'Pipeline usecase': ['Pipeline use case'],
   'Data optimization %': ['Data optimization%', 'Data Optimization %', 'Data optimization  %'],
   'Current Collection': ['Current collection'],
@@ -59,7 +65,11 @@ export function buildSourceSummaryColumnMap(headerRow: string[], warnings: strin
     const b = (headerRow[1] || '').trim()
     const isNew = a === 'Display name' && b === 'Source'
     const isLegacy30 = a === 'Source' && /security or observability/i.test(b)
-    if (!isNew && !isLegacy30) {
+    // v0.9.1 per-WG / per-Fleet sheet: A='Source', B='Physical location(s)'.
+    // Recognized so we don't emit the legacy-header warning on every sheet of
+    // a v0.9.1 workbook.
+    const isV091PerWg = a === 'Source' && /^physical location/i.test(b)
+    if (!isNew && !isLegacy30 && !isV091PerWg) {
       warnings.push(
         'Source summary: row-2 column titles are matched by name (so legacy files without Type/Region, Display name, or reordered columns, still import correctly).',
       )

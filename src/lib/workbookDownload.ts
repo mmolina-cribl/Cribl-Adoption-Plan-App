@@ -2,7 +2,22 @@ import { fetchAdoptionPlanEmptyBufferIfMissing } from './adoptionPlanTemplateExp
 import { getImportShellBuffer } from './importShellStore'
 import { planToBlobWithShellExcelJs } from './adoptionPlanShellExceljs'
 import { titleForAdoptionPlanExport } from './exportWorkbook'
+import { bufferIsV091Shell, planToBlobV091 } from './v091ExportWorkbook'
 import type { PlanState } from '../types/planTypes'
+
+/**
+ * Route a candidate shell buffer to the v0.9.1 multi-sheet exporter when the
+ * buffer is a v0.9.1 workbook (Stream Overview / Edge Overview present, or any
+ * `wg<name>` / `fl<name>_fleet` sub-sheet) or to the legacy v0.8.6 ExcelJS
+ * pipeline otherwise. The probe is a pure JSZip read of `xl/workbook.xml`,
+ * cheap enough to run on every export attempt.
+ */
+async function fillShell(plan: PlanState, buffer: ArrayBuffer): Promise<ArrayBuffer> {
+  if (await bufferIsV091Shell(buffer)) {
+    return planToBlobV091(plan, buffer)
+  }
+  return planToBlobWithShellExcelJs(plan, buffer)
+}
 
 /** Thrown when no Cribl shell is available or ExcelJS cannot fill it (we do not fall back to a plain generator). */
 export class ExportShellUnavailableError extends Error {
@@ -17,15 +32,18 @@ export class ExportShellUnavailableError extends Error {
 
 /**
  * 1) Last **imported** .xlsx (if any) — ExcelJS + OOXML merge for Cribl styling.  
- * 2) **Empty** v0.8.6 shell from `public/adoption-plan-empty.xlsx` (fetched if not yet cached).  
- * There is **no** third “plain” xlsx path: that build is ~1.5× the template size, unstyled, and easy to mistake for a real export.
+ * 2) **Empty** v0.9.1 shell from `public/adoption-plan-empty.xlsx` (fetched if not yet cached).  
+ * Each shell is auto-routed to the v0.9.1 multi-sheet exporter (PR B) or the
+ * legacy v0.8.6 ExcelJS pipeline based on its sheet topology — see
+ * {@link fillShell}. There is **no** third “plain” xlsx path: that build is
+ * ~1.5× the template size, unstyled, and easy to mistake for a real export.
  */
 export async function planToBlobAsync(plan: PlanState): Promise<ArrayBuffer> {
   let lastError: unknown
   const imp = getImportShellBuffer()
   if (imp) {
     try {
-      return await planToBlobWithShellExcelJs(plan, imp)
+      return await fillShell(plan, imp)
     } catch (e) {
       lastError = e
     }
@@ -33,7 +51,7 @@ export async function planToBlobAsync(plan: PlanState): Promise<ArrayBuffer> {
   const empty = await fetchAdoptionPlanEmptyBufferIfMissing()
   if (empty) {
     try {
-      return await planToBlobWithShellExcelJs(plan, empty)
+      return await fillShell(plan, empty)
     } catch (e) {
       lastError = e
     }
