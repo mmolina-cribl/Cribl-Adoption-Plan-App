@@ -10,7 +10,35 @@ import {
   V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
   V091_OVERVIEW_TABLE2_HEADER_ROW,
 } from './planWorkbookLayout'
-import { newId, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupKind, type WorkerGroupRow } from '../types/planTypes'
+import {
+  PS_BASE_SCOPE_ITEMS,
+  PS_BASE_SCOPE_WORKSHEET_FIRST_ROW,
+  PS_BASE_SCOPE_WORKSHEET_LABELS,
+  PS_BLOCK1_FIRST_DATA_ROW,
+  PS_BLOCK2_FIRST_DATA_ROW,
+  PS_COL_DELIVERABLE_OR_PARAMS,
+  PS_COL_NOTES,
+  PS_COL_STATUS,
+  PS_COL_USECASE_NUMBER,
+  PS_PARAMETERS_PER_USE_CASE,
+  PS_USE_CASE_COUNT,
+  PS_USE_CASE_WORKSHEET_FIRST_ROW,
+  SHEET_PS_USE_CASE_WORKSHEET,
+} from './psUseCaseLayout'
+import { backfillActivation } from './activationNormalize'
+import {
+  newId,
+  type Activation,
+  type ActivationBaseScopeRow,
+  type ActivationUseCase,
+  type ActivationUseCaseOverviewRow,
+  type ActivationWorksheetRow,
+  type PlanState,
+  type SourceSummaryRow,
+  type SourceVolumeRow,
+  type WorkerGroupKind,
+  type WorkerGroupRow,
+} from '../types/planTypes'
 import { assignWorkerGroupIds } from './workerGroupIds'
 import { buildSourceSummaryColumnMap, findColumnIndexByHeader } from './sourceSummaryColumnMap'
 import { isWorkerSectionTitleRow, rowIsEffectivelyEmptyForTopo } from './topologySheetLayout'
@@ -580,6 +608,82 @@ function parseV091Workbook(
 }
 
 /**
+ * Read a single cell as a trimmed string. Tolerates `null`, numbers,
+ * and Date values the same way the rest of the importer does.
+ */
+function aoaCell(aoa: unknown[][], row1Based: number, col1Based: number): string {
+  const row = aoa[row1Based - 1]
+  if (!row) return ''
+  return cellToString(row[col1Based - 1])
+}
+
+/**
+ * Parse the gold v0.9.1 `PS Use Case Worksheet` sheet into an
+ * `Activation` value. Reads only the customer-editable cells (Status,
+ * Notes, Parameters, Use Case kind picks); the static labels in
+ * column A / B and every banner / header row are ignored at parse
+ * time because the gold layout is fixed and the constants in
+ * `psUseCaseLayout.ts` are the source of truth.
+ *
+ * Tier is intentionally NOT read from the sheet — the gold has no
+ * cell for it. Imported plans land with `tier: null` and the user
+ * re-picks via the modal-first tier picker on the Activation page.
+ */
+function parsePsUseCaseWorksheet(aoa: unknown[][]): Activation {
+  const baseScope: ActivationBaseScopeRow[] = []
+  for (let i = 0; i < PS_BASE_SCOPE_ITEMS.length; i += 1) {
+    const r = PS_BLOCK1_FIRST_DATA_ROW + i
+    baseScope.push({
+      // Coerced to a valid ActivationStatus by `backfillActivation`.
+      status: aoaCell(aoa, r, PS_COL_STATUS) as ActivationBaseScopeRow['status'],
+      notes: aoaCell(aoa, r, PS_COL_NOTES),
+    })
+  }
+
+  const useCaseOverview: ActivationUseCaseOverviewRow[] = []
+  for (let i = 0; i < PS_USE_CASE_COUNT; i += 1) {
+    const r = PS_BLOCK2_FIRST_DATA_ROW + i
+    // Block 2 stores the kind picker in column B (PS_COL_USECASE_NUMBER).
+    useCaseOverview.push({ kind: aoaCell(aoa, r, PS_COL_USECASE_NUMBER) })
+  }
+
+  const baseScopeWorksheet: ActivationWorksheetRow[] = []
+  for (let i = 0; i < PS_BASE_SCOPE_WORKSHEET_LABELS.length; i += 1) {
+    const r = PS_BASE_SCOPE_WORKSHEET_FIRST_ROW + i
+    baseScopeWorksheet.push({
+      parameters: aoaCell(aoa, r, PS_COL_DELIVERABLE_OR_PARAMS),
+      status: aoaCell(aoa, r, PS_COL_STATUS) as ActivationWorksheetRow['status'],
+      notes: aoaCell(aoa, r, PS_COL_NOTES),
+    })
+  }
+
+  const useCases: ActivationUseCase[] = []
+  for (let uc = 0; uc < PS_USE_CASE_COUNT; uc += 1) {
+    const parameters: ActivationWorksheetRow[] = []
+    for (let p = 0; p < PS_PARAMETERS_PER_USE_CASE; p += 1) {
+      const r = PS_USE_CASE_WORKSHEET_FIRST_ROW + uc * PS_PARAMETERS_PER_USE_CASE + p
+      parameters.push({
+        parameters: aoaCell(aoa, r, PS_COL_DELIVERABLE_OR_PARAMS),
+        status: aoaCell(aoa, r, PS_COL_STATUS) as ActivationWorksheetRow['status'],
+        notes: aoaCell(aoa, r, PS_COL_NOTES),
+      })
+    }
+    useCases.push({ parameters })
+  }
+
+  // backfillActivation sanitizes everything — invalid Status strings
+  // collapse to "Not Started", unknown kinds collapse to "Other",
+  // and arrays are padded/truncated to the gold's exact shape.
+  return backfillActivation({
+    tier: null,
+    baseScope,
+    useCaseOverview,
+    baseScopeWorksheet,
+    useCases,
+  })
+}
+
+/**
  * Parse an adoption plan .xlsx (same structure as our export) into a PlanState.
  * Safe to run in the browser or Node; pass an ArrayBuffer or shared Uint8Array.
  */
@@ -605,6 +709,15 @@ export function importAdoptionPlanXlsx(
 
   if (schema === 'v0.9.1') {
     const v091 = parseV091Workbook(wb, sn, warnings)
+    // PS Use Case Worksheet may be missing on customer-trimmed templates;
+    // fall back to the default empty Activation in that case so the
+    // import doesn't fail.
+    const psSheet = sn.includes(SHEET_PS_USE_CASE_WORKSHEET)
+      ? wb.Sheets[SHEET_PS_USE_CASE_WORKSHEET]
+      : null
+    const activation = psSheet
+      ? parsePsUseCaseWorksheet(aoaFromSheet(psSheet, false))
+      : defaultActivation()
     const plan: PlanState = assignWorkerGroupIds({
       version: 1,
       customerName,
@@ -616,11 +729,7 @@ export function importAdoptionPlanXlsx(
       // the app fills it lazily where it still consumes the legacy shape.
       sourceVolume: [],
       workerGroups: v091.workerGroups,
-      // PR C wires real PS Use Case Worksheet parsing here. For now the
-      // importer drops in the default empty Activation so the rest of the
-      // app can rely on the field being present after import; the real
-      // sheet reader lands alongside the Activation page UI.
-      activation: defaultActivation(),
+      activation,
     })
     return { ok: true, plan, warnings }
   }

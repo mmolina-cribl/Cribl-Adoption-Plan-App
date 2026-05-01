@@ -3,7 +3,10 @@
  *
  * The gold v0.9.1 shell ships a fixed sheet topology:
  *   1. INSTRUCTIONS                — static, preserved verbatim
- *   2. PS Use Case Worksheet       — static, preserved verbatim
+ *   2. PS Use Case Worksheet       — editable cells round-tripped via
+ *                                    {@link fillPsUseCaseWorksheet};
+ *                                    static labels / banners / dropdown
+ *                                    chrome preserved verbatim (PR C)
  *   3. Stream Overview             — regenerated each save (plain-text rollup)
  *   4. wgdefault                   — Stream WG scaffold #1
  *   5. wgdefaultHybrid             — Stream WG scaffold #2
@@ -59,10 +62,30 @@ import {
   V091_PER_WG_HEADERS_BASE,
   V091_WG_SHEET_PREFIX,
 } from './planWorkbookLayout'
+import {
+  PS_BASE_SCOPE_ITEMS,
+  PS_BASE_SCOPE_WORKSHEET_FIRST_ROW,
+  PS_BASE_SCOPE_WORKSHEET_LABELS,
+  PS_BLOCK1_FIRST_DATA_ROW,
+  PS_BLOCK2_FIRST_DATA_ROW,
+  PS_COL_DELIVERABLE_OR_PARAMS,
+  PS_COL_NOTES,
+  PS_COL_STATUS,
+  PS_COL_USECASE_NUMBER,
+  PS_PARAMETERS_PER_USE_CASE,
+  PS_USE_CASE_COUNT,
+  PS_USE_CASE_WORKSHEET_FIRST_ROW,
+} from './psUseCaseLayout'
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
 import { resolveAllSheetNames } from './v091SheetNames'
 import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
-import type { PlanState, SourceSummaryRow, WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
+import type {
+  Activation,
+  PlanState,
+  SourceSummaryRow,
+  WorkerGroupKind,
+  WorkerGroupRow,
+} from '../types/planTypes'
 
 /**
  * The five static / overview sheet names treated as reserved when
@@ -625,8 +648,76 @@ async function fillContentInShell(plan: PlanState, expandedShell: ArrayBuffer): 
     fillOverviewSheet(edgeOverview, 'edge', plan, finalSheetNames)
   }
 
+  const psSheet = wb.getWorksheet(SHEET_PS_USE_CASE)
+  if (psSheet) {
+    fillPsUseCaseWorksheet(psSheet, plan.activation)
+  }
+
   const out = await wb.xlsx.writeBuffer()
   return out instanceof ArrayBuffer ? out : (new Uint8Array(out as Uint8Array).buffer as ArrayBuffer)
+}
+
+/**
+ * Write the customer-edited fields of `plan.activation` into the gold's
+ * `PS Use Case Worksheet` sheet without disturbing any banner / header /
+ * static-label / dropdown / conditional-formatting cells. Tier is NOT
+ * written because the gold has no cell for it (see Activation type
+ * docs); the picker is purely an in-app UX affordance.
+ *
+ * Because the importer is the inverse of this function and uses the
+ * same `psUseCaseLayout.ts` constants, every cell written here is
+ * round-trip safe.
+ */
+function fillPsUseCaseWorksheet(ws: ExcelJS.Worksheet, activation: Activation): void {
+  // Block 1 — Activation Base Scope (rows 3–7): Status (D), Notes (E)
+  for (let i = 0; i < PS_BASE_SCOPE_ITEMS.length; i += 1) {
+    const r = PS_BLOCK1_FIRST_DATA_ROW + i
+    const row = activation.baseScope[i]
+    if (row) {
+      ws.getCell(r, PS_COL_STATUS).value = row.status
+      ws.getCell(r, PS_COL_NOTES).value = row.notes
+    }
+  }
+
+  // Block 2 — Activation Use Case Overview (rows 11–15): kind picker (B)
+  for (let i = 0; i < PS_USE_CASE_COUNT; i += 1) {
+    const r = PS_BLOCK2_FIRST_DATA_ROW + i
+    const slot = activation.useCaseOverview[i]
+    if (slot) {
+      // Empty string clears the cell — gold tolerates this on its
+      // 12-value dropdown (no-pick is the seeded default).
+      ws.getCell(r, PS_COL_USECASE_NUMBER).value = slot.kind ? slot.kind : null
+    }
+  }
+
+  // Block 3a — Base Scope Worksheet anchors (rows 19–21): Parameters
+  // (C), Status (D), Notes (E)
+  for (let i = 0; i < PS_BASE_SCOPE_WORKSHEET_LABELS.length; i += 1) {
+    const r = PS_BASE_SCOPE_WORKSHEET_FIRST_ROW + i
+    const row = activation.baseScopeWorksheet[i]
+    if (row) {
+      ws.getCell(r, PS_COL_DELIVERABLE_OR_PARAMS).value = row.parameters
+      ws.getCell(r, PS_COL_STATUS).value = row.status
+      ws.getCell(r, PS_COL_NOTES).value = row.notes
+    }
+  }
+
+  // Block 3b — Per-use-case parameter rows (rows 22–46): Parameters
+  // (C), Status (D), Notes (E). 5 use cases × 5 parameter rows each.
+  for (let uc = 0; uc < PS_USE_CASE_COUNT; uc += 1) {
+    const useCase = activation.useCases[uc]
+    if (!useCase) continue
+    for (let p = 0; p < PS_PARAMETERS_PER_USE_CASE; p += 1) {
+      const r =
+        PS_USE_CASE_WORKSHEET_FIRST_ROW + uc * PS_PARAMETERS_PER_USE_CASE + p
+      const row = useCase.parameters[p]
+      if (row) {
+        ws.getCell(r, PS_COL_DELIVERABLE_OR_PARAMS).value = row.parameters
+        ws.getCell(r, PS_COL_STATUS).value = row.status
+        ws.getCell(r, PS_COL_NOTES).value = row.notes
+      }
+    }
+  }
 }
 
 // ─── Phase 3: OOXML style restore + table-ref fixes ─────────────────────────
