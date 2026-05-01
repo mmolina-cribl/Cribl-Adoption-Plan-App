@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { SectionBox } from './FormControls'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type SetStateAction,
+} from 'react'
 import { TierPickerDialog } from './TierPickerDialog'
 import {
   PS_BASE_SCOPE_ITEMS,
@@ -25,15 +31,36 @@ type Props = {
   setPlan: Dispatch<SetStateAction<PlanState>>
 }
 
+type ActivationTabId = 'base-scope' | 'use-case-overview' | 'use-case-worksheet'
+
+const TABS: ReadonlyArray<{
+  id: ActivationTabId
+  label: string
+  hint: string
+}> = [
+  {
+    id: 'base-scope',
+    label: 'Base Scope',
+    hint: '5 fixed deliverables every Cribl PS engagement covers.',
+  },
+  {
+    id: 'use-case-overview',
+    label: 'Use Case Overview',
+    hint: 'Pick what each numbered use-case slot is for this customer.',
+  },
+  {
+    id: 'use-case-worksheet',
+    label: 'Use Case Worksheet',
+    hint: '3 base-scope anchor rows and 5 use-case cards (5 parameters each).',
+  },
+]
+
 /**
  * The Activation page — a 1-to-1 interactive view of the gold's
- * `PS Use Case Worksheet` sheet plus a soft tier picker. Three stacked
- * sections mirror the gold's three banner-separated blocks:
- *
- * 1. Activation Base Scope (5 fixed deliverables, Status + Notes).
- * 2. Activation Use Case Overview (5 use-case slots, kind picker).
- * 3. Activation Use Case Worksheet (3 base-scope sub-rows + 5 use-case
- *    cards × 5 parameter rows each, all with Parameters / Status / Notes).
+ * `PS Use Case Worksheet` sheet plus a soft tier picker. Three tabs
+ * mirror the gold's three banner-separated blocks; only one tab's
+ * content renders at a time so each block has the full content width
+ * for writing and selections.
  *
  * Soft-gating: when `tier` is set, use-case cards beyond the tier's
  * unlocked count fade to ~50% opacity with an "Out of scope" pill but
@@ -42,6 +69,8 @@ type Props = {
 export function ActivationView({ plan, setPlan }: Props) {
   const activation = plan.activation
   const tier = activation.tier
+
+  const [activeTab, setActiveTab] = useState<ActivationTabId>('base-scope')
 
   /**
    * Has the user ever seen the tier picker on this device this
@@ -77,6 +106,7 @@ export function ActivationView({ plan, setPlan }: Props) {
   }
 
   const customerName = plan.customerName.trim() || 'this customer'
+  const activeTabMeta = TABS.find((t) => t.id === activeTab) ?? TABS[0]!
 
   return (
     <div className="min-w-0 space-y-4 sm:space-y-5">
@@ -97,63 +127,31 @@ export function ActivationView({ plan, setPlan }: Props) {
             the <span className="text-cribl-ink/80">PS Use Case Worksheet</span> tab on export.
           </p>
         </div>
-        <TierChip
-          tier={tier}
-          onClick={() => setTierPickerForced(true)}
-        />
+        <TierChip tier={tier} onClick={() => setTierPickerForced(true)} />
       </header>
 
-      <SectionBox
-        id="activation-base-scope"
-        kicker="Block 1"
-        title="Activation Base Scope"
-        defaultOpen
-        allowOverflow
-      >
-        <p className="m-0 mb-3 text-xs text-cribl-muted">
-          The 5 fixed deliverables every Cribl PS engagement covers. Pick a status and add notes
-          as the activation progresses.
-        </p>
-        <BaseScopeChecklistCard activation={activation} setActivation={setActivation} />
-      </SectionBox>
+      <ActivationTabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      <SectionBox
-        id="activation-use-case-overview"
-        kicker="Block 2"
-        title="Activation Use Case Overview"
-        defaultOpen
-        allowOverflow
+      <div
+        role="tabpanel"
+        id={`activation-tab-${activeTab}`}
+        aria-labelledby={`activation-tab-${activeTab}-button`}
+        className="card-axiom min-w-0 border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5"
       >
-        <p className="m-0 mb-3 text-xs text-cribl-muted">
-          Pick what each numbered use-case slot is for {customerName}. The list below mirrors the
-          12 options the gold workbook accepts.
-        </p>
-        <UseCaseOverviewCard activation={activation} setActivation={setActivation} />
-      </SectionBox>
+        <p className="m-0 mb-4 text-xs text-cribl-muted">{activeTabMeta.hint}</p>
 
-      <SectionBox
-        id="activation-use-case-worksheet"
-        kicker="Block 3"
-        title="Activation Use Case Worksheet"
-        defaultOpen
-        allowOverflow
-      >
-        <p className="m-0 mb-3 text-xs text-cribl-muted">
-          The expanded worksheet — 3 base-scope anchor rows and 5 use cases (5 parameter rows
-          each). Per-row Parameters, Status, and Notes.
-        </p>
-        <BaseScopeWorksheetCard activation={activation} setActivation={setActivation} />
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          {activation.useCases.map((_, useCaseIndex) => (
-            <UseCaseWorksheetCard
-              key={useCaseIndex}
-              useCaseIndex={useCaseIndex}
-              activation={activation}
-              setActivation={setActivation}
-            />
-          ))}
-        </div>
-      </SectionBox>
+        {activeTab === 'base-scope' ? (
+          <BaseScopeChecklistCard activation={activation} setActivation={setActivation} />
+        ) : null}
+
+        {activeTab === 'use-case-overview' ? (
+          <UseCaseOverviewCard activation={activation} setActivation={setActivation} />
+        ) : null}
+
+        {activeTab === 'use-case-worksheet' ? (
+          <UseCaseWorksheetTab activation={activation} setActivation={setActivation} />
+        ) : null}
+      </div>
 
       {tierPickerForced ? (
         <TierPickerDialog
@@ -167,6 +165,66 @@ export function ActivationView({ plan, setPlan }: Props) {
           }}
         />
       ) : null}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Tab strip
+// ────────────────────────────────────────────────────────────────────
+
+function ActivationTabBar({
+  activeTab,
+  onChange,
+}: {
+  activeTab: ActivationTabId
+  onChange: (id: ActivationTabId) => void
+}) {
+  /**
+   * Left/Right arrow keys move focus along the tab strip. Tab list
+   * follows WAI-ARIA tabs pattern — only the active tab is in the
+   * default tab order.
+   */
+  const onKey = (e: KeyboardEvent<HTMLButtonElement>, idx: number) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const next = e.key === 'ArrowLeft' ? (idx - 1 + TABS.length) % TABS.length : (idx + 1) % TABS.length
+    const target = TABS[next]!
+    onChange(target.id)
+    const btn = document.getElementById(`activation-tab-${target.id}-button`)
+    if (btn instanceof HTMLButtonElement) btn.focus()
+  }
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Activation sections"
+      className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-xl border border-cribl-border bg-cribl-canvas p-1 shadow-ctrl"
+    >
+      {TABS.map((t, i) => {
+        const isActive = activeTab === t.id
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`activation-tab-${t.id}-button`}
+            aria-selected={isActive}
+            aria-controls={`activation-tab-${t.id}`}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onChange(t.id)}
+            onKeyDown={(e) => onKey(e, i)}
+            className={[
+              'min-w-0 flex-1 rounded-lg px-3 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/40',
+              isActive
+                ? 'bg-white text-cribl-ink shadow-ctrl'
+                : 'text-cribl-muted hover:bg-white/60 hover:text-cribl-ink',
+            ].join(' ')}
+          >
+            <span className="block truncate">{t.label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -198,7 +256,7 @@ function TierChip({ tier, onClick }: { tier: ActivationTier | null; onClick: () 
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Block 1 — Activation Base Scope (5 deliverables)
+// Tab 1 — Activation Base Scope (5 deliverables)
 // ────────────────────────────────────────────────────────────────────
 
 function BaseScopeChecklistCard({
@@ -214,36 +272,42 @@ function BaseScopeChecklistCard({
   }
 
   return (
-    <div className="grid gap-2.5">
+    <div className="grid gap-3">
       {PS_BASE_SCOPE_ITEMS.map((meta, i) => {
         const row = activation.baseScope[i]
         return (
           <div
             key={meta.item}
-            className="grid grid-cols-1 gap-2 rounded-xl border border-cribl-border/80 bg-white p-3 shadow-ctrl sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,170px)_minmax(0,1.5fr)] sm:items-center sm:gap-3"
+            className="rounded-xl border border-cribl-border/80 bg-cribl-card-body/40 p-3 sm:p-4"
           >
-            <div className="min-w-0">
-              <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
-                Item
-              </p>
-              <p className="m-0 text-sm font-semibold text-cribl-ink">{meta.item}</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,200px)] md:items-center">
+              <div className="min-w-0">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+                  Item
+                </p>
+                <p className="m-0 text-sm font-semibold text-cribl-ink">{meta.item}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+                  Deliverable
+                </p>
+                <p className="m-0 text-sm text-cribl-ink/90">{meta.deliverable}</p>
+              </div>
+              <FieldLabel label="Status">
+                <StatusSelect
+                  ariaLabel={`Status for ${meta.item}`}
+                  value={row.status}
+                  onChange={(v) => updateRow(i, { status: v })}
+                />
+              </FieldLabel>
             </div>
-            <div className="min-w-0">
-              <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
-                Deliverable
-              </p>
-              <p className="m-0 text-sm text-cribl-ink/90">{meta.deliverable}</p>
-            </div>
-            <StatusSelect
-              ariaLabel={`Status for ${meta.item}`}
-              value={row.status}
-              onChange={(v) => updateRow(i, { status: v })}
-            />
-            <NotesInput
-              ariaLabel={`Notes for ${meta.item}`}
-              value={row.notes}
-              onChange={(v) => updateRow(i, { notes: v })}
-            />
+            <FieldLabel className="mt-3" label="Notes">
+              <NotesTextarea
+                ariaLabel={`Notes for ${meta.item}`}
+                value={row.notes}
+                onChange={(v) => updateRow(i, { notes: v })}
+              />
+            </FieldLabel>
           </div>
         )
       })}
@@ -252,7 +316,7 @@ function BaseScopeChecklistCard({
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Block 2 — Activation Use Case Overview (5 kind pickers)
+// Tab 2 — Activation Use Case Overview (5 kind pickers)
 // ────────────────────────────────────────────────────────────────────
 
 function UseCaseOverviewCard({
@@ -270,7 +334,7 @@ function UseCaseOverviewCard({
   const unlockedCount = unlockedUseCaseCountForTier(activation.tier)
 
   return (
-    <div className="grid gap-2.5">
+    <div className="grid gap-3">
       {activation.useCaseOverview.map((row, i) => {
         const number = PS_USE_CASE_OVERVIEW_NUMBERS[i]
         const tier = PS_USE_CASE_TIERS[i]
@@ -279,22 +343,31 @@ function UseCaseOverviewCard({
           <div
             key={number}
             className={[
-              'grid grid-cols-1 gap-2 rounded-xl border border-cribl-border/80 bg-white p-3 shadow-ctrl sm:grid-cols-[minmax(0,90px)_minmax(0,90px)_minmax(0,1fr)] sm:items-center sm:gap-3 transition',
+              'rounded-xl border border-cribl-border/80 bg-cribl-card-body/40 p-3 transition sm:p-4',
               isLocked ? 'opacity-50' : '',
             ].join(' ')}
           >
-            <div className="min-w-0">
-              <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
-                Use Case #
-              </p>
-              <p className="m-0 text-sm font-semibold tabular-nums text-cribl-ink">{number}</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,90px)_minmax(0,90px)_minmax(0,1fr)] md:items-center">
+              <div className="min-w-0">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+                  Use Case #
+                </p>
+                <p className="m-0 text-sm font-semibold tabular-nums text-cribl-ink">{number}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+                  Tier
+                </p>
+                <TierBadge tier={tier} faded={isLocked} />
+              </div>
+              <FieldLabel label="Use case kind">
+                <UseCaseKindSelect
+                  ariaLabel={`Use case kind for slot ${number}`}
+                  value={row.kind}
+                  onChange={(v) => updateRow(i, v)}
+                />
+              </FieldLabel>
             </div>
-            <TierBadge tier={tier} faded={isLocked} />
-            <UseCaseKindSelect
-              ariaLabel={`Use case kind for slot ${number}`}
-              value={row.kind}
-              onChange={(v) => updateRow(i, v)}
-            />
           </div>
         )
       })}
@@ -303,8 +376,32 @@ function UseCaseOverviewCard({
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Block 3a — Base-scope worksheet sub-rows (Primary Source / etc.)
+// Tab 3 — Activation Use Case Worksheet
 // ────────────────────────────────────────────────────────────────────
+
+function UseCaseWorksheetTab({
+  activation,
+  setActivation,
+}: {
+  activation: Activation
+  setActivation: (next: Activation) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <BaseScopeWorksheetCard activation={activation} setActivation={setActivation} />
+      <div className="grid gap-3">
+        {activation.useCases.map((_, useCaseIndex) => (
+          <UseCaseWorksheetCard
+            key={useCaseIndex}
+            useCaseIndex={useCaseIndex}
+            activation={activation}
+            setActivation={setActivation}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function BaseScopeWorksheetCard({
   activation,
@@ -324,44 +421,53 @@ function BaseScopeWorksheetCard({
   }
 
   return (
-    <div className="rounded-xl border border-cribl-border/80 bg-cribl-card-body/40 p-3 shadow-ctrl sm:p-4">
-      <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-muted">
-        Base scope anchors
-      </p>
-      <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">
-        Pre-engagement infrastructure questions that aren't part of any numbered use case.
-      </p>
-      <div className="mt-3 grid gap-2.5">
+    <div className="rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 sm:p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-muted">
+          Base scope anchors
+        </p>
+        <p className="m-0 text-[11px] text-cribl-muted">
+          Pre-engagement infrastructure (rows 19–21).
+        </p>
+      </div>
+      <div className="mt-3 grid gap-3">
         {PS_BASE_SCOPE_WORKSHEET_LABELS.map((label, i) => {
           const row = activation.baseScopeWorksheet[i]
+          const shortLabel = label.replace(/^Base Scope - /, '')
           return (
             <div
               key={label}
-              className="grid grid-cols-1 gap-2 rounded-lg border border-cribl-border/80 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,170px)_minmax(0,1.5fr)] sm:items-center sm:gap-3"
+              className="rounded-lg border border-cribl-border/80 bg-white p-3"
             >
-              <div className="min-w-0">
-                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
-                  Anchor
-                </p>
-                <p className="m-0 text-sm font-semibold text-cribl-ink">
-                  {label.replace(/^Base Scope - /, '')}
-                </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,200px)_minmax(0,1fr)_minmax(0,200px)] md:items-start">
+                <div className="min-w-0">
+                  <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+                    Anchor
+                  </p>
+                  <p className="m-0 text-sm font-semibold text-cribl-ink">{shortLabel}</p>
+                </div>
+                <FieldLabel label="Parameters (specific logs / tasks)">
+                  <ParametersTextarea
+                    ariaLabel={`Parameters for ${label}`}
+                    value={row.parameters}
+                    onChange={(v) => updateRow(i, { parameters: v })}
+                  />
+                </FieldLabel>
+                <FieldLabel label="Status">
+                  <StatusSelect
+                    ariaLabel={`Status for ${label}`}
+                    value={row.status}
+                    onChange={(v) => updateRow(i, { status: v })}
+                  />
+                </FieldLabel>
               </div>
-              <ParametersInput
-                ariaLabel={`Parameters for ${label}`}
-                value={row.parameters}
-                onChange={(v) => updateRow(i, { parameters: v })}
-              />
-              <StatusSelect
-                ariaLabel={`Status for ${label}`}
-                value={row.status}
-                onChange={(v) => updateRow(i, { status: v })}
-              />
-              <NotesInput
-                ariaLabel={`Notes for ${label}`}
-                value={row.notes}
-                onChange={(v) => updateRow(i, { notes: v })}
-              />
+              <FieldLabel className="mt-3" label="Notes">
+                <NotesTextarea
+                  ariaLabel={`Notes for ${label}`}
+                  value={row.notes}
+                  onChange={(v) => updateRow(i, { notes: v })}
+                />
+              </FieldLabel>
             </div>
           )
         })}
@@ -369,10 +475,6 @@ function BaseScopeWorksheetCard({
     </div>
   )
 }
-
-// ────────────────────────────────────────────────────────────────────
-// Block 3b — Per-use-case worksheet card (5 parameter rows)
-// ────────────────────────────────────────────────────────────────────
 
 function UseCaseWorksheetCard({
   useCaseIndex,
@@ -406,7 +508,7 @@ function UseCaseWorksheetCard({
   return (
     <div
       className={[
-        'card-axiom flex min-w-0 flex-col gap-3 border-cribl-border/80 bg-white p-3.5 shadow-ctrl transition sm:p-4',
+        'rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 transition sm:p-4',
         isLocked ? 'opacity-50' : '',
       ].join(' ')}
     >
@@ -423,7 +525,7 @@ function UseCaseWorksheetCard({
           <TierBadge tier={tier} faded={false} />
           {isLocked ? (
             <span
-              className="rounded-md border border-cribl-border bg-cribl-card-body px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted"
+              className="rounded-md border border-cribl-border bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted"
               title={`Out of scope for ${activation.tier} tier — still editable`}
             >
               Out of scope
@@ -431,39 +533,47 @@ function UseCaseWorksheetCard({
           ) : null}
         </div>
       </div>
-      <div className="grid gap-2">
+      <div className="mt-3 grid gap-3">
         {useCase.parameters.map((p, paramIndex) => (
           <div
             key={paramIndex}
-            className="grid grid-cols-1 gap-2 rounded-lg border border-cribl-border/80 bg-cribl-card-body/40 p-2.5 sm:grid-cols-[minmax(0,52px)_minmax(0,1.5fr)_minmax(0,170px)_minmax(0,1.5fr)] sm:items-center sm:gap-2.5"
+            className="rounded-lg border border-cribl-border/80 bg-white p-3"
           >
-            <span className="text-xs font-semibold tabular-nums text-cribl-muted">
-              {PS_PARAMETER_NUMBERS[paramIndex] ?? `${paramIndex + 1}.0`}
-            </span>
-            <ParametersInput
-              ariaLabel={`Parameters for ${headerLabel} parameter ${paramIndex + 1}`}
-              value={p.parameters}
-              onChange={(v) => updateParam(paramIndex, { parameters: v })}
-            />
-            <StatusSelect
-              ariaLabel={`Status for ${headerLabel} parameter ${paramIndex + 1}`}
-              value={p.status}
-              onChange={(v) => updateParam(paramIndex, { status: v })}
-            />
-            <NotesInput
-              ariaLabel={`Notes for ${headerLabel} parameter ${paramIndex + 1}`}
-              value={p.notes}
-              onChange={(v) => updateParam(paramIndex, { notes: v })}
-            />
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,52px)_minmax(0,1fr)_minmax(0,200px)] md:items-start">
+              <div className="min-w-0">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+                  #
+                </p>
+                <p className="m-0 text-sm font-semibold tabular-nums text-cribl-ink">
+                  {PS_PARAMETER_NUMBERS[paramIndex] ?? `${paramIndex + 1}.0`}
+                </p>
+              </div>
+              <FieldLabel label="Parameters (specific logs / tasks)">
+                <ParametersTextarea
+                  ariaLabel={`Parameters for ${headerLabel} parameter ${paramIndex + 1}`}
+                  value={p.parameters}
+                  onChange={(v) => updateParam(paramIndex, { parameters: v })}
+                />
+              </FieldLabel>
+              <FieldLabel label="Status">
+                <StatusSelect
+                  ariaLabel={`Status for ${headerLabel} parameter ${paramIndex + 1}`}
+                  value={p.status}
+                  onChange={(v) => updateParam(paramIndex, { status: v })}
+                />
+              </FieldLabel>
+            </div>
+            <FieldLabel className="mt-3" label="Notes">
+              <NotesTextarea
+                ariaLabel={`Notes for ${headerLabel} parameter ${paramIndex + 1}`}
+                value={p.notes}
+                onChange={(v) => updateParam(paramIndex, { notes: v })}
+              />
+            </FieldLabel>
           </div>
         ))}
       </div>
-      {/*
-       * Footer is a no-op visual breather. We don't surface a "remove
-       * use case" affordance because the gold's row layout is fixed:
-       * always 5 use case slots, always 5 parameters each.
-       */}
-      <p className="m-0 text-[10px] text-cribl-muted">
+      <p className="m-0 mt-3 text-[10px] text-cribl-muted">
         {PS_PARAMETERS_PER_USE_CASE} parameter rows · gold-fixed layout
       </p>
     </div>
@@ -473,6 +583,25 @@ function UseCaseWorksheetCard({
 // ────────────────────────────────────────────────────────────────────
 // Tiny shared inputs
 // ────────────────────────────────────────────────────────────────────
+
+function FieldLabel({
+  label,
+  className,
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={['flex min-w-0 flex-col gap-1', className].filter(Boolean).join(' ')}>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+        {label}
+      </span>
+      {children}
+    </label>
+  )
+}
 
 function StatusSelect({
   value,
@@ -527,7 +656,13 @@ function UseCaseKindSelect({
   )
 }
 
-function NotesInput({
+/**
+ * Multi-line, vertically resizable Notes input. Mirrors the Stakeholder(s)
+ * textarea pattern from the source form (`field-strong min-h-10 resize-y`,
+ * `rows={2}`) so the user can drag the bottom-right corner to give long
+ * notes more breathing room.
+ */
+function NotesTextarea({
   value,
   onChange,
   ariaLabel,
@@ -537,18 +672,24 @@ function NotesInput({
   ariaLabel: string
 }) {
   return (
-    <input
-      type="text"
+    <textarea
       aria-label={ariaLabel}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder="Notes…"
-      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm text-cribl-ink placeholder:text-cribl-muted/70"
+      rows={2}
+      placeholder="Notes — drag the bottom-right corner to expand…"
+      className="field-strong min-h-10 w-full resize-y text-sm text-cribl-ink placeholder:text-cribl-muted/70"
     />
   )
 }
 
-function ParametersInput({
+/**
+ * Multi-line, vertically resizable Parameters input. Same expandable
+ * pattern as `NotesTextarea` so users describing complex source / task
+ * lists ("/var/log/*.log + container stdout + Lambda CloudWatch
+ * groups") aren't squeezed into a single line.
+ */
+function ParametersTextarea({
   value,
   onChange,
   ariaLabel,
@@ -558,13 +699,13 @@ function ParametersInput({
   ariaLabel: string
 }) {
   return (
-    <input
-      type="text"
+    <textarea
       aria-label={ariaLabel}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder="Specific logs / tasks…"
-      className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm text-cribl-ink placeholder:text-cribl-muted/70"
+      rows={2}
+      placeholder="Specific logs / tasks — drag to expand…"
+      className="field-strong min-h-10 w-full resize-y text-sm text-cribl-ink placeholder:text-cribl-muted/70"
     />
   )
 }
