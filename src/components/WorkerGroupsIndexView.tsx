@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import type { PlanState, WorkerGroupRow } from '../types/planTypes'
+import type { PlanState, WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
 import { newId } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { effectiveIngestEgressGbdForWg, sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
@@ -12,6 +12,64 @@ type Props = {
   plan: PlanState
   setPlan: Dispatch<SetStateAction<PlanState>>
   onOpenGroup: (id: string) => void
+  /**
+   * v2.0: which kind of worker-group row this view shows. Defaults to
+   * `'stream'` (the original "Worker Groups" index). Pass `'edge'` to
+   * render the same UI scoped to Cribl Edge fleets — only the headline,
+   * placeholder copy, and empty-state add hint change.
+   */
+  kind?: WorkerGroupKind
+}
+
+const COPY: Record<WorkerGroupKind, {
+  pageTitle: string
+  pageDescription: string
+  searchPlaceholder: string
+  searchAriaLabel: string
+  unnamed: string
+  emptyState: string
+  noMatches: string
+  selectedNoun: (n: number) => string
+  bulkDeleteVerb: (n: number) => string
+  bulkUnassignVerb: (n: number) => string
+  bulkDuplicateConfirm: (n: number) => string
+  bulkDeleteConfirm: (n: number, sources: string) => string
+  noSelectionLine1: string
+}> = {
+  stream: {
+    pageTitle: 'Worker Groups',
+    pageDescription:
+      'Browse all worker groups. Filter to narrow the list, then use Bulk Actions to apply changes across many at once.',
+    searchPlaceholder: 'Search worker groups…',
+    searchAriaLabel: 'Search worker groups',
+    unnamed: 'Unnamed worker group',
+    emptyState: 'No worker groups yet — use + Add Worker Group in the left nav.',
+    noMatches: 'No worker groups match the current filters.',
+    selectedNoun: (n) => `${n} selected`,
+    bulkDeleteVerb: (n) => `Delete ${n}…`,
+    bulkUnassignVerb: () => 'Unassign all sources…',
+    bulkDuplicateConfirm: (n) => `Duplicate ${n} worker groups? Sources are not cloned.`,
+    bulkDeleteConfirm: (n, sources) =>
+      `Delete ${n} worker group${n === 1 ? '' : 's'}?${sources} This cannot be undone.`,
+    noSelectionLine1: 'No worker groups selected',
+  },
+  edge: {
+    pageTitle: 'Fleets',
+    pageDescription:
+      'Browse all Cribl Edge fleets. Filter to narrow the list, then use Bulk Actions to apply changes across many at once.',
+    searchPlaceholder: 'Search fleets…',
+    searchAriaLabel: 'Search fleets',
+    unnamed: 'Unnamed fleet',
+    emptyState: 'No fleets yet — use + Add Fleet in the left nav.',
+    noMatches: 'No fleets match the current filters.',
+    selectedNoun: (n) => `${n} selected`,
+    bulkDeleteVerb: (n) => `Delete ${n}…`,
+    bulkUnassignVerb: () => 'Unassign all sources…',
+    bulkDuplicateConfirm: (n) => `Duplicate ${n} fleets? Sources are not cloned.`,
+    bulkDeleteConfirm: (n, sources) =>
+      `Delete ${n} fleet${n === 1 ? '' : 's'}?${sources} This cannot be undone.`,
+    noSelectionLine1: 'No fleets selected',
+  },
 }
 
 const NO_CHANGE = '__nochange__'
@@ -37,7 +95,8 @@ type WgIndexRow = {
   detail: string
 }
 
-export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
+export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stream' }: Props) {
+  const copy = COPY[kind]
   const [q, setQ] = useState('')
   const [onlyWithSources, setOnlyWithSources] = useState(false)
   const [onlyEmpty, setOnlyEmpty] = useState(false)
@@ -47,7 +106,14 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
   const [filterOpen, setFilterOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
 
-  const groups = plan.workerGroups
+  // Only show rows for this section's kind. Using `useMemo` keeps the
+  // reference stable while the underlying plan stays put — important for the
+  // selection-cleanup `useEffect` below, which would otherwise treat every
+  // re-render as a topology change and rebuild the selection set.
+  const groups = useMemo(
+    () => plan.workerGroups.filter((g) => g.kind === kind),
+    [plan.workerGroups, kind],
+  )
 
   // Drop selections that no longer exist (after a bulk delete or external edit).
   useEffect(() => {
@@ -74,7 +140,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
         const disk = parseGb(g.diskOneDayGb)
         return {
           id: g.id,
-          name: g.wg.trim() || 'Unnamed worker group',
+          name: g.wg.trim() || copy.unnamed,
           nSources,
           volGb: vol,
           effIngest: cap?.ingestGb ?? null,
@@ -104,7 +170,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
         return c.kind === 'canonical' && c.value === hostingFilter
       })
       .sort((a, b) => b.volGb - a.volGb)
-  }, [groups, plan, q, onlyWithSources, onlyEmpty, onlyOver1Tb, hostingFilter])
+  }, [groups, plan, q, onlyWithSources, onlyEmpty, onlyOver1Tb, hostingFilter, copy.unnamed])
 
   const maxSources = Math.max(0, ...rows.map((r) => r.nSources))
 
@@ -177,10 +243,10 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
     if (count === 0) {
       return
     }
+    const noun = kind === 'edge' ? 'fleet' : 'worker group'
+    const plural = count === 1 ? '' : 's'
     const ok = window.confirm(
-      `Unassign every source from ${count} worker group${count === 1 ? '' : 's'}? The worker group${
-        count === 1 ? '' : 's'
-      } will remain; sources will go back to the unassigned pool.`,
+      `Unassign every source from ${count} ${noun}${plural}? The ${noun}${plural} will remain; sources will go back to the unassigned pool.`,
     )
     if (!ok) {
       return
@@ -203,7 +269,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
       return
     }
     if (count > 5) {
-      const ok = window.confirm(`Duplicate ${count} worker groups? Sources are not cloned.`)
+      const ok = window.confirm(copy.bulkDuplicateConfirm(count))
       if (!ok) {
         return
       }
@@ -213,7 +279,10 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
       const copies: WorkerGroupRow[] = targets.map((g) => ({
         ...g,
         id: newId(),
-        wg: `${(g.wg || 'Unnamed worker group').trim()} (copy)`,
+        // Each duplicate inherits the source row's `kind`, so cloning a
+        // Stream WG never accidentally creates a Fleet (or vice versa).
+        kind: g.kind,
+        wg: `${(g.wg || copy.unnamed).trim()} (copy)`,
       }))
       return { ...p, workerGroups: [...p.workerGroups, ...copies] }
     })
@@ -229,9 +298,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
     const sourceLine = sourcesAffected
       ? ` ${sourcesAffected} assigned source${sourcesAffected === 1 ? '' : 's'} will be unassigned (not deleted).`
       : ''
-    const ok = window.confirm(
-      `Delete ${count} worker group${count === 1 ? '' : 's'}?${sourceLine} This cannot be undone.`,
-    )
+    const ok = window.confirm(copy.bulkDeleteConfirm(count, sourceLine))
     if (!ok) {
       return
     }
@@ -255,19 +322,16 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Worker Groups</h2>
-          <p className="m-0 mt-1.5 text-sm text-cribl-muted">
-            Browse all worker groups. Filter to narrow the list, then use Bulk Actions to apply changes across many at
-            once.
-          </p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">{copy.pageTitle}</h2>
+          <p className="m-0 mt-1.5 text-sm text-cribl-muted">{copy.pageDescription}</p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
           <SearchInput
-            id="wg-index-q"
+            id={kind === 'edge' ? 'fleet-index-q' : 'wg-index-q'}
             value={q}
             onChange={setQ}
-            placeholder="Search worker groups…"
-            ariaLabel="Search worker groups"
+            placeholder={copy.searchPlaceholder}
+            ariaLabel={copy.searchAriaLabel}
             className="w-full sm:w-72"
           />
           <div className="flex items-center gap-2 self-end">
@@ -382,9 +446,10 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
             >
               {selectionCount === 0 ? (
                 <div className="space-y-2 text-sm text-cribl-muted">
-                  <p className="m-0 font-medium text-cribl-ink">No worker groups selected</p>
+                  <p className="m-0 font-medium text-cribl-ink">{copy.noSelectionLine1}</p>
                   <p className="m-0">
-                    Tick the checkbox on a worker group card, or open <span className="text-cribl-ink">Filter</span> →
+                    Tick the checkbox on a {kind === 'edge' ? 'fleet' : 'worker group'} card, or open{' '}
+                    <span className="text-cribl-ink">Filter</span> →
                     <span className="text-cribl-ink"> Select all matching</span>.
                   </p>
                 </div>
@@ -441,7 +506,11 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
                       type="button"
                       onClick={bulkDuplicate}
                       className="h-9 flex-1 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
-                      title="Clone each selected worker group with a (copy) suffix; sources are not cloned"
+                      title={
+                        kind === 'edge'
+                          ? 'Clone each selected fleet with a (copy) suffix; sources are not cloned'
+                          : 'Clone each selected worker group with a (copy) suffix; sources are not cloned'
+                      }
                     >
                       Duplicate
                     </button>
@@ -452,9 +521,13 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
                       type="button"
                       onClick={bulkUnassignSources}
                       className="h-9 w-full rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-900 hover:bg-amber-100"
-                      title="Detach every source from the selected worker groups; the worker groups remain"
+                      title={
+                        kind === 'edge'
+                          ? 'Detach every source from the selected fleets; the fleets remain'
+                          : 'Detach every source from the selected worker groups; the worker groups remain'
+                      }
                     >
-                      Unassign all sources…
+                      {copy.bulkUnassignVerb(selectionCount)}
                     </button>
                   </div>
 
@@ -464,7 +537,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
                       onClick={bulkDelete}
                       className="h-9 w-full rounded-lg border border-rose-200 bg-rose-600 px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700"
                     >
-                      Delete {selectionCount}…
+                      {copy.bulkDeleteVerb(selectionCount)}
                     </button>
                   </div>
                 </div>
@@ -476,11 +549,15 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
 
       {groups.length === 0 ? (
         <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
-          No worker groups yet — use <strong>+ Add Worker Group</strong> in the left nav.
+          {kind === 'edge' ? (
+            <>No fleets yet — use <strong>+ Add Fleet</strong> in the left nav.</>
+          ) : (
+            <>No worker groups yet — use <strong>+ Add Worker Group</strong> in the left nav.</>
+          )}
         </p>
       ) : rows.length === 0 ? (
         <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">
-          No worker groups match the current filters.
+          {copy.noMatches}
           {activeFilterCount > 0 ? (
             <>
               {' '}

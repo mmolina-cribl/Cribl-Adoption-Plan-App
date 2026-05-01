@@ -173,24 +173,21 @@ function parseSourceSummarySheet(
       break
     }
     const base = defaultSourceRow(out.length, defaultWorkerGroupId)
-    const sourceS = strAtMap(row, col, 'Source')
-    const dIdx = col.get('Display name') ?? -1
-    const display =
-      dIdx >= 0
-        ? strAtMap(row, col, 'Display name') || sourceS || `Source ${out.length + 1}`
-        : sourceS || `Source ${out.length + 1}`
     const typeIdx = col.get('Type') ?? -1
     const tRaw = strCell(row, typeIdx)
+    // Physical location(s) [v0.9.1] takes precedence over Region(s) [v0.8.6];
+    // both alias the same `physicalLocations` field on the import column map,
+    // so this single read picks up whichever header the workbook uses.
+    const physical = strAtMap(row, col, 'Physical location(s)') || strAtMap(row, col, 'Region(s)')
     out.push({
       ...base,
       id: newId(),
       workerGroupId: defaultWorkerGroupId,
-      displayName: display,
       source: strAtMap(row, col, 'Source'),
       securityOrObs: strAtMap(row, col, 'Security or Observability or both data?'),
       streamOrEdge: strAtMap(row, col, 'Stream or Edge?'),
       type: normalizeVolumeType(tRaw) as SourceSummaryRow['type'],
-      regions: strAtMap(row, col, 'Region(s)'),
+      physicalLocations: physical,
       sourceTile: strAtMap(row, col, 'Source tile'),
       pipelineUsecase: strAtMap(row, col, 'Pipeline usecase'),
       destinations: strAtMap(row, col, 'Destinations'),
@@ -199,6 +196,7 @@ function parseSourceSummarySheet(
       complianceRelated: toBool(cellAt(row, col.get('Compliance related?') ?? -1)),
       dataCriticality: strAtMap(row, col, 'Data criticality'),
       stakeholders: strAtMap(row, col, 'Stakeholder(s) (team / line of business)'),
+      currentCollection: strAtMap(row, col, 'Current Collection'),
       isCurrent: toBool(cellAt(row, col.get('Current?') ?? -1)),
       targetOnboardStart: cellToString(cellAt(row, col.get('Target Onboarding Start') ?? -1)),
       targetOnboardEnd: cellToString(cellAt(row, col.get('Target Onboarding End') ?? -1)),
@@ -215,7 +213,9 @@ function parseSourceSummarySheet(
       strategic: strAtMap(row, col, 'Strategic'),
       onboardingEffort: strAtMap(row, col, 'Onboarding Effort'),
       politics: strAtMap(row, col, 'Politics'),
-      additionalNotes: strAtMap(row, col, 'Additional notes'),
+      // v0.9.1 only dropped two per-source columns from the gold template:
+      // Display name and Additional notes. Both are read and discarded here
+      // so v0.8.6 workbooks still import without losing the rest of the row.
     })
   }
   return out
@@ -298,6 +298,10 @@ function parseCopySourcesWg(
     }
     wgs.push({
       id: newId(),
+      // v0.8.6 topology only has worker groups; PR B's multi-sheet importer
+      // sets `kind: 'edge'` for entries that come from `fl<name>_fleet`
+      // sheets. Until then every imported row is a Stream worker group.
+      kind: 'stream',
       wg: wgName,
       ingestGbd: cellToNumStr(cellAt(row, colW('Ingest (GB/day)'))),
       egressGbd: cellToNumStr(cellAt(row, colW('Egress (GB/Day)'))),

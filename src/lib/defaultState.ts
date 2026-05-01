@@ -1,15 +1,21 @@
-import { newId, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupRow } from '../types/planTypes'
+import {
+  newId,
+  type PlanState,
+  type SourceSummaryRow,
+  type SourceVolumeRow,
+  type WorkerGroupKind,
+  type WorkerGroupRow,
+} from '../types/planTypes'
 
-function defaultSourceRow(sourceIndex0: number, workerGroupId: string): SourceSummaryRow {
+function defaultSourceRow(_sourceIndex0: number, workerGroupId: string): SourceSummaryRow {
   return {
     id: newId(),
     workerGroupId,
-    displayName: `Source ${sourceIndex0 + 1}`,
     source: '',
     securityOrObs: '',
     streamOrEdge: '',
     type: '',
-    regions: '',
+    physicalLocations: '',
     sourceTile: '',
     pipelineUsecase: '',
     destinations: '',
@@ -18,6 +24,7 @@ function defaultSourceRow(sourceIndex0: number, workerGroupId: string): SourceSu
     complianceRelated: false,
     dataCriticality: '',
     stakeholders: '',
+    currentCollection: '',
     isCurrent: false,
     targetOnboardStart: '',
     targetOnboardEnd: '',
@@ -34,7 +41,6 @@ function defaultSourceRow(sourceIndex0: number, workerGroupId: string): SourceSu
     strategic: '',
     onboardingEffort: '',
     politics: '',
-    additionalNotes: '',
   }
 }
 
@@ -55,9 +61,10 @@ function defaultVolumeRow(workerGroupId: string): SourceVolumeRow {
   }
 }
 
-function defaultWorkerGroupRow(): WorkerGroupRow {
+function defaultWorkerGroupRow(kind: WorkerGroupKind = 'stream'): WorkerGroupRow {
   return {
     id: newId(),
+    kind,
     wg: '',
     ingestGbd: '',
     egressGbd: '',

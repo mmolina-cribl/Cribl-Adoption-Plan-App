@@ -243,6 +243,117 @@ which assumes the user lands here.
 
 ---
 
+## v2.0 schema rewrite (gold v0.9.1)
+
+The Cribl Professional Services team ships a new gold Excel template
+periodically. v0.9.1 (April 2026) is a structural break from v0.8.6:
+
+| Concern | v0.8.6 | v0.9.1 |
+|---|---|---|
+| Per-source data | one `Source summary` sheet for the whole plan | one sheet per worker group / fleet (`wg<name>` for Stream, `fl<name>_fleet` for Edge) |
+| Topology overview | one `Copy of Sources and WGs` sheet | inferred top-of-file `Stream Overview` (rolled up from `wg:*` sheets) + `Edge Overview` (rolled up from `fl:*` sheets) |
+| Activations | not modeled | new `PS Use Case Worksheet` with tier (Silver / Gold / Platinum), base scope, and use-case board |
+| Region semantics | `Region(s)` (cloud-region biased) | `Physical location(s)` (Edge fleets can live on hosts, not regions) |
+| Migration source field | only present on the topology sheet | promoted to the per-WG sheet as `Current Collection` |
+| Per-source columns dropped | n/a | only `Display name` and `Additional notes`. The "value lever" fields (Operational / Risk Reduction / Strategic / Onboarding Effort / Politics) **stay** on every per-WG / per-Fleet sheet — an early read of the gold based on a stale `SAMPLE` sheet incorrectly suggested they were dropped. |
+
+The app's response is a major version bump (`v2.0.0`) split into three
+sequential PRs so each lands as a reviewable, releasable slice:
+
+### PR A — `feat/v2.0-rc.1-data-model` (this PR)
+
+**Scope.** Align the in-app data model and left-nav structure to
+v0.9.1's worker-group / fleet split, without yet changing the Excel
+format.
+
+Data model changes (see [`src/types/planTypes.ts`](./src/types/planTypes.ts)):
+
+- `SourceSummaryRow` drops 2 fields (`displayName`, `additionalNotes`).
+  The 5 "value lever" fields (`operational`, `riskReduction`,
+  `strategic`, `onboardingEffort`, `politics`) **stay** — they are
+  still on every per-WG / per-Fleet sheet of the gold v0.9.1 template.
+- `regions` → `physicalLocations`. New `currentCollection` field.
+- `WorkerGroupRow` gains `kind: 'stream' | 'edge'`. `'stream'` is the
+  default and what every imported v0.8.6 row, hydrated v1.x KV blob,
+  and "Add Worker Group" click produces. `'edge'` is reserved for the
+  new "Add Fleet" flow.
+- New `sourceLabel(row, index)` helper replaces every inline
+  `row.displayName?.trim() || \`Source N\`` fallback. The Source field
+  is now the row's identity — the inline pencil in the source detail
+  view writes back to `source` directly.
+
+UI changes:
+
+- [`PlanSidebar`](./src/components/PlanSidebar.tsx) splits the worker-
+  group section into two parallel sections (`Worker Groups` + `Fleets`).
+  Each has its own header, list, chevron, and add button. The add
+  button passes the section's `kind` to the parent so the dialog
+  reuses the same component with kind-aware copy.
+- [`AddWorkerGroupDialog`](./src/components/AddWorkerGroupDialog.tsx)
+  now takes a `kind` prop. Title / placeholder / submit-button copy
+  switch between "worker group" and "fleet" automatically.
+- [`WorkerGroupsIndexView`](./src/components/WorkerGroupsIndexView.tsx)
+  is parameterized by `kind` (defaults to `'stream'`). Mounted twice
+  in [`App.tsx`](./src/App.tsx): once at `mainView === 'workerGroups'`
+  with `kind="stream"`, once at `mainView === 'fleets'` with
+  `kind="edge"`. Empty-state copy, search placeholder, bulk-action
+  confirms, and unnamed-row fallback all switch on the prop.
+- The wizard catalog
+  ([`src/components/sourceForm/sourceFormWizardFieldCatalog.ts`](./src/components/sourceForm/sourceFormWizardFieldCatalog.ts))
+  adds 2 new steps for `physicalLocations` and `currentCollection`
+  and keeps every value-lever step.
+
+I/O changes (transitional, v0.8.6 layout still in use):
+
+- Legacy v0.8.6 import / export still works as a transitional safety
+  net. The exporter writes the 5 value-lever fields and emits `''`
+  only for `Display name` and `Additional notes`, so the gold v0.8.6
+  shell's column borders / number formats stay intact.
+- `Region(s)` (v0.8.6) is accepted on import as a fallback alias for
+  `Physical location(s)` (v0.9.1).
+- KV hydrate (`usePlanStorage.normalizePlan`) carries `regions` into
+  `physicalLocations` and defaults missing `kind` to `'stream'`, so a
+  v1.3.x saved plan opens cleanly in v2.0 without losing data.
+
+**Out of scope.** Sheet renames, multi-sheet enumeration, the
+`PS Use Case Worksheet`, and the per-WG / per-Fleet sheet creation
+on add. Those are PR B and PR C below.
+
+### PR B — `feat/v2.0-rc.2-multi-sheet`
+
+Replace `public/adoption-plan-empty.xlsx` with a sanitized v0.9.1
+file. Rewrite [`planWorkbookLayout.ts`](./src/lib/planWorkbookLayout.ts),
+[`importWorkbook.ts`](./src/lib/importWorkbook.ts),
+[`exportWorkbook.ts`](./src/lib/exportWorkbook.ts), and
+[`adoptionPlanShellExceljs.ts`](./src/lib/adoptionPlanShellExceljs.ts)
+to:
+
+- Generate one sub-sheet per `WorkerGroupRow` on export
+  (`wg<sanitized-name>` for `kind === 'stream'`,
+  `fl<sanitized-name>_fleet` for `kind === 'edge'`). Adding a new
+  worker group / fleet in the UI naturally produces a new sub-sheet
+  on the next export — there is no separate "create sheet" action.
+- Roll up `Stream Overview` from every `wg:*` sub-sheet and
+  `Edge Overview` from every `fl:*_fleet` sub-sheet, with hyperlinks
+  back to the source rows.
+- Auto-detect v0.8.6 vs v0.9.1 by sheet presence on import; always
+  write v0.9.1 on export. The `SAMPLE` and `input_data` sheets are
+  treated as static and emitted verbatim from the shell.
+
+### PR C — `feat/v2.0-ps-use-cases`
+
+New `PlanState.activation` with tier, base scope (6 items), and a
+use-case board (5 use cases × parameters). New left-nav entry and
+view. Round-trip the `PS Use Case Worksheet` sheet (rows 3–7 base
+scope, rows 11–15 overview, rows 19–46 worksheet). The PS Use Case
+Worksheet is independent of the per-WG / per-Fleet sheets — it does
+not influence which sub-sheets are generated.
+
+**Tag history.** `v2.0.0-rc.1` (PR A merge), `v2.0.0-rc.2` (PR B
+merge), `v2.0.0` (PR C merge + GitHub release).
+
+---
+
 ## Local-dev fallback
 
 When `window.CRIBL_API_URL` is undefined (i.e. the app is opened

@@ -10,7 +10,7 @@ import { getOnboardingStatusCounts, ONBOARDING_STATUS_COLORS } from '../lib/onbo
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { PlanResourceMap } from './PlanResourceMap'
 import { SearchInput } from './SearchInput'
-import type { PlanState } from '../types/planTypes'
+import { sourceLabel, type PlanState } from '../types/planTypes'
 
 const WG_SNAPSHOT_PAGE_SIZE = 2
 
@@ -292,12 +292,12 @@ export function PlanDataOverview({
     critCounts.set(key, (critCounts.get(key) || 0) + 1)
   }
   const vols = plan.sourceSummary
-    .map((r) => ({ label: r.displayName?.trim() || 'Source', value: parseGb(r.avgDailyGb) }))
+    .map((r, i) => ({ label: sourceLabel(r, i), value: parseGb(r.avgDailyGb) }))
     .filter((x) => Number.isFinite(x.value) && x.value >= 0)
     .sort((a, b) => b.value - a.value)
   const topVols = vols.slice(0, 6)
   const summaryTopoVols = plan.sourceSummary
-    .map((r) => ({ label: r.displayName?.trim() || r.source?.trim() || 'Source', value: parseGb(r.avgDailyGb) }))
+    .map((r, i) => ({ label: sourceLabel(r, i), value: parseGb(r.avgDailyGb) }))
     .filter((x) => Number.isFinite(x.value) && x.value >= 0)
   const tableTopoVols = plan.sourceVolume
     .map((r) => ({ label: r.source?.trim() || 'Source', value: parseGb(r.dailyVolumeGb) }))
@@ -314,7 +314,7 @@ export function PlanDataOverview({
 
   const regionCounts = new Map<string, number>()
   for (const r of plan.sourceSummary) {
-    for (const reg of parseMultiValue(r.regions || '')) {
+    for (const reg of parseMultiValue(r.physicalLocations || '')) {
       regionCounts.set(reg, (regionCounts.get(reg) || 0) + 1)
     }
   }
@@ -439,13 +439,13 @@ export function PlanDataOverview({
             </div>
           </div>
           <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
-            <p className="m-0 text-sm font-semibold text-cribl-ink">Regions</p>
+            <p className="m-0 text-sm font-semibold text-cribl-ink">Physical locations</p>
             <p className="m-0 mt-0.5 text-xs text-cribl-muted">
-              Counts by region tag (a source with several regions adds to each)
+              Counts by location tag (a source with several locations adds to each)
             </p>
             <div className="mt-3">
               {topRegions.length === 0 ? (
-                <p className="m-0 text-sm text-cribl-muted">No region tags yet.</p>
+                <p className="m-0 text-sm text-cribl-muted">No location tags yet.</p>
               ) : (
                 <MiniBars items={topRegions} />
               )}

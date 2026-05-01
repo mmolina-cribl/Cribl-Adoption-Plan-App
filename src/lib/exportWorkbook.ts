@@ -51,7 +51,16 @@ function dataOptimizationPercentForExcel(s: string): number | string {
   return n
 }
 
-/** One data row; order must follow `SOURCE_HEADERS` (see planWorkbookLayout). */
+/**
+ * One data row; order must follow `SOURCE_HEADERS` (see planWorkbookLayout).
+ *
+ * v2.0 transitional shape: the v0.8.6 export path emits all 28 columns. Only
+ * `Additional notes` (the last column) was actually dropped in v0.9.1, so we
+ * write `''` for that slot and keep every other column populated from the
+ * data model. PR B switches the export to the v0.9.1 multi-sheet emit (per-
+ * WG / per-Fleet sub-sheets); until then this preserves the gold shell's
+ * column borders, number formats, and theme references.
+ */
 function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | boolean | Date)[] {
   return [
     s.source,
@@ -81,24 +90,43 @@ function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | 
     s.strategic,
     s.onboardingEffort,
     s.politics,
-    s.additionalNotes,
+    '',
   ]
 }
 
-/** Map a Source summary column title (any layout in `ALL_SOURCE_IMPORT_HEADER_NAMES`) to a cell value. */
+/**
+ * Map a Source summary column title (any layout in `ALL_SOURCE_IMPORT_HEADER_NAMES`)
+ * to a cell value.
+ *
+ * Only two columns the v2.0 model deliberately doesn't carry — `Display name`
+ * and `Additional notes` — return `''`. Every other column maps to a real
+ * field. `Region(s)` (v0.8.6) and `Physical location(s)` (v0.9.1) both read
+ * from `physicalLocations`. `Worker Group` / `Fleet` returns the WG/Fleet
+ * name resolved from `workerGroupId` so the v0.9.1 per-WG / per-Fleet sheet
+ * can populate the redundant column the gold template requires.
+ */
 export function sourceSummaryValueForHeaderName(
   name: string,
   s: SourceSummaryRow,
+  ctx?: { plan?: PlanState },
 ): string | number | boolean | Date | null | undefined {
   switch (name) {
     case 'Display name':
-      return s.displayName
+      return ''
     case 'Source':
       return s.source
     case 'Type':
       return s.type
+    case 'Physical location(s)':
     case 'Region(s)':
-      return s.regions
+      return s.physicalLocations
+    case 'Current Collection':
+      return s.currentCollection
+    case 'Worker Group':
+    case 'Fleet': {
+      const wg = ctx?.plan?.workerGroups.find((w) => w.id === s.workerGroupId)
+      return wg?.wg ?? ''
+    }
     case 'Security or Observability or both data?':
       return s.securityOrObs
     case 'Stream or Edge?':
@@ -152,7 +180,7 @@ export function sourceSummaryValueForHeaderName(
     case 'Politics':
       return s.politics
     case 'Additional notes':
-      return s.additionalNotes
+      return ''
     default:
       return undefined
   }
@@ -281,18 +309,15 @@ export function buildSourcesAoaFirst(plan: PlanState) {
   const explicit = (plan.sourceVolume ?? []).filter((s) => String(s.source ?? '').trim() !== '')
   const seen = new Set(explicit.map((s) => String(s.source ?? '').trim().toLowerCase()))
   const implied = (plan.sourceSummary ?? [])
-    .map((r) => {
-      const label = String(r.source ?? '').trim() || String(r.displayName ?? '').trim()
-      return { r, label }
-    })
+    .map((r) => ({ r, label: String(r.source ?? '').trim() }))
     .filter(({ label }) => label !== '')
     .filter(({ label }) => !seen.has(label.toLowerCase()))
     .map(({ r, label }) => ({
       source: label,
       dailyVolumeGb: String(r.avgDailyGb ?? '').trim(),
       type: r.type ?? '',
-      region: String(r.regions ?? '').trim(),
-      currentCollection: '',
+      region: String(r.physicalLocations ?? '').trim(),
+      currentCollection: String(r.currentCollection ?? '').trim(),
       criblCollection: '',
       wg: plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg ?? '',
       useCases: '',

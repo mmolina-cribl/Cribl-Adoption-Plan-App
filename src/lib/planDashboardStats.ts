@@ -1,8 +1,16 @@
-import type { PlanState, SourceSummaryRow, SourceVolumeRow, WorkerGroupRow } from '../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupRow } from '../types/planTypes'
 
+/**
+ * v0.9.1 schema: completeness score is computed over every per-WG / per-Fleet
+ * sheet column. v2.0 only stops counting the two columns the gold template
+ * actually dropped (Display name and Additional notes); the value-lever
+ * fields (Operational / Risk Reduction / Strategic / Onboarding Effort /
+ * Politics) are still part of the gold sheet and still count.
+ */
 const SOURCE_ROW_KEYS: (keyof SourceSummaryRow)[] = [
-  'displayName',
   'source',
+  'physicalLocations',
+  'currentCollection',
   'securityOrObs',
   'streamOrEdge',
   'sourceTile',
@@ -29,32 +37,22 @@ const SOURCE_ROW_KEYS: (keyof SourceSummaryRow)[] = [
   'strategic',
   'onboardingEffort',
   'politics',
-  'additionalNotes',
 ]
 
-function isFilledString(v: unknown, key: keyof SourceSummaryRow, row: SourceSummaryRow, index0: number): boolean {
+function isFilledString(v: unknown, key: keyof SourceSummaryRow, row: SourceSummaryRow): boolean {
   if (key === 'isCurrent' || key === 'complianceRelated') {
     return row[key] === true
   }
   if (typeof v !== 'string') {
     return false
   }
-  const t = v.trim()
-  if (!t) {
-    return false
-  }
-  if (key === 'displayName') {
-    if (t === `Source ${index0 + 1}`) {
-      return false
-    }
-  }
-  return true
+  return v.trim() !== ''
 }
 
-export function sourceRowProgress(row: SourceSummaryRow, sourceIndex0: number): { filled: number; total: number; pct: number } {
+export function sourceRowProgress(row: SourceSummaryRow): { filled: number; total: number; pct: number } {
   let filled = 0
   for (const key of SOURCE_ROW_KEYS) {
-    if (isFilledString(row[key], key, row, sourceIndex0)) {
+    if (isFilledString(row[key], key, row)) {
       filled += 1
     }
   }
@@ -76,10 +74,10 @@ function wgLine(w: WorkerGroupRow): string {
 export function buildDashboardSnapshot(plan: PlanState) {
   const sourceRows = plan.sourceSummary.map((r, i) => ({
     id: r.id,
-    name: r.displayName?.trim() || `Source ${i + 1}`,
+    name: sourceLabel(r, i),
     label: r.source?.trim() || '—',
     volGb: r.avgDailyGb?.trim() || '—',
-    ...sourceRowProgress(r, i),
+    ...sourceRowProgress(r),
   }))
 
   const vLines = plan.sourceVolume.map(volumeRowLine)

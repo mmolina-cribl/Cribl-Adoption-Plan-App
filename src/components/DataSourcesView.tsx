@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import type { PlanState, SourceSummaryRow } from '../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
 import { SourceSummaryStack } from './sourceForm/SourceFormPanels'
 
 type Props = {
@@ -42,7 +42,7 @@ export function DataSourcesView({
   )
 
   const s = patch(row.id)
-  const displayLabel = row.displayName?.trim() || `Source ${sourceIndex + 1}`
+  const displayLabel = sourceLabel(row, sourceIndex)
 
   return (
     <div className="min-w-0">
