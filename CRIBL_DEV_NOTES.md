@@ -660,6 +660,24 @@ sheets — it does not influence which `wg<name>` / `fl<name>_fleet`
 sheets the exporter generates, and the importer ingests it
 unconditionally regardless of how many WGs / Fleets the plan has.
 
+#### What shipped in `2.0.0`
+
+- New `Activation` data model on `PlanState` with the gold-true 5/5/3/5×5
+  shape, plus a tolerant `backfillActivation()` normalizer that pads or
+  trims older saved plans to the canonical shape on KV hydrate.
+- Left-nav **Activation** entry (desktop rail + mobile chip bar) that
+  surfaces the picked tier as a small badge.
+- Dedicated `ActivationView` page with three `SectionBox`-wrapped blocks
+  (base scope, use-case overview, use-case worksheet), modal-first
+  `TierPickerDialog` that auto-opens once when `tier === null`, and a
+  sticky `PS Tier: <tier> ▾` chip in the page header that re-opens the
+  picker any time. Out-of-scope use case cards fade to ~50% opacity with
+  an "Out of scope" pill but stay fully editable.
+- Importer + exporter for the `PS Use Case Worksheet` sheet that
+  round-trip every editable cell while leaving every static label /
+  banner / header / dropdown / conditional-formatting block verbatim.
+  Verified end-to-end with a 16-spot-check + 4-shape-assertion smoke.
+
 **Tag history.** `v2.0.0-rc.1` (PR A merge), `v2.0.0-rc.2` (PR B
 merge), `v2.0.0` (PR C merge + GitHub release).
 

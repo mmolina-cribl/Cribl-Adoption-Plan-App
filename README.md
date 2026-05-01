@@ -11,13 +11,15 @@ also works standalone in a browser for local development.
 > worker groups and fleets, the sources feeding them, and the daily
 > volume each one contributes."
 
-> **v2.0 in progress.** The app is being aligned to the v0.9.1 gold
-> Excel template (per-WG sheets, Stream + Edge overviews, PS Use Case
-> Worksheet). PR A — data model alignment — shipped in `2.0.0-rc.1`;
-> PR B — multi-sheet `.xlsx` I/O rewrite + kind-aware resource maps —
-> ships in `2.0.0-rc.2`; the PS Use Case Worksheet (PR C) follows.
-> See [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
-> for the full plan.
+> **v2.0 shipped.** The app is fully aligned to the v0.9.1 gold Excel
+> template (per-WG sheets, Stream + Edge overviews, PS Use Case Worksheet).
+> PR A (data model alignment) shipped in `2.0.0-rc.1`, PR B (multi-sheet
+> `.xlsx` I/O rewrite + kind-aware resource maps) in `2.0.0-rc.2`, and
+> PR C (Activation page — soft tier picker, base-scope checklist,
+> use-case overview, and use-case worksheet board with full PS Use Case
+> Worksheet round-trip) in `2.0.0`. See
+> [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
+> for the full design history.
 
 ## What it does
 
