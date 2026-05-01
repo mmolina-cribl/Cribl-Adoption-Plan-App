@@ -494,12 +494,171 @@ PR B is sized in commits, not one big rewrite:
 
 ### PR C — `feat/v2.0-ps-use-cases`
 
-New `PlanState.activation` with tier, base scope (6 items), and a
-use-case board (5 use cases × parameters). New left-nav entry and
-view. Round-trip the `PS Use Case Worksheet` sheet (rows 3–7 base
-scope, rows 11–15 overview, rows 19–46 worksheet). The PS Use Case
-Worksheet is independent of the per-WG / per-Fleet sheets — it does
-not influence which sub-sheets are generated.
+The gold `PS Use Case Worksheet` sheet has been preserved verbatim by
+the app since v2.0.0-rc.1 (it round-trips as a static, unread tab). PR
+C makes it a first-class citizen of the app: a new "Activation" page
+in the left nav lets the customer + CSE jointly fill it out, and the
+exporter writes their answers back to the same sheet so the resulting
+`.xlsx` is faithful to the gold layout for downstream consumers.
+
+#### What's literally on the gold sheet
+
+The sheet is 5 columns wide (A–E) and 46 rows tall, broken into three
+stacked blocks separated by blank rows. Banner cells (rows 1, 9, 17)
+are merged across A–E and styled like section dividers.
+
+1. **Activation Base Scope** (rows 1–7). A 5-row deliverables
+   checklist — _Architecture_ / _Use Case Planning_ / _Deployment_ /
+   _Source/Destination Configuration_ / _Health Check_. Columns A
+   ("Item") and C ("Deliverable") are pre-filled by the gold and are
+   immutable (the app re-writes them verbatim on export). Column B is
+   a literal `_` separator cell, also static. Columns D ("Status",
+   validated against the four-value list `Not Started / In Progress /
+   Pending Review / Complete`) and E ("Notes", free text) are the
+   editable fields.
+2. **Activation Use Case Overview** (rows 9–15). 5 numbered slots
+   (1.0–5.0 in column A) where the customer picks _what_ each use case
+   is from a fixed dropdown of 12 options (`Data Onboarding`,
+   `Advanced Data Onboarding`, `Data Archiving`, `Data Reduction`,
+   `Logs to Metrics`, `Edge Deployment`, `Data Enrichment`, `Format
+   Conversion`, `Data Routing`, `Cribl Search`, `Container
+   Deployment`, `Other`). Column B is the only editable column.
+3. **Activation Use Case Worksheet** (rows 17–46). The expanded
+   worksheet. 28 data rows total, all sharing the same column layout
+   (Use Case label / Use Case # / Parameters / Status / Notes):
+   - **Rows 19–21** — three "Base Scope" anchor rows (`Base Scope -
+     Primary Source`, `Base Scope - Primary Destination`, `Base Scope
+     - Storage Location`), each with its own free-text Parameters,
+     Status, Notes. These are pre-engagement infrastructure questions,
+     not part of any numbered use case.
+   - **Rows 22–26** — Use Case #1 (Silver), 5 parameter rows
+     (numbered 1.0 through 5.0).
+   - **Rows 27–31** — Use Case #2 (Silver), 5 parameter rows.
+   - **Rows 32–36** — Use Case #3 (Gold), 5 parameter rows.
+   - **Rows 37–41** — Use Case #4 (Platinum), 5 parameter rows.
+   - **Rows 42–46** — Use Case #5 (Platinum), 5 parameter rows.
+
+   The "(Silver) / (Gold) / (Platinum)" labels in column A are
+   **baked into the gold template** — the app re-writes them verbatim
+   on export. They tell the reader which tier of the Cribl PS
+   engagement covers that use case slot.
+
+#### Why "tier" matters in the app
+
+Cribl PS engagements are sold in three tiers: _Silver_, _Gold_, or
+_Platinum_. The tier the customer purchased determines how many use
+cases are in scope:
+
+- _Silver_: 2 use cases (slots #1 and #2).
+- _Gold_: 3 use cases (slots #1, #2, and #3).
+- _Platinum_: all 5 use cases.
+
+The gold spreadsheet itself does **not** carry the customer's tier in
+any cell — it only tags each use case slot with the tier that unlocks
+it. So the app's "tier" is an in-app convenience that lives in
+`PlanState.activation.tier` and persists to KV, but does not
+round-trip through the `.xlsx`.
+
+#### Tier picker UX
+
+This app is used by both the customer and the CSE — often together.
+The tier picker is therefore:
+
+- **Modal-first.** When the user lands on the Activation page and
+  `tier` is unset, a centered modal blocks the page with a friendly
+  prompt ("Which Cribl Professional Services tier is this engagement
+  contracted for? Silver / Gold / Platinum"). The modal is dismissible
+  ("Skip — I'll pick later") so a customer flipping through the app
+  isn't forced to commit before reading the rest.
+- **Sticky.** Once picked, tier is saved into the plan and surfaces in
+  the page header as a small `PS Tier: Gold ▾` chip. Clicking the
+  chip re-opens the modal.
+- **Soft-gating.** Use case cards that fall outside the chosen tier
+  fade to ~50% opacity and gain a small "Out of scope for Silver" pill,
+  but stay fully editable. This is intentional: a CSE pre-staging an
+  upgrade or a customer experimenting before committing to a higher
+  tier should never feel locked out. The visual fade is enough signal.
+- **Skip-friendly.** When `tier` is `null` (skipped or never picked),
+  no fading happens and all 5 use case cards render at full opacity —
+  the page behaves identically to the gold's "no tier knowledge"
+  baseline.
+
+#### `PlanState.activation` shape
+
+Single new top-level field on `PlanState`. All five blocks below
+combined hold ~50 strings; the entire activation object stays well
+under any KV size budget.
+
+```ts
+type ActivationStatus =
+  | 'Not Started'
+  | 'In Progress'
+  | 'Pending Review'
+  | 'Complete'
+
+type ActivationTier = 'Silver' | 'Gold' | 'Platinum'
+
+type Activation = {
+  /**
+   * Customer's PS engagement tier. `null` when unset (modal hasn't
+   * been answered yet, or the user explicitly skipped). Does not
+   * round-trip through the gold .xlsx — purely an in-app convenience
+   * for soft-gating use case cards.
+   */
+  tier: ActivationTier | null
+
+  /** Rows 3–7 (Activation Base Scope). 5 fixed deliverables. */
+  baseScope: { status: ActivationStatus; notes: string }[]  // length 5
+
+  /** Rows 11–15 (Activation Use Case Overview). 5 picker slots. */
+  useCaseOverview: { kind: string }[]  // length 5; '' when unset
+
+  /** Rows 19–21 (Base Scope sub-rows of the worksheet). */
+  baseScopeWorksheet: {
+    parameters: string
+    status: ActivationStatus
+    notes: string
+  }[]  // length 3, ordered: Primary Source / Primary Destination / Storage Location
+
+  /** Rows 22–46 (Use Case worksheet). 5 use cases × 5 parameter rows. */
+  useCases: {
+    parameters: {
+      parameters: string
+      status: ActivationStatus
+      notes: string
+    }[]  // length 5
+  }[]  // length 5
+}
+```
+
+The Item / Deliverable column-A and column-C labels in block 1, the
+"Use Case #" column in block 2, and the "Use Case #N (Tier)" /
+parameter-number labels in block 3 are **not stored in state** — they
+are constants (`psUseCaseLayout.ts`) the UI reads to render row labels
+and the exporter reads to write static column-A and column-B cells
+verbatim. Tier of each use case slot (`'Silver' / 'Silver' / 'Gold' /
+'Platinum' / 'Platinum'`) is derived by index from the same module.
+
+#### I/O round-trip
+
+The `PS Use Case Worksheet` sheet is preserved verbatim by both the
+v0.8.6 and v0.9.1 pipelines today. PR C extends the v0.9.1 importer
+and exporter to also _read from_ and _write into_ this sheet:
+
+- **Importer** parses block 1 (D/E columns of rows 3–7), block 2 (B
+  column of rows 11–15), block 3a (C/D/E columns of rows 19–21), and
+  block 3b (C/D/E columns of rows 22–46). All static labels are
+  ignored at parse time.
+- **Exporter** writes the editable cells in-place, leaves every
+  static label / banner / header row untouched (so the gold's
+  conditional formatting, data validation, fonts, and merged cells
+  all survive verbatim). No new sheets are added; sheet ordering
+  stays as the gold ships it.
+
+The PS Use Case Worksheet is **independent** of the per-WG / per-Fleet
+sheets — it does not influence which `wg<name>` / `fl<name>_fleet`
+sheets the exporter generates, and the importer ingests it
+unconditionally regardless of how many WGs / Fleets the plan has.
 
 **Tag history.** `v2.0.0-rc.1` (PR A merge), `v2.0.0-rc.2` (PR B
 merge), `v2.0.0` (PR C merge + GitHub release).
