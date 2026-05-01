@@ -53,6 +53,8 @@ type Props = {
   /** v2.0: navigate to the Fleets index (only shows kind === 'edge'). */
   onSelectFleets: () => void
   onSelectSources: () => void
+  /** v2.0 PR C: navigate to the Activation page (PS Use Case Worksheet). */
+  onSelectActivation: () => void
   onSelectSettings: () => void
   onSelectWorkerGroup: (id: string) => void
   /**
@@ -458,6 +460,7 @@ export function PlanSidebarRail({
   onSelectWorkerGroups,
   onSelectFleets,
   onSelectSources,
+  onSelectActivation,
   onSelectSettings,
   onSelectWorkerGroup,
   onAddWorkerGroup,
@@ -587,6 +590,22 @@ export function PlanSidebarRail({
           </div>
         </div>
       ) : null}
+
+      <NavButton
+        active={mainView === 'activation'}
+        onClick={onSelectActivation}
+        title="Cribl PS activation worksheet (tier, base scope, use cases)"
+        className="mt-3"
+      >
+        <span className="flex items-center gap-2">
+          <span>Activation</span>
+          {plan.activation.tier ? (
+            <span className="rounded-md bg-cribl-primary-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary-ink">
+              {plan.activation.tier}
+            </span>
+          ) : null}
+        </span>
+      </NavButton>
 
       <NavButton
         active={mainView === 'import'}
@@ -840,6 +859,7 @@ export function PlanNavMobile({
   onSelectWorkerGroups: _onSelectWorkerGroups,
   onSelectFleets: _onSelectFleets,
   onSelectSources: _onSelectSources,
+  onSelectActivation: _onSelectActivation,
   onSelectSettings: _onSelectSettings,
   onSelectWorkerGroup,
   onAddWorkerGroup,
@@ -889,6 +909,14 @@ export function PlanNavMobile({
       </button>
       <button type="button" className={chip(mainView === 'sources')} onClick={_onSelectSources}>
         Sources
+      </button>
+      <button type="button" className={chip(mainView === 'activation')} onClick={_onSelectActivation}>
+        Activation
+        {plan.activation.tier ? (
+          <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+            · {plan.activation.tier}
+          </span>
+        ) : null}
       </button>
       <button type="button" className={chip(mainView === 'settings')} onClick={_onSelectSettings}>
         Settings

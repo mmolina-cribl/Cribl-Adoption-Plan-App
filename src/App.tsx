@@ -12,6 +12,7 @@ import { WorkerGroupDetailView } from './components/WorkerGroupDetailView'
 import { WorkerGroupsIndexView } from './components/WorkerGroupsIndexView'
 import { SourcesIndexView } from './components/SourcesIndexView'
 import { SettingsView } from './components/SettingsView'
+import { ActivationView } from './components/ActivationView'
 import { ConfirmClearDialog } from './components/ConfirmClearDialog'
 import { ConfirmRemoveSourceDialog } from './components/ConfirmRemoveSourceDialog'
 import { ConfirmRemoveWorkerGroupDialog } from './components/ConfirmRemoveWorkerGroupDialog'
@@ -432,6 +433,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onSelectWorkerGroups={() => setMainView('workerGroups')}
                   onSelectFleets={() => setMainView('fleets')}
                   onSelectSources={() => setMainView('sources')}
+                  onSelectActivation={() => setMainView('activation')}
                   onSelectSettings={() => setMainView('settings')}
                   onSelectWorkerGroup={(id) => {
                     setActiveWorkerGroupId(id)
@@ -510,6 +512,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               onSelectWorkerGroups={() => setMainView('workerGroups')}
               onSelectFleets={() => setMainView('fleets')}
               onSelectSources={() => setMainView('sources')}
+              onSelectActivation={() => setMainView('activation')}
               onSelectSettings={() => setMainView('settings')}
               onSelectWorkerGroup={(id) => {
                 setActiveWorkerGroupId(id)
@@ -591,6 +594,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   }}
                 />
               )}
+
+              {mainView === 'activation' && <ActivationView plan={plan} setPlan={setPlan} />}
 
               {mainView === 'settings' && <SettingsView />}
 

@@ -10,6 +10,7 @@ export type MainView =
   | 'workerGroups'
   | 'fleets'
   | 'sources'
+  | 'activation'
   | 'settings'
   | 'workerGroup'
   | 'source'
