@@ -4,13 +4,18 @@ import {
   SHEET_COPY_SOURCES_WG,
   SHEET_COPY_SOURCES_WG_LEGACY,
   SHEET_COPY_SOURCES_WG_TRUNCATED_LEGACY,
+  SHEET_EDGE_OVERVIEW_V091,
   SHEET_SOURCE_SUMMARY,
+  SHEET_STREAM_OVERVIEW_V091,
+  V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
+  V091_OVERVIEW_TABLE2_HEADER_ROW,
 } from './planWorkbookLayout'
-import { newId, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupRow } from '../types/planTypes'
+import { newId, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupKind, type WorkerGroupRow } from '../types/planTypes'
 import { assignWorkerGroupIds } from './workerGroupIds'
 import { buildSourceSummaryColumnMap, findColumnIndexByHeader } from './sourceSummaryColumnMap'
 import { isWorkerSectionTitleRow, rowIsEffectivelyEmptyForTopo } from './topologySheetLayout'
 import { buildTopologyColumnMap, buildWorkerColumnMap } from './topologyWorkbookMap'
+import { classifyV091SheetName } from './v091SheetNames'
 
 export type ImportWorkbookResult =
   | { ok: true; plan: PlanState; warnings: string[] }
@@ -159,18 +164,25 @@ function parseSourceSummarySheet(
   if (findColumnIndexByHeader(header, 'Source') < 0) {
     return []
   }
+  const sourceColIdx = col.get('Source') ?? -1
   const out: SourceSummaryRow[] = []
   for (let r = dataStart; r < aoa.length; r += 1) {
     const row = aoa[r] as unknown[] | undefined
     if (!row) {
-      break
+      continue
     }
-    const scanLen = Math.max(32, row.length, header.length)
-    const allEmpty = row
-      .slice(0, scanLen)
-      .every((c) => c == null || String(c).trim() === '')
-    if (allEmpty) {
-      break
+    // A real source row always has a non-empty `Source` name. The gold
+    // v0.9.1 empty shell ships each per-WG / per-Fleet sub-sheet with a
+    // 19-row scaffold of pre-formatted-but-unfilled rows (data-validation
+    // dropdowns and conditional formatting are pre-applied so the user
+    // sees a usable grid before filling anything in). Those rows have
+    // some cells populated by Excel's defaults (e.g. Type's dropdown
+    // anchor, retention placeholder), so the previous "all-cells-empty"
+    // break would not trigger and we'd import them as 19 × N phantom
+    // sources. Gating on Source-non-empty also fixes the same shape on
+    // v0.8.6 imports (no real source row was ever nameless).
+    if (sourceColIdx < 0 || strCell(row, sourceColIdx) === '') {
+      continue
     }
     const base = defaultSourceRow(out.length, defaultWorkerGroupId)
     const typeIdx = col.get('Type') ?? -1
@@ -338,6 +350,235 @@ function aoaFromSheet(
   return aoa.slice(0, last + 1)
 }
 
+// ─── v0.9.1 multi-sheet parser ────────────────────────────────────────────
+
+/**
+ * Schema version detected on a workbook handed to {@link importAdoptionPlanXlsx}.
+ *
+ * The detector is intentionally biased toward v0.9.1 — if any of the new
+ * sheet markers are present we treat the whole workbook as v0.9.1 even if
+ * the v0.8.6 `Source summary` / `Copy of Sources and WGs` sheets are also
+ * present (the gold v0.8.6 → v0.9.1 migration script left some workbooks
+ * with both shapes side by side, and v0.9.1 always wins).
+ */
+type ImportSchemaVersion = 'v0.9.1' | 'v0.8.6' | 'unknown'
+
+function detectSchemaVersion(sheetNames: string[]): ImportSchemaVersion {
+  if (sheetNames.includes(SHEET_STREAM_OVERVIEW_V091)) {
+    return 'v0.9.1'
+  }
+  if (sheetNames.includes(SHEET_EDGE_OVERVIEW_V091)) {
+    return 'v0.9.1'
+  }
+  if (sheetNames.some((n) => classifyV091SheetName(n) !== null)) {
+    return 'v0.9.1'
+  }
+  if (sheetNames.includes(SHEET_SOURCE_SUMMARY)) {
+    return 'v0.8.6'
+  }
+  return 'unknown'
+}
+
+/**
+ * Result of parsing one Stream Overview / Edge Overview spec table (the lower
+ * table at row 16 onward). Keys are the lowercase, trimmed display name in
+ * column A; values are the raw capacity strings ready to drop straight onto a
+ * matching {@link WorkerGroupRow}. Display names are the post-prefix /
+ * post-suffix body — e.g. `wgdefault` produces key `default`.
+ */
+type OverviewSpecCapacity = {
+  ingestGbd: string
+  egressGbd: string
+  throughputGbd: string
+  workerHosting: string
+  workerCount: string
+  workerDetail: string
+  diskOneDayGb: string
+}
+
+function parseOverviewSpecTable(
+  aoa: unknown[][],
+  warnings: string[],
+  overviewLabel: string,
+): Map<string, OverviewSpecCapacity> {
+  // Both Stream Overview and Edge Overview put the spec-table header on row
+  // 16 (1-based) with data starting on row 17. We tolerate the header
+  // sliding ±2 rows in case a customer manually inserted a row above it.
+  const headerRowIdx = (() => {
+    const target = V091_OVERVIEW_TABLE2_HEADER_ROW - 1 // 0-based
+    for (let i = Math.max(0, target - 2); i < Math.min(aoa.length, target + 3); i += 1) {
+      const row = aoa[i] as unknown[] | undefined
+      if (!row) {
+        continue
+      }
+      const header = row.map((c) => (c == null ? '' : String(c).trim()))
+      const a = header[0]?.toLowerCase()
+      const b = header[1]?.toLowerCase()
+      if ((a === 'wg' || a === 'fl') && b === 'ingest (gb/day)') {
+        return i
+      }
+    }
+    return -1
+  })()
+  const out = new Map<string, OverviewSpecCapacity>()
+  if (headerRowIdx < 0) {
+    warnings.push(
+      `${overviewLabel}: spec table header (row 16) not found; ingest / egress / hosting capacity not imported.`,
+    )
+    return out
+  }
+  const dataStart =
+    headerRowIdx + 1 + (V091_OVERVIEW_TABLE2_FIRST_DATA_ROW - V091_OVERVIEW_TABLE2_HEADER_ROW) - 1
+  for (let r = dataStart; r < aoa.length; r += 1) {
+    const row = aoa[r] as unknown[] | undefined
+    if (rowIsEffectivelyEmptyForTopo(row, 8)) {
+      continue
+    }
+    const name = strCell(row, 0)
+    if (!name) {
+      continue
+    }
+    const key = name.trim().toLowerCase()
+    if (out.has(key)) {
+      // First write wins; subsequent rows with the same display name are
+      // ignored. This shouldn't happen on a well-formed file but guards
+      // against the gold's old "phantom row" pattern (capacity rows without
+      // a matching per-WG sheet).
+      continue
+    }
+    out.set(key, {
+      ingestGbd: cellToNumStr(cellAt(row, 1)),
+      egressGbd: cellToNumStr(cellAt(row, 2)),
+      throughputGbd: cellToNumStr(cellAt(row, 3)),
+      workerHosting: strCell(row, 4),
+      workerCount: strCell(row, 5),
+      workerDetail: strCell(row, 6),
+      diskOneDayGb: cellToNumStr(cellAt(row, 7)),
+    })
+  }
+  return out
+}
+
+/**
+ * Apply capacity from a parsed overview spec table onto every WG / Fleet row
+ * of the matching `kind`. Display-name match is case-insensitive on the
+ * sheet-name body (the importer set `wg.wg` to that body when the per-WG
+ * sheet was discovered).
+ *
+ * Capacity fields are only written if the parsed value is non-empty so a
+ * partially-filled overview table doesn't blank out per-WG data the
+ * exporter put there from a previous round-trip.
+ */
+function applyOverviewCapacity(
+  workerGroups: WorkerGroupRow[],
+  capacity: Map<string, OverviewSpecCapacity>,
+  kind: WorkerGroupKind,
+): void {
+  for (const wg of workerGroups) {
+    if (wg.kind !== kind) {
+      continue
+    }
+    const cap = capacity.get(wg.wg.trim().toLowerCase())
+    if (!cap) {
+      continue
+    }
+    if (cap.ingestGbd) wg.ingestGbd = cap.ingestGbd
+    if (cap.egressGbd) wg.egressGbd = cap.egressGbd
+    if (cap.throughputGbd) wg.throughputGbd = cap.throughputGbd
+    if (cap.workerHosting) wg.workerHosting = cap.workerHosting
+    if (cap.workerCount) wg.workerCount = cap.workerCount
+    if (cap.workerDetail) wg.workerDetail = cap.workerDetail
+    if (cap.diskOneDayGb) wg.diskOneDayGb = cap.diskOneDayGb
+  }
+}
+
+/**
+ * v0.9.1 multi-sheet importer.
+ *
+ * Per-WG (`wg<name>`) and per-Fleet (`fl<name>_fleet`) sheets are the source
+ * of truth for both worker-group identity and per-source data. Each sheet is
+ * parsed with the same {@link parseSourceSummarySheet} the v0.8.6 path uses
+ * (the column titles overlap intentionally) — the only thing the v0.9.1
+ * dispatcher adds is associating every parsed source row with the right
+ * `workerGroupId` from the start.
+ *
+ * `Stream Overview` / `Edge Overview` are read for capacity only. The top
+ * table (rolled-up sources) is intentionally ignored because it's a write-
+ * only artifact the exporter regenerates each save.
+ */
+function parseV091Workbook(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  wb: any,
+  sheetNames: string[],
+  warnings: string[],
+): { sourceSummary: SourceSummaryRow[]; workerGroups: WorkerGroupRow[] } {
+  const workerGroups: WorkerGroupRow[] = []
+  const sourceSummary: SourceSummaryRow[] = []
+
+  for (const name of sheetNames) {
+    const cls = classifyV091SheetName(name)
+    if (!cls) {
+      continue
+    }
+    const wgId = newId()
+    workerGroups.push({
+      id: wgId,
+      kind: cls.kind,
+      wg: cls.displayName,
+      ingestGbd: '',
+      egressGbd: '',
+      throughputGbd: '',
+      workerHosting: '',
+      workerCount: '',
+      workerDetail: '',
+      diskOneDayGb: '',
+    })
+    const sheet = wb.Sheets[name]
+    if (!sheet) {
+      continue
+    }
+    const aoa = aoaFromSheet(sheet)
+    // `parseSourceSummarySheet` reads the v0.9.1 row-2 header layout
+    // (A=Source, B=Physical location(s), …) via the column-name map. Each
+    // sheet's source rows are tagged with this WG / Fleet's id so post-pass
+    // `assignWorkerGroupIds` short-circuits them through.
+    const rows = parseSourceSummarySheet(aoa, warnings, wgId)
+    sourceSummary.push(...rows)
+  }
+
+  if (workerGroups.length === 0) {
+    warnings.push(
+      'v0.9.1 workbook detected but no per-WG (`wg*`) or per-Fleet (`fl*_fleet`) sheets were found; nothing imported.',
+    )
+  }
+
+  const streamSheet = sheetNames.includes(SHEET_STREAM_OVERVIEW_V091)
+    ? wb.Sheets[SHEET_STREAM_OVERVIEW_V091]
+    : null
+  if (streamSheet) {
+    const cap = parseOverviewSpecTable(
+      aoaFromSheet(streamSheet, false),
+      warnings,
+      SHEET_STREAM_OVERVIEW_V091,
+    )
+    applyOverviewCapacity(workerGroups, cap, 'stream')
+  }
+
+  const edgeSheet = sheetNames.includes(SHEET_EDGE_OVERVIEW_V091)
+    ? wb.Sheets[SHEET_EDGE_OVERVIEW_V091]
+    : null
+  if (edgeSheet) {
+    const cap = parseOverviewSpecTable(
+      aoaFromSheet(edgeSheet, false),
+      warnings,
+      SHEET_EDGE_OVERVIEW_V091,
+    )
+    applyOverviewCapacity(workerGroups, cap, 'edge')
+  }
+
+  return { workerGroups, sourceSummary }
+}
+
 /**
  * Parse an adoption plan .xlsx (same structure as our export) into a PlanState.
  * Safe to run in the browser or Node; pass an ArrayBuffer or shared Uint8Array.
@@ -355,39 +596,65 @@ export function importAdoptionPlanXlsx(
     return { ok: false, error: 'The file is not a valid .xlsx workbook (read failed).' }
   }
   const sn = (wb.SheetNames ?? []) as string[]
-  const getSheet = (name: string) => (sn.includes(name) ? wb.Sheets[name] : null)
-  const ss = getSheet(SHEET_SOURCE_SUMMARY)
-  const cpy =
-    getSheet(SHEET_COPY_SOURCES_WG) ||
-    getSheet(SHEET_COPY_SOURCES_WG_LEGACY) ||
-    getSheet(SHEET_COPY_SOURCES_WG_TRUNCATED_LEGACY)
-  if (!ss) {
-    return { ok: false, error: `Required sheet “${SHEET_SOURCE_SUMMARY}” is missing. Use an export from this app or the official template.` }
-  }
-  if (!cpy) {
-    warnings.push(
-      `Optional topology sheet (“${SHEET_COPY_SOURCES_WG}”, “${SHEET_COPY_SOURCES_WG_LEGACY}”, or legacy “${SHEET_COPY_SOURCES_WG_TRUNCATED_LEGACY}”) is missing; volume and worker data were not imported.`,
-    )
-  }
-
-  const aoaSS = aoaFromSheet(ss)
   const customerName =
     typeof wb.Props?.Subject === 'string' && wb.Props.Subject.trim()
       ? String(wb.Props.Subject).trim()
       : ''
-  const topology = cpy
-    ? parseCopySourcesWg(aoaFromSheet(cpy), warnings)
-    : { sourceVolume: [] as SourceVolumeRow[], workerGroups: [] as WorkerGroupRow[] }
 
-  const sourceSummary = parseSourceSummarySheet(aoaSS, warnings, '')
+  const schema = detectSchemaVersion(sn)
 
-  const plan: PlanState = assignWorkerGroupIds({
-    version: 1,
-    customerName,
-    cseNotes: '',
-    sourceSummary,
-    sourceVolume: topology.sourceVolume,
-    workerGroups: topology.workerGroups,
-  })
-  return { ok: true, plan, warnings }
+  if (schema === 'v0.9.1') {
+    const v091 = parseV091Workbook(wb, sn, warnings)
+    const plan: PlanState = assignWorkerGroupIds({
+      version: 1,
+      customerName,
+      cseNotes: '',
+      sourceSummary: v091.sourceSummary,
+      // v0.9.1 workbooks don't carry the legacy `Copy of Sources and WGs`
+      // topology sheet; per-WG / per-Fleet sheets cover the same ground via
+      // `sourceSummary`. Volume rollup remains an empty array on import and
+      // the app fills it lazily where it still consumes the legacy shape.
+      sourceVolume: [],
+      workerGroups: v091.workerGroups,
+    })
+    return { ok: true, plan, warnings }
+  }
+
+  if (schema === 'v0.8.6') {
+    const ss = wb.Sheets[SHEET_SOURCE_SUMMARY]
+    const cpy =
+      wb.Sheets[SHEET_COPY_SOURCES_WG] ||
+      wb.Sheets[SHEET_COPY_SOURCES_WG_LEGACY] ||
+      wb.Sheets[SHEET_COPY_SOURCES_WG_TRUNCATED_LEGACY]
+    if (!cpy) {
+      warnings.push(
+        `Optional topology sheet (“${SHEET_COPY_SOURCES_WG}”, “${SHEET_COPY_SOURCES_WG_LEGACY}”, or legacy “${SHEET_COPY_SOURCES_WG_TRUNCATED_LEGACY}”) is missing; volume and worker data were not imported.`,
+      )
+    }
+
+    const aoaSS = aoaFromSheet(ss)
+    const topology = cpy
+      ? parseCopySourcesWg(aoaFromSheet(cpy), warnings)
+      : { sourceVolume: [] as SourceVolumeRow[], workerGroups: [] as WorkerGroupRow[] }
+
+    const sourceSummary = parseSourceSummarySheet(aoaSS, warnings, '')
+
+    const plan: PlanState = assignWorkerGroupIds({
+      version: 1,
+      customerName,
+      cseNotes: '',
+      sourceSummary,
+      sourceVolume: topology.sourceVolume,
+      workerGroups: topology.workerGroups,
+    })
+    return { ok: true, plan, warnings }
+  }
+
+  return {
+    ok: false,
+    error:
+      'Could not identify this workbook as a supported adoption plan template. ' +
+      `Expected either a v0.9.1 file (with “${SHEET_STREAM_OVERVIEW_V091}” / “${SHEET_EDGE_OVERVIEW_V091}” or per-WG sheets) ` +
+      `or a v0.8.6 file (with “${SHEET_SOURCE_SUMMARY}”).`,
+  }
 }

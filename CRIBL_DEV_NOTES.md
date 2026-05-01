@@ -410,14 +410,22 @@ Sheet-name sanitization lives in
 
 PR B is sized in commits, not one big rewrite:
 
-1. _Foundation_ (this commit): replace `public/adoption-plan-empty.xlsx`
-   with the gold; add v0.9.1 layout constants to `planWorkbookLayout.ts`;
+1. _Foundation_ (done): replace `public/adoption-plan-empty.xlsx` with
+   the gold; add v0.9.1 layout constants to `planWorkbookLayout.ts`;
    new `v091SheetNames.ts`; rewrite the dev notes section.
-2. _Importer_: detect v0.9.1 by sheet presence, enumerate per-WG / per-
-   Fleet sheets, set `WorkerGroupRow.kind` from the sheet prefix, parse
-   capacity from the overview tables.
-3. _Exporter_: generate per-WG / per-Fleet sheets, regenerate Stream /
-   Edge Overview rollups as plain-text static values.
+2. _Importer_ (done): detect v0.9.1 by sheet presence, enumerate
+   per-WG / per-Fleet sheets, set `WorkerGroupRow.kind` from the sheet
+   prefix, parse capacity from the overview tables. The v0.8.6 path is
+   preserved verbatim and routed only when the workbook has neither a
+   `Stream Overview` / `Edge Overview` sheet nor any sheet name that
+   parses as `wg<name>` / `fl<name>_fleet`. Every per-WG sheet's source
+   rows are tagged with that sheet's freshly-minted `workerGroupId` at
+   parse time, so `assignWorkerGroupIds` is a no-op fast-path. Overview
+   rollups feed only the seven capacity columns onto each matching WG /
+   Fleet — the top "Sources" table is intentionally ignored because
+   it's a write-only artifact the exporter regenerates each save.
+3. _Exporter_ (next): generate per-WG / per-Fleet sheets, regenerate
+   Stream / Edge Overview rollups as plain-text static values.
 4. _Resource-map kind sweep_ (already on the to-do list in PR A's
    handoff): make every `Worker group` copy in `PlanResourceMap`,
    `WorkerGroupResourceMap`, `WorkerGroupDetailView`, and
