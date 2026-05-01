@@ -3,6 +3,8 @@ import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { PopoverButton } from './PopoverButton'
+import { AnimatedBar } from './AnimatedBar'
+import { SearchInput } from './SearchInput'
 
 type Props = {
   plan: PlanState
@@ -311,19 +313,14 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
-          <div className="w-full sm:w-72">
-            <label className="sr-only" htmlFor="src-index-q">
-              Search sources
-            </label>
-            <input
-              id="src-index-q"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search sources…"
-              autoComplete="off"
-              className="h-9 w-full"
-            />
-          </div>
+          <SearchInput
+            id="src-index-q"
+            value={q}
+            onChange={setQ}
+            placeholder="Search sources…"
+            ariaLabel="Search sources"
+            className="w-full sm:w-72"
+          />
           <div className="flex items-center gap-2 self-end">
             <PopoverButton
               label="Filter"
@@ -675,24 +672,40 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
             return (
               <li key={s.id} className="min-w-0">
                 <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenSource(s.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onOpenSource(s.id)
+                    }
+                  }}
+                  aria-label={`Open ${name}`}
+                  title={`Open ${name}`}
                   className={[
-                    'card-axiom flex min-w-0 items-stretch gap-2 border-cribl-border/80 bg-white p-3 shadow-ctrl',
+                    // The whole card is the click target now —
+                    // matches the worker-groups index and the two
+                    // resource maps. The bulk-action checkbox at the
+                    // top-left stops propagation so selecting a row
+                    // never falls through to "open".
+                    'card-axiom flex min-w-0 cursor-pointer items-stretch gap-2 border-cribl-border/80 bg-white p-3 text-left shadow-ctrl transition hover:border-cribl-primary/60 hover:bg-cribl-elevate/70 focus-visible:border-cribl-primary/60 focus-visible:ring-2 focus-visible:ring-cribl-primary/40 focus-visible:outline-none',
                     isSelected ? 'ring-2 ring-cribl-primary/60' : '',
                   ].join(' ')}
                 >
-                  <label className="flex shrink-0 cursor-pointer select-none items-start pt-1.5 pl-1">
+                  <label
+                    className="flex shrink-0 cursor-pointer select-none items-start pt-1.5 pl-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleOne(s.id)}
+                      onClick={(e) => e.stopPropagation()}
                       aria-label={`Select ${name}`}
                     />
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => onOpenSource(s.id)}
-                    className="min-w-0 flex-1 border-0 bg-transparent p-1 text-left hover:bg-cribl-elevate/70"
-                  >
+                  <div className="min-w-0 flex-1 p-1">
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="m-0 min-w-0 truncate text-sm font-semibold text-cribl-ink">{name}</p>
                       {volStr ? (
@@ -712,17 +725,13 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
                         aria-valuemax={100}
                         aria-label={`Onboarding completion ${completionPct}%`}
                       >
-                        <div
-                          className="h-full rounded-full bg-cribl-blue"
-                          style={{ width: `${completionPct}%` }}
-                        />
+                        <AnimatedBar pct={completionPct} />
                       </div>
                       <span className="shrink-0 text-[11px] tabular-nums text-cribl-muted">
                         {completionLabel}
                       </span>
                     </div>
-                    <p className="m-0 mt-2 text-[11px] text-cribl-muted">Click to open</p>
-                  </button>
+                  </div>
                 </div>
               </li>
             )

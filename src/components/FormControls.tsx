@@ -834,7 +834,15 @@ export function SectionBox({
 
   if (!collapsible) {
     return (
-      <section id={id} className="card-axiom">
+      <section
+        id={id}
+        // `card-axiom` bakes in `overflow: hidden` which clips popovers /
+        // comboboxes rendered inside non-collapsible sections too. Honor
+        // `allowOverflow` here as well so callers don't need to know which
+        // branch they hit.
+        style={allowOverflow ? { overflow: 'visible' } : undefined}
+        className="card-axiom"
+      >
         <div
           className={[
             'flex flex-wrap items-start justify-between gap-3 bg-cribl-card-header px-5 py-3.5 sm:px-5',

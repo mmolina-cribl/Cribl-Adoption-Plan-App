@@ -17,8 +17,11 @@ export function ExportWorkbookView({ plan }: Props) {
         <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Download your plan</h2>
         <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
           Creates a file that bundles what you entered, reference picklists, and your topology in one place so you can
-          share it with Cribl and your stakeholders. The file name uses the customer name from the header when you
-          have set it.
+          share it with Cribl and your stakeholders. The file is named{' '}
+          <span className="text-cribl-ink/80">
+            &lt;customer name&gt; Adoption Plan - MM-DD-YYYY.xlsx
+          </span>{' '}
+          using the customer name from the header and today's date.
         </p>
       </div>
 

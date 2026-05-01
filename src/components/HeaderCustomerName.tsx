@@ -7,18 +7,25 @@ type Props = {
   className?: string
 }
 
-const PLACEHOLDER_HINT = 'e.g. Acme Corp'
+const PLACEHOLDER_HINT = 'e.g. Cribl'
 
 /**
- * Customer name in the app header: same pattern as a source row in the rail
- * (label + value strip + pencil to edit in place).
+ * Customer name shown in the top-right of the app header.
+ *
+ * Displayed as a large, prominent line (the customer's brand is one of the
+ * first things they read) with a pencil button hugging the right edge that
+ * flips into an inline edit field. We deliberately drop the small
+ * "Customer" label that used to sit above the input — the placeholder
+ * `e.g. Cribl` plus the pencil icon is enough to communicate "this is your
+ * editable name", and the bigger value pulls more visual weight in the
+ * header bar. The note in Plan ("Edit it in the field at the top right.")
+ * provides the explicit affordance for first-time visitors.
  */
 export function HeaderCustomerName({ value, onChange, className = '' }: Props) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const id = useId()
   const trimmed = value.trim()
-  const showLabel = trimmed || null
 
   useEffect(() => {
     if (!editing) {
@@ -32,62 +39,50 @@ export function HeaderCustomerName({ value, onChange, className = '' }: Props) {
   }, [editing])
 
   return (
-    <div className={['flex min-w-0 min-[480px]:w-64 flex-col gap-1', className].filter(Boolean).join(' ')}>
-      <span className="m-0 text-xs font-medium text-cribl-muted" id={id + '-l'}>
-        Customer
-      </span>
-      <div
-        className={[
-          'flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
-          'border-cribl-border/80 bg-white/80',
-          'hover:border-cribl-border',
-        ].join(' ')}
-      >
-        {editing ? (
-          <div className="min-w-0 flex-1 py-1.5 pl-2.5 pr-1 sm:pl-3">
-            <input
-              ref={inputRef}
-              id={id + '-i'}
-              className="m-0 w-full min-w-0 max-w-full border-0 bg-transparent p-0 text-sm font-medium text-cribl-ink outline-none"
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              onBlur={() => setEditing(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === 'Escape') {
-                  e.currentTarget.blur()
-                }
-              }}
-              placeholder={PLACEHOLDER_HINT}
-              autoComplete="organization"
-              aria-labelledby={id + '-l'}
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="min-w-0 flex-1 border-0 bg-transparent px-2.5 py-2 text-left text-sm font-medium sm:pl-3"
-            aria-labelledby={id + '-l'}
+    <div
+      className={[
+        'flex min-w-0 items-center justify-end gap-2',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          id={id + '-i'}
+          className="m-0 min-w-0 max-w-full flex-1 rounded-md border border-cribl-primary/50 bg-white px-2 py-1 text-lg font-semibold text-cribl-ink shadow-ctrl outline-none focus:border-cribl-primary focus:ring-2 focus:ring-cribl-primary/30 sm:text-xl"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') {
+              e.currentTarget.blur()
+            }
+          }}
+          placeholder={PLACEHOLDER_HINT}
+          autoComplete="organization"
+          aria-label="Customer name"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          title="Edit customer name"
+          aria-label={trimmed ? `Customer: ${trimmed}. Click to edit.` : 'Edit customer name'}
+          className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-right transition hover:bg-cribl-elevate/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/30"
+        >
+          <span
+            className={[
+              'block min-w-0 max-w-full truncate text-lg font-semibold sm:text-xl',
+              trimmed ? 'text-cribl-ink' : 'italic text-cribl-muted',
+            ].join(' ')}
           >
-            {showLabel ? (
-              <span className="block min-w-0 max-w-full truncate text-cribl-ink">{trimmed}</span>
-            ) : (
-              <span className="block min-w-0 max-w-full truncate text-cribl-muted">{PLACEHOLDER_HINT}</span>
-            )}
-          </button>
-        )}
-        {!editing && (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="inline-flex w-7 shrink-0 items-center justify-center border-0 border-l border-cribl-border/60 bg-transparent text-cribl-muted hover:bg-cribl-elevate hover:text-cribl-ink"
-            title="Edit customer"
-            aria-label="Edit customer name"
-          >
-            <PencilIcon className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
+            {trimmed || PLACEHOLDER_HINT}
+          </span>
+          <PencilIcon className="h-[1.05rem] w-[1.05rem] shrink-0 text-cribl-muted transition group-hover:text-cribl-primary" />
+        </button>
+      )}
     </div>
   )
 }

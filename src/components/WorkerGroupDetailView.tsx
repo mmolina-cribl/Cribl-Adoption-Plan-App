@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useState, type Dispatch, type SetStateAction } from 'react'
 import { WorkerGroupEditor } from './WorkerGroupEditor'
 import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
-import type { PlanState, SourceSummaryRow } from '../types/planTypes'
+import type { PlanState } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
 import { LabeledField, SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
@@ -13,6 +13,11 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { ConfirmRemoveWorkerGroupDialog } from './ConfirmRemoveWorkerGroupDialog'
 import { getWorkerGroupDetailCardsExpanded } from '../lib/detailCardsPreference'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
+import { AttachSourceCombobox } from './AttachSourceCombobox'
+import { WorkerGroupResourceMap } from './WorkerGroupResourceMap'
+import { getOnboardingStatusCounts, ONBOARDING_STATUS_COLORS } from '../lib/onboardingStatus'
+import { useEntryAnimation } from '../lib/animationsPreference'
+import { AnimatedBar } from './AnimatedBar'
 
 function parseMultiValue(v: string): string[] {
   const parts = (v || '')
@@ -46,6 +51,7 @@ function DonutChart({
 }: {
   items: { label: string; value: number; valueLabel?: string; color: string }[]
 }) {
+  const { animated, enabled: animEnabled } = useEntryAnimation()
   const total = items.reduce((a, x) => a + x.value, 0)
   const r = 16
   const c = 2 * Math.PI * r
@@ -55,6 +61,7 @@ function DonutChart({
     .map((x) => {
       const frac = total > 0 ? x.value / total : 0
       const dash = frac * c
+      const visibleDash = animated ? dash : 0
       const seg = (
         <circle
           key={x.label}
@@ -64,9 +71,14 @@ function DonutChart({
           fill="transparent"
           stroke={x.color}
           strokeWidth="8"
-          strokeDasharray={`${dash} ${c - dash}`}
+          strokeDasharray={`${visibleDash} ${c - visibleDash}`}
           strokeDashoffset={-offset}
           strokeLinecap="butt"
+          style={
+            animEnabled
+              ? { transition: 'stroke-dasharray 700ms cubic-bezier(0.22, 1, 0.36, 1)' }
+              : undefined
+          }
         />
       )
       offset += dash
@@ -99,9 +111,10 @@ function MiniBars({
   items,
   suffix,
 }: {
-  items: { label: string; value: number }[]
+  items: { label: string; value: number; color?: string }[]
   suffix?: string
 }) {
+  const { animated, enabled: animEnabled } = useEntryAnimation()
   const max = Math.max(0, ...items.map((x) => x.value))
   return (
     <div className="space-y-2">
@@ -113,7 +126,16 @@ function MiniBars({
               {it.label}
             </span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70">
-              <div className="h-full rounded-full bg-cribl-blue" style={{ width: `${w}%` }} />
+              <div
+                className={`h-full rounded-full ${it.color ? '' : 'bg-cribl-blue'}`}
+                style={{
+                  width: `${animated ? w : 0}%`,
+                  backgroundColor: it.color,
+                  transition: animEnabled
+                    ? 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)'
+                    : undefined,
+                }}
+              />
             </div>
             <span className="w-14 shrink-0 text-right text-xs tabular-nums text-cribl-ink/80">
               {fmtCompact(it.value)}
@@ -126,146 +148,29 @@ function MiniBars({
   )
 }
 
-type AttachSourceCandidate = {
-  row: SourceSummaryRow
-  currentWgName: string | null
-}
-
-function AttachSourceCombobox({
-  candidates,
-  onAttach,
-}: {
-  candidates: AttachSourceCandidate[]
-  onAttach: (sourceId: string) => void
-}) {
-  const [q, setQ] = useState('')
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const matches = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    const ranked = candidates
-      .filter((c) => {
-        if (!needle) {
-          return true
-        }
-        const name = (c.row.displayName || '').toLowerCase()
-        const src = (c.row.source || '').toLowerCase()
-        const tile = (c.row.sourceTile || '').toLowerCase()
-        const wg = (c.currentWgName || '').toLowerCase()
-        return (
-          name.includes(needle) ||
-          src.includes(needle) ||
-          tile.includes(needle) ||
-          wg.includes(needle)
-        )
-      })
-      // Unassigned sources surface first; assigned-elsewhere sources after.
-      .sort((a, b) => {
-        const au = a.currentWgName ? 1 : 0
-        const bu = b.currentWgName ? 1 : 0
-        return au - bu
-      })
-    return ranked.slice(0, 12)
-  }, [candidates, q])
-
-  if (candidates.length === 0) {
-    return null
-  }
-
-  return (
-    <div ref={wrapRef} className="relative mb-3">
-      <label className="sr-only" htmlFor="wg-attach-source">
-        Attach a source to this worker group
-      </label>
-      <div className="flex items-center gap-2">
-        <input
-          id="wg-attach-source"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value)
-            setOpen(true)
-          }}
-          onFocus={() => setOpen(true)}
-          placeholder="Attach a source… (search by name, sourcetype, or current group)"
-          autoComplete="off"
-          className="h-9 w-full"
-        />
-      </div>
-      {open && matches.length > 0 ? (
-        <ul className="absolute left-0 right-0 z-20 mt-1 max-h-80 list-none overflow-auto rounded-lg border border-cribl-border bg-white p-1 shadow-card-float">
-          {matches.map((c) => {
-            const name = c.row.displayName?.trim() || 'Source'
-            const tile = c.row.sourceTile?.trim()
-            const src = c.row.source?.trim()
-            const subtitleBits = [tile, src].filter(Boolean) as string[]
-            const subtitle = subtitleBits
-              .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
-              .join(' · ')
-            return (
-              <li key={c.row.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onAttach(c.row.id)
-                    setQ('')
-                    setOpen(false)
-                  }}
-                  className="flex w-full items-center justify-between gap-3 rounded-md border-0 bg-transparent px-3 py-2 text-left hover:bg-cribl-elevate"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-cribl-ink">{name}</span>
-                    {subtitle ? (
-                      <span className="block truncate text-xs text-cribl-muted">{subtitle}</span>
-                    ) : null}
-                  </span>
-                  <span className="shrink-0 text-[11px] font-medium">
-                    {c.currentWgName ? (
-                      <span className="rounded-md bg-cribl-card-body px-2 py-0.5 text-cribl-muted">
-                        in {c.currentWgName}
-                      </span>
-                    ) : (
-                      <span className="rounded-md bg-cribl-primary-soft px-2 py-0.5 text-cribl-primary-ink">
-                        Unassigned
-                      </span>
-                    )}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      ) : open && q.trim() ? (
-        <p className="absolute left-0 right-0 z-20 mt-1 rounded-lg border border-cribl-border bg-white p-3 text-xs text-cribl-muted shadow-card-float">
-          No sources match “{q.trim()}”.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
 type Props = {
   plan: PlanState
   setPlan: Dispatch<SetStateAction<PlanState>>
   groupId: string
   onRemoveGroup: (id: string) => void
   onSelectSource: (id: string) => void
+  /**
+   * Open the global "New data source" dialog (same flow used by the left
+   * sidebar "+ Add source" button). The resource map exposes a "+ New
+   * source" action that calls this so customers can spawn new sources
+   * directly from the worker-group page.
+   */
+  onAddSource: () => void
 }
 
-export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, onSelectSource }: Props) {
+export function WorkerGroupDetailView({
+  plan,
+  setPlan,
+  groupId,
+  onRemoveGroup,
+  onSelectSource,
+  onAddSource,
+}: Props) {
   const g = plan.workerGroups.find((x) => x.id === groupId) ?? null
   const s = usePatchWorkerGroup(setPlan, groupId)
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false)
@@ -330,8 +235,7 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
   const redUnit: 'GB/d' | 'TB/d' = maxReduction >= 1024 ? 'TB/d' : 'GB/d'
   const redScale = redUnit === 'TB/d' ? 1 / 1024 : 1
 
-  const onboardingCurrent = sources.filter((r) => r.isCurrent).length
-  const onboardingPlanned = Math.max(0, sources.length - onboardingCurrent)
+  const onboardingCounts = getOnboardingStatusCounts(sources)
 
   const critCounts = new Map<string, number>()
   for (const r of sources) {
@@ -428,177 +332,69 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
 
   return (
     <div className="min-w-0 space-y-4 sm:space-y-5">
-      <SectionBox
+      {/*
+       * Floating page heading — intentionally rendered without the
+       * `SectionBox` / `card-axiom` chrome so the worker-group name
+       * acts as the page title rather than yet another collapsible
+       * panel. The kicker mirrors what `SectionBox` would have shown
+       * so the visual rhythm with the cards below still reads.
+       */}
+      <header
         id="wg-header"
-        kicker="Worker group"
-        title={
-          <EditableWorkerGroupName
-            groupId={g.id}
-            value={g.wg}
-            onChange={(v) => s('wg', v)}
-            emptyLabel="Worker group"
-            size="section"
-          />
-        }
-        collapsible={false}
+        className="flex min-w-0 flex-col gap-1 px-1"
+        aria-label="Worker group title"
       >
-        {(() => {
-          const cap = effectiveIngestEgressGbdForWg(plan, g)
-          const ingest = cap?.ingestGb ?? 0
-          const egress = cap?.egressGb ?? 0
-          const throughput = (ingest || 0) + (egress || 0)
-          const baselineNodes = baselineNodesForThroughput(throughput)
-          return (
-            <div className="space-y-3">
-              <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">Topology</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <LabeledField id={`wg-header-hosting-${g.id}`} label="Hosting">
-                  <HostingPicker
-                    id={`wg-header-hosting-${g.id}`}
-                    value={g.workerHosting}
-                    onChange={(v) => s('workerHosting', v)}
-                  />
-                </LabeledField>
-                <LabeledField id={`wg-header-count-${g.id}`} label="Worker count">
-                  <input
-                    type="text"
-                    id={`wg-header-count-${g.id}`}
-                    value={g.workerCount}
-                    onChange={(e) => s('workerCount', e.target.value)}
-                    placeholder={baselineNodes ? `Auto: ${baselineNodes}` : 'e.g. 4'}
-                  />
-                </LabeledField>
-                <LabeledField id={`wg-header-detail-${g.id}`} label="Worker detail">
-                  <input
-                    type="text"
-                    id={`wg-header-detail-${g.id}`}
-                    value={g.workerDetail}
-                    onChange={(e) => s('workerDetail', e.target.value)}
-                    placeholder="e.g. c6i.4xlarge, 16 vCPU/32 GB"
-                  />
-                </LabeledField>
-              </div>
-              <p className="m-0 text-xs text-cribl-muted">
-                Topology fields describe what the worker group <em>is</em> (customer reality). Capacity numbers and
-                sizing assumptions live in the <span className="text-cribl-ink">Capacity</span> card. All three fields
-                round-trip to Excel via the <span className="text-cribl-ink">Worker Hosting</span> /
-                <span className="text-cribl-ink"> Worker Count</span> /
-                <span className="text-cribl-ink"> Worker Detail</span> columns.
-              </p>
-            </div>
-          )
-        })()}
-      </SectionBox>
+        <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">
+          Worker group
+        </p>
+        <EditableWorkerGroupName
+          groupId={g.id}
+          value={g.wg}
+          onChange={(v) => s('wg', v)}
+          emptyLabel="Worker group"
+          size="section"
+        />
+      </header>
 
       <SectionBox
-        id="wg-sources"
-        kicker="Overview"
-        title={`Sources in this worker group (${sources.length})`}
+        id="wg-resource-map"
+        kicker="Diagram"
+        title="Worker group resource map"
         defaultOpen={expandByDefault}
         allowOverflow
       >
-        <AttachSourceCombobox
-          candidates={plan.sourceSummary
-            .filter((r) => r.workerGroupId !== g.id)
-            .map((r) => {
-              const wg = r.workerGroupId
-                ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || null
-                : null
-              return { row: r, currentWgName: wg }
-            })}
+        <WorkerGroupResourceMap
+          workerGroup={g}
+          sources={sources}
+          totalVolumeGb={totalVol}
+          unassignedSources={plan.sourceSummary.filter((r) => !r.workerGroupId)}
+          onOpenSource={onSelectSource}
+          onUnassign={unassignSource}
           onAttach={assignSourceToThisGroup}
+          onAddSource={onAddSource}
         />
-        {sources.length === 0 ? (
-          <p className="m-0 text-sm text-cribl-muted">
-            No sources are assigned to this worker group yet. Use the search box above to attach an existing
-            source, or open a Source summary page directly.
-          </p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
-            {sources.map((r) => (
-              <li key={r.id} className="min-w-0">
-                <div className="card-axiom flex min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 shadow-ctrl sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-sm font-semibold text-cribl-ink">
-                        {r.displayName?.trim() || 'Source'}
-                      </span>
-                    </div>
-                    {r.source?.trim() ? (
-                      (() => {
-                        const name = (r.displayName || '').trim().toLowerCase()
-                        const tile = (r.sourceTile || '').trim()
-                        const src = (r.source || '').trim()
-                        const vol = (r.avgDailyGb || '').trim()
-                        const volStr = vol ? formatGbOrTbPerDayStr(parseGb(vol)) : ''
-                        const bits = [tile, src, volStr].filter(Boolean)
-                        const subtitle = bits
-                          .filter((b, i) => bits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
-                          .filter((b) => b.toLowerCase() !== name)
-                          .join(' · ')
-                        if (!subtitle) return null
-                        return <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p>
-                      })()
-                    ) : null}
-                    {(() => {
-                      const v = parseGb(r.avgDailyGb)
-                      if (!Number.isFinite(v) || v < 0 || maxVol <= 0) return null
-                      const pct = Math.round((v / maxVol) * 100)
-                      const vStr = formatGbOrTbPerDayStr(v)
-                      return (
-                        <div className="mt-2 flex items-center gap-2">
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70">
-                            <div className="h-full rounded-full bg-cribl-blue" style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-cribl-ink/80">{vStr}</span>
-                        </div>
-                      )
-                    })()}
-                  </div>
-                  <div className="flex shrink-0 flex-col gap-2 self-stretch sm:flex-row sm:self-center">
-                    <button
-                      type="button"
-                      onClick={() => onSelectSource(r.id)}
-                      className="h-9 shrink-0 rounded-lg border border-cribl-border bg-cribl-canvas px-3 text-sm font-medium text-cribl-ink sm:px-4"
-                    >
-                      Open
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => unassignSource(r.id)}
-                      className="h-9 shrink-0 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink sm:px-4"
-                      title="Remove from this worker group"
-                    >
-                      Unassign
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </SectionBox>
-      <WorkerGroupEditor
-        plan={plan}
-        group={g}
-        s={s}
-        onRemoveGroup={onRemoveGroup}
-        defaultExpanded={expandByDefault}
-      />
 
-      <SectionBox id="wg-dashboard" kicker="Dashboard" title="Worker group dashboard" collapsible={false}>
+      <SectionBox
+        id="wg-dashboard"
+        kicker="Dashboard"
+        title="Worker group dashboard"
+        defaultOpen={expandByDefault}
+        allowOverflow
+      >
         {sources.length === 0 ? (
           <p className="m-0 text-sm text-cribl-muted">Add sources to this worker group to see charts and rollups.</p>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl">
               <p className="m-0 text-xs font-semibold text-cribl-ink">Onboarding status</p>
-              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">Current vs planned</p>
+              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">Complete · Current · Planned</p>
               <div className="mt-3">
                 <DonutChart
                   items={[
-                    { label: 'Current', value: onboardingCurrent, color: CHART_CRIBL_BLUE },
-                    { label: 'Planned', value: onboardingPlanned, color: '#94a3b8' },
+                    { label: 'Complete', value: onboardingCounts.complete, color: ONBOARDING_STATUS_COLORS.complete },
+                    { label: 'Current', value: onboardingCounts.current, color: ONBOARDING_STATUS_COLORS.current },
+                    { label: 'Planned', value: onboardingCounts.planned, color: ONBOARDING_STATUS_COLORS.planned },
                   ]}
                 />
               </div>
@@ -817,11 +613,176 @@ export function WorkerGroupDetailView({ plan, setPlan, groupId, onRemoveGroup, o
                 levers, etc.). Use it to see which sources need more detail.
               </p>
               <div className="mt-3">
-                <MiniBars items={Object.entries(completionBuckets).map(([label, value]) => ({ label, value }))} />
+                <MiniBars
+                  items={Object.entries(completionBuckets)
+                    .reverse()
+                    .map(([label, value]) => {
+                      const color =
+                        label === '75–100%'
+                          ? '#4ade80' // green-400 — success
+                          : label === '50–75%'
+                          ? '#fb923c' // orange-400
+                          : label === '25–50%'
+                          ? '#fbbf24' // amber-400
+                          : '#f87171' // red-400 — needs attention
+                      return { label, value, color }
+                    })}
+                />
               </div>
             </div>
+
           </div>
         )}
+      </SectionBox>
+
+      <SectionBox
+        id="wg-sources"
+        kicker="Overview"
+        title={`Sources in this worker group (${sources.length})`}
+        defaultOpen={expandByDefault}
+        allowOverflow
+      >
+        <AttachSourceCombobox
+          className="mb-3"
+          candidates={plan.sourceSummary
+            .filter((r) => r.workerGroupId !== g.id)
+            .map((r) => {
+              const wg = r.workerGroupId
+                ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || null
+                : null
+              return { row: r, currentWgName: wg }
+            })}
+          onAttach={assignSourceToThisGroup}
+        />
+        {sources.length === 0 ? (
+          <p className="m-0 text-sm text-cribl-muted">
+            No sources are assigned to this worker group yet. Use the search box above to attach an existing
+            source, or open a Source summary page directly.
+          </p>
+        ) : (
+          <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
+            {sources.map((r) => (
+              <li key={r.id} className="min-w-0">
+                <div className="card-axiom flex min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 shadow-ctrl sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="text-sm font-semibold text-cribl-ink">
+                        {r.displayName?.trim() || 'Source'}
+                      </span>
+                    </div>
+                    {r.source?.trim() ? (
+                      (() => {
+                        const name = (r.displayName || '').trim().toLowerCase()
+                        const tile = (r.sourceTile || '').trim()
+                        const src = (r.source || '').trim()
+                        const vol = (r.avgDailyGb || '').trim()
+                        const volStr = vol ? formatGbOrTbPerDayStr(parseGb(vol)) : ''
+                        const bits = [tile, src, volStr].filter(Boolean)
+                        const subtitle = bits
+                          .filter((b, i) => bits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
+                          .filter((b) => b.toLowerCase() !== name)
+                          .join(' · ')
+                        if (!subtitle) return null
+                        return <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p>
+                      })()
+                    ) : null}
+                    {(() => {
+                      const v = parseGb(r.avgDailyGb)
+                      if (!Number.isFinite(v) || v < 0 || maxVol <= 0) return null
+                      const pct = Math.round((v / maxVol) * 100)
+                      const vStr = formatGbOrTbPerDayStr(v)
+                      return (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70">
+                            <AnimatedBar pct={pct} />
+                          </div>
+                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-cribl-ink/80">{vStr}</span>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2 self-stretch sm:flex-row sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => onSelectSource(r.id)}
+                      className="h-9 shrink-0 rounded-lg border border-cribl-border bg-cribl-canvas px-3 text-sm font-medium text-cribl-ink sm:px-4"
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => unassignSource(r.id)}
+                      className="h-9 shrink-0 rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-muted hover:text-cribl-ink sm:px-4"
+                      title="Remove from this worker group"
+                    >
+                      Unassign
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionBox>
+      <WorkerGroupEditor
+        plan={plan}
+        group={g}
+        s={s}
+        onRemoveGroup={onRemoveGroup}
+        defaultExpanded={expandByDefault}
+      />
+
+      <SectionBox
+        id="wg-topology"
+        kicker="Topology"
+        title="Worker group topology"
+        defaultOpen={expandByDefault}
+      >
+        {(() => {
+          const cap = effectiveIngestEgressGbdForWg(plan, g)
+          const ingest = cap?.ingestGb ?? 0
+          const egress = cap?.egressGb ?? 0
+          const throughput = (ingest || 0) + (egress || 0)
+          const baselineNodes = baselineNodesForThroughput(throughput)
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <LabeledField id={`wg-topology-hosting-${g.id}`} label="Hosting">
+                  <HostingPicker
+                    id={`wg-topology-hosting-${g.id}`}
+                    value={g.workerHosting}
+                    onChange={(v) => s('workerHosting', v)}
+                  />
+                </LabeledField>
+                <LabeledField id={`wg-topology-count-${g.id}`} label="Worker count">
+                  <input
+                    type="text"
+                    id={`wg-topology-count-${g.id}`}
+                    value={g.workerCount}
+                    onChange={(e) => s('workerCount', e.target.value)}
+                    placeholder={baselineNodes ? `Auto: ${baselineNodes}` : 'e.g. 4'}
+                  />
+                </LabeledField>
+                <LabeledField id={`wg-topology-detail-${g.id}`} label="Worker detail">
+                  <input
+                    type="text"
+                    id={`wg-topology-detail-${g.id}`}
+                    value={g.workerDetail}
+                    onChange={(e) => s('workerDetail', e.target.value)}
+                    placeholder="e.g. c6i.4xlarge, 16 vCPU/32 GB"
+                  />
+                </LabeledField>
+              </div>
+              <p className="m-0 text-xs text-cribl-muted">
+                Topology fields describe what the worker group <em>is</em> (customer reality). Capacity numbers and
+                sizing assumptions live in the <span className="text-cribl-ink">Capacity</span> card. All three fields
+                round-trip to Excel via the <span className="text-cribl-ink">Worker Hosting</span> /
+                <span className="text-cribl-ink"> Worker Count</span> /
+                <span className="text-cribl-ink"> Worker Detail</span> columns.
+              </p>
+            </div>
+          )
+        })()}
       </SectionBox>
 
       <div className="flex items-center justify-end">

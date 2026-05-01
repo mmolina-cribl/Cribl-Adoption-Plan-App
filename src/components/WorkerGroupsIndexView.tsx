@@ -5,6 +5,8 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { effectiveIngestEgressGbdForWg, sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
 import { PopoverButton } from './PopoverButton'
 import { WORKER_HOSTING_OPTIONS, classifyHosting } from '../lib/workerHosting'
+import { AnimatedBar } from './AnimatedBar'
+import { SearchInput } from './SearchInput'
 
 type Props = {
   plan: PlanState
@@ -260,19 +262,14 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
-          <div className="w-full sm:w-72">
-            <label className="sr-only" htmlFor="wg-index-q">
-              Search worker groups
-            </label>
-            <input
-              id="wg-index-q"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search worker groups…"
-              autoComplete="off"
-              className="h-9 w-full"
-            />
-          </div>
+          <SearchInput
+            id="wg-index-q"
+            value={q}
+            onChange={setQ}
+            placeholder="Search worker groups…"
+            ariaLabel="Search worker groups"
+            className="w-full sm:w-72"
+          />
           <div className="flex items-center gap-2 self-end">
             <PopoverButton
               label="Filter"
@@ -508,18 +505,38 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
             return (
               <li key={g.id} className="min-w-0">
                 <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenGroup(g.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onOpenGroup(g.id)
+                    }
+                  }}
+                  aria-labelledby={`wg-index-title-${g.id}`}
+                  title={`Open ${g.name}`}
                   className={[
-                    'min-w-0 overflow-hidden rounded-2xl border border-cribl-border/80 bg-white p-5 text-left shadow-ctrl sm:p-6',
+                    // The whole card is the click target now (no
+                    // separate "Open worker group" pill at the
+                    // bottom). Bulk-action checkbox at the top is a
+                    // real <input> with stopPropagation so toggling
+                    // selection never falls through to "open".
+                    'block min-w-0 cursor-pointer overflow-hidden rounded-2xl border border-cribl-border/80 bg-white p-5 text-left shadow-ctrl transition hover:border-cribl-primary/60 hover:shadow-md focus-visible:border-cribl-primary/60 focus-visible:ring-2 focus-visible:ring-cribl-primary/40 focus-visible:outline-none sm:p-6',
                     isSelected ? 'ring-2 ring-cribl-primary/60' : '',
                   ].join(' ')}
                 >
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
-                      <label className="flex shrink-0 cursor-pointer select-none items-center pt-1">
+                      <label
+                        className="flex shrink-0 cursor-pointer select-none items-center pt-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleOne(g.id)}
+                          onClick={(e) => e.stopPropagation()}
                           aria-label={`Select ${g.name}`}
                         />
                       </label>
@@ -540,25 +557,43 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
                   </div>
                   {maxSources > 0 && g.nSources > 0 ? (
                     <div
-                      className="mt-3.5"
+                      className="mt-3.5 flex items-center gap-3"
                       title="Share of sources vs the largest group in the list (with current filters)"
                     >
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-cribl-border/70">
-                        <div
-                          className="h-full rounded-full bg-cribl-blue"
-                          style={{ width: `${srcBarPct}%` }}
-                        />
+                      {/*
+                       * Bar fills the remaining row width; the
+                       * "Est. daily (sources)" stat sits flush right
+                       * so the volume number reads as a label for
+                       * the bar's "share of sources" visualization.
+                       */}
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70">
+                        <AnimatedBar pct={srcBarPct} />
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="m-0 text-[10px] font-medium uppercase tracking-wide text-cribl-muted">
+                          Est. daily (sources)
+                        </p>
+                        <p className="m-0 font-mono text-sm tabular-nums text-cribl-ink">{volLine}</p>
                       </div>
                     </div>
                   ) : null}
 
                   <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <p className="m-0 text-[10px] font-medium uppercase tracking-wide text-cribl-muted">
-                        Est. daily (sources)
-                      </p>
-                      <p className="m-0 font-mono text-sm tabular-nums text-cribl-ink">{volLine}</p>
-                    </div>
+                    {/*
+                     * Fallback placement for "Est. daily (sources)":
+                     * only shown when the bar is hidden (the group
+                     * has no sources, or no group in the filtered
+                     * list does). Otherwise the label/value live up
+                     * next to the bar above.
+                     */}
+                    {!(maxSources > 0 && g.nSources > 0) ? (
+                      <div className="min-w-0">
+                        <p className="m-0 text-[10px] font-medium uppercase tracking-wide text-cribl-muted">
+                          Est. daily (sources)
+                        </p>
+                        <p className="m-0 font-mono text-sm tabular-nums text-cribl-ink">{volLine}</p>
+                      </div>
+                    ) : null}
                     <div className="min-w-0">
                       <p className="m-0 text-[10px] font-medium uppercase tracking-wide text-cribl-muted">In / out</p>
                       <p
@@ -612,17 +647,6 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup }: Props) {
                       {g.detail}
                     </p>
                   ) : null}
-
-                  <div className="mt-5">
-                    <button
-                      type="button"
-                      onClick={() => onOpenGroup(g.id)}
-                      className="h-10 w-full rounded-lg border border-cribl-border bg-cribl-canvas text-sm font-semibold text-cribl-ink hover:bg-cribl-elevate"
-                      aria-describedby={`wg-index-title-${g.id}`}
-                    >
-                      Open worker group
-                    </button>
-                  </div>
                 </div>
               </li>
             )

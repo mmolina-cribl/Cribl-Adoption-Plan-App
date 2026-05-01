@@ -64,7 +64,10 @@ function App() {
 function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
     useResizableRail()
-  const [mainView, setMainView] = useState<MainView>('source')
+  // First-load lands on the Plan tab — the resource map / dashboard
+  // is the most useful "you are here" view; the per-Source detail
+  // page is too narrow to greet a returning user.
+  const [mainView, setMainView] = useState<MainView>('overview')
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
   const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
   const [addSourceOpen, setAddSourceOpen] = useState(false)
@@ -151,6 +154,44 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
         }
       }
       return { ...p, sourceSummary: next }
+    })
+  }
+
+  /**
+   * Reassign (or unassign) a single Source's worker group from anywhere in
+   * the app — currently driven by the interactive Plan resource map's
+   * drag-to-reassign and click-to-unassign affordances. Pass `null` to
+   * detach the source. Also keeps `sourceVolume` rows that share the same
+   * Source name aligned, mirroring `WorkerGroupDetailView.unassignSource`
+   * / `assignSourceToThisGroup`.
+   */
+  const reassignSourceWorkerGroup = (
+    id: string,
+    newWorkerGroupId: string | null,
+  ) => {
+    setPlan((p) => {
+      const target = p.sourceSummary.find((r) => r.id === id)
+      if (!target) {
+        return p
+      }
+      const newId = newWorkerGroupId ?? ''
+      if ((target.workerGroupId || '') === newId) {
+        return p
+      }
+      const sourceName = (target.source || '').trim()
+      return {
+        ...p,
+        sourceSummary: p.sourceSummary.map((r) =>
+          r.id === id ? { ...r, workerGroupId: newId } : r,
+        ),
+        sourceVolume: sourceName
+          ? p.sourceVolume.map((r) =>
+              (r.source || '').trim() === sourceName
+                ? { ...r, workerGroupId: newId }
+                : r,
+            )
+          : p.sourceVolume,
+      }
     })
   }
 
@@ -416,25 +457,25 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 <div
                   className="flex w-full max-md:justify-center
                     md:absolute md:left-1/2 md:top-1/2 md:z-0
-                    md:w-[min(100%-18.5rem,28rem)] md:max-w-[calc(100%-19rem)]
+                    md:w-[min(100%-22rem,28rem)] md:max-w-[calc(100%-22.5rem)]
                     md:-translate-x-1/2 md:-translate-y-1/2
                     md:items-center md:justify-center
                   "
                 >
-                  <h1 className="m-0 text-base font-semibold tracking-wide text-cribl-ink sm:text-lg">
+                  <h1 className="m-0 text-xl font-semibold tracking-wide text-cribl-ink sm:text-2xl md:text-3xl">
                     Adoption Plan
                   </h1>
                 </div>
                 <div
                   className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
                     md:mt-0
-                    md:absolute md:right-0 md:top-1/2 md:z-10 md:mt-0
-                    md:w-64 md:max-w-full
+                    md:absolute md:right-4 md:top-1/2 md:z-10 md:mt-0 lg:right-8
+                    md:w-80 md:max-w-full
                     md:-translate-y-1/2
                   "
                 >
                   <HeaderCustomerName
-                    className="min-w-0 w-64 max-w-full"
+                    className="min-w-0 w-full max-w-full"
                     value={plan.customerName}
                     onChange={(v) => setPlan((p) => ({ ...p, customerName: v }))}
                   />
@@ -490,6 +531,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveSourceId(id)
                     setMainView('source')
                   }}
+                  onReassignSource={reassignSourceWorkerGroup}
+                  onAddSource={openAddSource}
+                  onAddWorkerGroup={openAddWorkerGroup}
                 />
               )}
 
@@ -547,6 +591,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveSourceId(id)
                     setMainView('source')
                   }}
+                  onAddSource={openAddSource}
                 />
               )}
 

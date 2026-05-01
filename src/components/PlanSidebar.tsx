@@ -3,6 +3,7 @@ import type { PlanState, SourceSummaryRow, WorkerGroupRow } from '../types/planT
 import { PencilIcon } from './PencilIcon'
 import type { MainView } from './navTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
+import { sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
 
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
@@ -219,6 +220,14 @@ function WorkerGroupRowRail({
   index,
   isActive,
   canRemove,
+  /**
+   * Total ingest summed from every Source attached to this worker group.
+   * Mirrors how Source rail rows surface their avg daily volume so customers
+   * see at a glance which WGs are heavy ingest vs light without leaving the
+   * left nav. Computed by the parent (it has the full plan in scope).
+   */
+  totalSourceIngestGb,
+  sourceCount,
   onSelect,
   onRemove,
   onUpdateWg,
@@ -227,6 +236,8 @@ function WorkerGroupRowRail({
   index: number
   isActive: boolean
   canRemove: boolean
+  totalSourceIngestGb: number
+  sourceCount: number
   onSelect: () => void
   onRemove: () => void
   onUpdateWg: (wg: string) => void
@@ -234,10 +245,14 @@ function WorkerGroupRowRail({
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const label = row.wg.trim() || `Worker group ${index + 1}`
-  const ingestGb = parseGb(row.ingestGbd)
-  const sub = Number.isFinite(ingestGb) && ingestGb >= 0
-    ? `${formatGbOrTbPerDayStr(ingestGb)} ingest`
-    : null
+  const sub =
+    totalSourceIngestGb > 0
+      ? `${formatGbOrTbPerDayStr(totalSourceIngestGb)} ingest · ${sourceCount} ${
+          sourceCount === 1 ? 'source' : 'sources'
+        }`
+      : sourceCount > 0
+      ? `${sourceCount} ${sourceCount === 1 ? 'source' : 'sources'} · no volume yet`
+      : 'No sources yet'
 
   useEffect(() => {
     if (!editing) {
@@ -388,6 +403,7 @@ export function PlanSidebarRail({
           {wgs.map((r, i) => {
             const isWg =
               mainView === 'workerGroup' && activeWorkerGroupId === r.id
+            const sourceTotal = sumAvgDailyFromSourceSummaryForWg(plan, r.id)
             return (
               <WorkerGroupRowRail
                 key={r.id}
@@ -395,6 +411,8 @@ export function PlanSidebarRail({
                 index={i}
                 isActive={isWg}
                 canRemove={canRemoveWg}
+                totalSourceIngestGb={sourceTotal.sum}
+                sourceCount={sourceTotal.count}
                 onSelect={() => onSelectWorkerGroup(r.id)}
                 onRemove={() => onRemoveWorkerGroup(r.id)}
                 onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}

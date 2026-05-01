@@ -48,13 +48,27 @@ export async function planToBlobAsync(plan: PlanState): Promise<ArrayBuffer> {
   )
 }
 
+/**
+ * Today's date as `MM-DD-YYYY`. We use `-` separators (not `/`) because
+ * `/` is not a legal filename character on Windows / macOS / Linux —
+ * `MM/DD/YYYY` would just get scrubbed by the sanitizer below into the
+ * same shape, so we author it that way directly to keep intent obvious.
+ */
+function todayMmDdYyyy(): string {
+  const d = new Date()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const yyyy = String(d.getFullYear())
+  return `${mm}-${dd}-${yyyy}`
+}
+
 function downloadFilenameForPlan(plan: PlanState): string {
   const stem = titleForAdoptionPlanExport(plan)
-  const safe = stem
+  const safeStem = stem
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, ' ')
     .trim() || 'Adoption Plan'
-  return `${safe}.xlsx`
+  return `${safeStem} - ${todayMmDdYyyy()}.xlsx`
 }
 
 export async function downloadXlsxForPlan(plan: PlanState) {

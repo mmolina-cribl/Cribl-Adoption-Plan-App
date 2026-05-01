@@ -6,6 +6,10 @@ import {
   effectiveIngestEgressGbdForWg,
   sumAvgDailyFromSourceSummaryForWg,
 } from '../lib/workerGroupRollup'
+import { getOnboardingStatusCounts, ONBOARDING_STATUS_COLORS } from '../lib/onboardingStatus'
+import { useEntryAnimation } from '../lib/animationsPreference'
+import { PlanResourceMap } from './PlanResourceMap'
+import { SearchInput } from './SearchInput'
 import type { PlanState } from '../types/planTypes'
 
 const WG_SNAPSHOT_PAGE_SIZE = 2
@@ -16,6 +20,25 @@ type Props = {
   onOpenWorkerGroup: (id: string) => void
   onGoToSources: () => void
   onSelectSource: (id: string) => void
+  /**
+   * Move a source between worker groups (drag-to-reassign in the resource
+   * map) or detach it from its current group (`null` = unassigned).
+   */
+  onReassignSource: (sourceId: string, newWorkerGroupId: string | null) => void
+  /**
+   * Open the global "New data source" dialog (same flow used by the left
+   * sidebar "+ Add source" button). Surfaces a "+ New source" action in
+   * the resource map header so users can spawn new sources right from
+   * the plan view.
+   */
+  onAddSource: () => void
+  /**
+   * Open the global "New worker group" dialog (same flow used by the
+   * left sidebar "+ Add Worker Group" button). Surfaces a "+ New worker
+   * group" action in the resource map header so users can spawn new
+   * worker groups right from the plan view.
+   */
+  onAddWorkerGroup: () => void
 }
 
 function parseGb(s: string | undefined): number {
@@ -44,6 +67,7 @@ function parseMultiValue(v: string): string[] {
 }
 
 function DonutChart({ items }: { items: { label: string; value: number; color: string }[] }) {
+  const { animated, enabled: animEnabled } = useEntryAnimation()
   const total = items.reduce((a, x) => a + x.value, 0)
   const r = 16
   const c = 2 * Math.PI * r
@@ -53,6 +77,7 @@ function DonutChart({ items }: { items: { label: string; value: number; color: s
     .map((x) => {
       const frac = total > 0 ? x.value / total : 0
       const dash = frac * c
+      const visibleDash = animated ? dash : 0
       const seg = (
         <circle
           key={x.label}
@@ -62,9 +87,14 @@ function DonutChart({ items }: { items: { label: string; value: number; color: s
           fill="transparent"
           stroke={x.color}
           strokeWidth="8"
-          strokeDasharray={`${dash} ${c - dash}`}
+          strokeDasharray={`${visibleDash} ${c - visibleDash}`}
           strokeDashoffset={-offset}
           strokeLinecap="butt"
+          style={
+            animEnabled
+              ? { transition: 'stroke-dasharray 700ms cubic-bezier(0.22, 1, 0.36, 1)' }
+              : undefined
+          }
         />
       )
       offset += dash
@@ -100,6 +130,7 @@ function MiniBars({
   items: { label: string; value: number }[]
   suffix?: string
 }) {
+  const { animated, enabled: animEnabled } = useEntryAnimation()
   const max = Math.max(0, ...items.map((x) => x.value))
   return (
     <div className="space-y-2">
@@ -111,7 +142,15 @@ function MiniBars({
               {it.label}
             </span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-cribl-border/70">
-              <div className="h-full rounded-full bg-cribl-blue" style={{ width: `${w}%` }} />
+              <div
+                className="h-full rounded-full bg-cribl-blue"
+                style={{
+                  width: `${animated ? w : 0}%`,
+                  transition: animEnabled
+                    ? 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)'
+                    : undefined,
+                }}
+              />
             </div>
             <span className="w-16 shrink-0 text-right text-xs tabular-nums text-cribl-ink/80">
               {fmtGb(it.value)}
@@ -145,6 +184,7 @@ function StatCard({
 }
 
 function ProgressMini({ pct }: { pct: number }) {
+  const { animated, enabled: animEnabled } = useEntryAnimation()
   const w = Math.min(100, Math.max(0, pct))
   return (
     <div
@@ -155,8 +195,13 @@ function ProgressMini({ pct }: { pct: number }) {
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full bg-cribl-blue transition-[width] duration-500"
-        style={{ width: `${w}%` }}
+        className="h-full rounded-full bg-cribl-blue"
+        style={{
+          width: `${animated ? w : 0}%`,
+          transition: animEnabled
+            ? 'width 700ms cubic-bezier(0.22, 1, 0.36, 1)'
+            : undefined,
+        }}
       />
     </div>
   )
@@ -168,6 +213,9 @@ export function PlanDataOverview({
   onOpenWorkerGroup,
   onGoToSources,
   onSelectSource,
+  onReassignSource,
+  onAddSource,
+  onAddWorkerGroup,
 }: Props) {
   const snap = useMemo(() => buildDashboardSnapshot(plan), [plan])
   const nSources = plan.sourceSummary.length
@@ -235,8 +283,7 @@ export function PlanDataOverview({
   const totalIngest = wgStats.reduce((a, x) => a + (x.effIngest ?? 0), 0)
   const totalEgress = wgStats.reduce((a, x) => a + (x.effEgress ?? 0), 0)
 
-  const currentCount = plan.sourceSummary.filter((s) => s.isCurrent).length
-  const plannedCount = Math.max(0, nSources - currentCount)
+  const onboardingCounts = getOnboardingStatusCounts(plan.sourceSummary)
   const critCounts = new Map<string, number>()
   for (const r of plan.sourceSummary) {
     const v = (r.dataCriticality || '').trim()
@@ -296,10 +343,29 @@ export function PlanDataOverview({
           </p>
         )}
         <p className="m-0 mt-2 max-w-2xl text-sm leading-relaxed text-cribl-muted">
-          A quick snapshot of what you have captured so far. Open any area from the left to keep going. When you want a
-          file to share, use <span className="text-cribl-ink/80">Export</span> in the sidebar.
+          Your end-to-end <span className="text-cribl-ink/80">Cribl Stream</span> rollout in one place — the worker
+          groups, the sources feeding them, and the daily volume each one contributes. Fill in details from the left
+          nav, then visualize the plan in the <span className="text-cribl-ink/80">resource maps</span> where
+          criticality and volume cues make priorities easy to spot. <span className="text-cribl-ink/80">Export</span>{' '}
+          to share with your team, or <span className="text-cribl-ink/80">Import</span> an existing plan any time to
+          pick up where you left off.
         </p>
       </section>
+
+      {/*
+       * The resource map is the most actionable surface on this page —
+       * customers can drag sources between worker groups and detach them
+       * inline — so it's anchored right under the hero, above the
+       * read-only stat cards and mix charts.
+       */}
+      <PlanResourceMap
+        plan={plan}
+        onOpenSource={onSelectSource}
+        onOpenWorkerGroup={onOpenWorkerGroup}
+        onReassignSource={onReassignSource}
+        onAddSource={onAddSource}
+        onAddWorkerGroup={onAddWorkerGroup}
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Data sources" value={nSources} hint="Per-source summary rows" />
@@ -319,12 +385,13 @@ export function PlanDataOverview({
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
           <p className="m-0 text-sm font-semibold text-cribl-ink">Onboarding mix</p>
-          <p className="m-0 mt-0.5 text-xs text-cribl-muted">Current vs planned sources</p>
+          <p className="m-0 mt-0.5 text-xs text-cribl-muted">Complete · Current · Planned</p>
           <div className="mt-3">
             <DonutChart
               items={[
-                { label: 'Current', value: currentCount, color: CHART_CRIBL_BLUE },
-                { label: 'Planned', value: plannedCount, color: '#94a3b8' },
+                { label: 'Complete', value: onboardingCounts.complete, color: ONBOARDING_STATUS_COLORS.complete },
+                { label: 'Current', value: onboardingCounts.current, color: ONBOARDING_STATUS_COLORS.current },
+                { label: 'Planned', value: onboardingCounts.planned, color: ONBOARDING_STATUS_COLORS.planned },
               ]}
             />
           </div>
@@ -419,19 +486,13 @@ export function PlanDataOverview({
             </span>
           </div>
           {nSources > 0 ? (
-            <div>
-              <label className="sr-only" htmlFor="recent-src-q">
-                Filter recent sources
-              </label>
-              <input
-                id="recent-src-q"
-                value={recentSrcQ}
-                onChange={(e) => setRecentSrcQ(e.target.value)}
-                placeholder="Search sources by name or sourcetype…"
-                autoComplete="off"
-                className="h-9 w-full"
-              />
-            </div>
+            <SearchInput
+              id="recent-src-q"
+              value={recentSrcQ}
+              onChange={setRecentSrcQ}
+              placeholder="Search sources by name or sourcetype…"
+              ariaLabel="Filter recent sources"
+            />
           ) : null}
           {nSources === 0 ? (
             <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
@@ -495,19 +556,14 @@ export function PlanDataOverview({
               Capacity and source assignment · {unassignedSources} unassigned
             </p>
             {wgStats.length > 0 ? (
-              <div className="mt-3">
-                <label className="sr-only" htmlFor="recent-wg-q">
-                  Filter worker groups
-                </label>
-                <input
-                  id="recent-wg-q"
-                  value={recentWgQ}
-                  onChange={(e) => setRecentWgQ(e.target.value)}
-                  placeholder="Search worker groups…"
-                  autoComplete="off"
-                  className="h-9 w-full"
-                />
-              </div>
+              <SearchInput
+                id="recent-wg-q"
+                value={recentWgQ}
+                onChange={setRecentWgQ}
+                placeholder="Search worker groups…"
+                ariaLabel="Filter worker groups"
+                className="mt-3"
+              />
             ) : null}
             {wgStats.length > 0 ? (
               <div className="mt-4">
