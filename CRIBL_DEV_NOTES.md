@@ -424,8 +424,45 @@ PR B is sized in commits, not one big rewrite:
    rollups feed only the seven capacity columns onto each matching WG /
    Fleet — the top "Sources" table is intentionally ignored because
    it's a write-only artifact the exporter regenerates each save.
-3. _Exporter_ (next): generate per-WG / per-Fleet sheets, regenerate
-   Stream / Edge Overview rollups as plain-text static values.
+3. _Exporter_ (done): generate per-WG / per-Fleet sheets, regenerate
+   Stream / Edge Overview rollups as plain-text static values. New
+   module `v091ExportWorkbook.ts` runs three phases:
+     - **JSZip clone pre-pass** ensures the shell has at least one
+       `wg<name>` scaffold per Stream WG and one `fl<name>_fleet`
+       scaffold per Edge fleet. The gold ships 2 + 1 — a plan that
+       needs more triggers OOXML-level cloning of the first scaffold
+       of each kind. Each clone gets a unique placeholder name
+       (`wg_v091Clone<N>` / `fl_v091Clone<N>_fleet`) so the Phase 2
+       scaffold detector still recognizes it; the placeholder is
+       renamed in Phase 2 to the resolved plan-WG sheet name. Clones
+       reuse the source's per-sheet rels (comments / drawings /
+       vmlDrawings) so they inherit Cribl validation hints for free.
+     - **ExcelJS fill** opens the expanded shell, resolves every
+       plan-WG sheet name through `resolveAllSheetNames`, renames
+       scaffolds in plan order, blanks the data rows from row 3 to at
+       least the gold's 19-row scaffold floor (so a shrink doesn't
+       leave phantoms), and writes `sourceSummaryValueForHeaderName`
+       output by header name. Stream / Edge Overview is regenerated
+       from scratch: rows 3..14 (top "Sources, Volume, Region") and
+       rows 17.. (specs) are blanked to the gold's table footprint
+       and re-filled with computed plain-text rollups (no formulas,
+       no hyperlinks). Unused scaffolds are dropped via
+       `wb.removeWorksheet`.
+     - **OOXML post-pass** restores `xl/styles.xml` + `xl/theme/theme1.xml`
+       from the expanded shell (so Cribl colors / fonts / fills
+       survive ExcelJS's round-trip), widens `table4`-`table7` `ref=`
+       attributes when overview data exceeds the gold's footprint,
+       splices the gold's verbatim per-WG `<conditionalFormatting>`
+       blocks into every output `wg*` / `fl*_fleet` sheet (so the
+       Low/Medium/High color rules' `dxfId` references line up with
+       the restored gold styles after ExcelJS re-numbered them), and
+       strips ExcelJS's spurious `operator="notContainsBlanks"` echo
+       so stricter parsers (openpyxl) can validate the file too.
+   Verified via tsx round-trip + openpyxl strict load on five
+   plan shapes: empty / 1S+0E / 0S+1E / 3S+2E (single clone each
+   side) / 5S+3E (heavy clone). Shell version is auto-detected in
+   `workbookDownload.ts#fillShell` so v0.8.6 imports still flow
+   through the legacy `adoptionPlanShellExceljs.ts` pipeline.
 4. _Resource-map kind sweep_ (already on the to-do list in PR A's
    handoff): make every `Worker group` copy in `PlanResourceMap`,
    `WorkerGroupResourceMap`, `WorkerGroupDetailView`, and
