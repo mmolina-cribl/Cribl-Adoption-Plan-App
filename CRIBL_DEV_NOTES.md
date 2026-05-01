@@ -463,11 +463,34 @@ PR B is sized in commits, not one big rewrite:
    side) / 5S+3E (heavy clone). Shell version is auto-detected in
    `workbookDownload.ts#fillShell` so v0.8.6 imports still flow
    through the legacy `adoptionPlanShellExceljs.ts` pipeline.
-4. _Resource-map kind sweep_ (already on the to-do list in PR A's
-   handoff): make every `Worker group` copy in `PlanResourceMap`,
-   `WorkerGroupResourceMap`, `WorkerGroupDetailView`, and
-   `PlanDataOverview` switch on `kind`.
-5. _Version bump + smoke_: `2.0.0-rc.1` → `2.0.0-rc.2`.
+4. _Resource-map kind sweep_ — every kind-sensitive string in
+   `PlanResourceMap`, `WorkerGroupResourceMap`,
+   `WorkerGroupDetailView`, and `PlanDataOverview` now flips at
+   render time off `workerGroup.kind` / `g.kind` / `g.wg?.kind`.
+   Centralized into per-file `copy` objects (and a
+   `copyForKind(kind)` helper in the shared resource map) so a
+   Fleet detail page reads naturally end-to-end — header kicker,
+   SectionBox titles, hub kicker, detach / unassign tooltips,
+   empty-state hints, drag prompts, topology prose, the
+   destructive Remove button, and the confirm-dialog fallback
+   name. The plan-wide map gained a parallel "+ New fleet" CTA
+   next to "+ New worker group" (`onAddWorkerGroup` widened to
+   `(kind?: WorkerGroupKind) => void`), and per-card kickers now
+   read "Worker group" / "Fleet" / "Unassigned" based on the
+   group's `kind`. The plan dashboard renames "Worker Groups" to
+   "Worker groups & fleets" with a Stream/Edge breakdown, adds a
+   per-row WG/Fleet badge, flips the "in/out" capacity tooltip to
+   "Same as Fleet → Capacity…" for Edge rows, and pairs "All
+   worker groups" with a new "All fleets" jump-link wired through
+   a new `onGoToFleets` prop on `PlanDataOverview`. (A follow-up
+   pure-rename PR is filed to rename the WG-prefixed shared
+   modules — `WorkerGroupResourceMap`, `WorkerGroupDetailView`,
+   `WorkerGroupEditor`, etc. — to kind-neutral names; deferred
+   until after rc.2 to keep this commit copy-only.)
+5. _Version bump + smoke_: `2.0.0-rc.1` → `2.0.0-rc.2`. Round-trip
+   smoke tests cover empty / single Stream / single Edge / mixed
+   small / heavy-clone shapes; tsx import + openpyxl strict load
+   pass on every shape.
 
 ### PR C — `feat/v2.0-ps-use-cases`
 
