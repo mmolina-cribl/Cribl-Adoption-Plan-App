@@ -1,11 +1,19 @@
 /** Shared with export + import: sheet names, headers, and row layout. */
 
 export const SHEET_INSTRUCTIONS = 'INSTRUCTIONS' as const
+/**
+ * v0.8.6 single per-plan source sheet. Replaced by per-WG sheets in v0.9.1
+ * (`wg<name>` for Stream, `fl<name>_fleet` for Edge). Kept as a constant so
+ * the v0.8.6 import path can still find it on legacy workbooks until PR B
+ * (multi-sheet rewrite) lands.
+ */
 export const SHEET_SOURCE_SUMMARY = 'Source summary' as const
 export const SHEET_INPUT_DATA = 'input_data' as const
 /**
  * Gold template: `Copy of Adoption plan - v0.8.6.xlsx` (topology tab).
  * Older app builds used shorter/variant names; import tries those as fallbacks.
+ * v0.9.1 splits this into `Stream Overview` + `Edge Overview`; PR B handles
+ * those names.
  */
 export const SHEET_COPY_SOURCES_WG = 'Copy of Sources and WGs' as const
 export const SHEET_COPY_SOURCES_WG_LEGACY = 'Copy: Sources & Worker Groups' as const
@@ -25,8 +33,13 @@ export const SOURCE_GROUP_LABELS: (string | null)[] = (() => {
 })()
 
 /**
- * Row 2 of the Source summary sheet: official Cribl v0.8.6 28-column order (Source in column A).
- * Default programmatic export and `getSourceSummaryMatrix` use this order.
+ * Row 2 of the Source summary sheet: official Cribl v0.8.6 28-column order
+ * (Source in column A). The v0.8.6 export path still emits this exact column
+ * set for shell fidelity. v2.0 only stops carrying two of these columns
+ * (`Display name` was an optional 31-col extra that's been dropped, and
+ * `Additional notes` is the one column the gold v0.9.1 actually removed).
+ * PR B switches the export pipeline to the v0.9.1 multi-sheet layout
+ * (`wg<name>` / `fl<name>_fleet`).
  */
 export const SOURCE_HEADERS: string[] = [
   'Source',
@@ -60,12 +73,22 @@ export const SOURCE_HEADERS: string[] = [
 ]
 
 /**
- * Superset of row-2 column titles: import matches these so optional Display name / Type / Region(s)
- * (31-column workbooks) resolve; export to a shell uses the same set for name-based cell writes.
+ * Superset of row-2 column titles the importer recognizes. Includes:
+ *   - v0.8.6 columns (Display name, Type, Region(s), Operational, Risk
+ *     Reduction, Strategic, Onboarding Effort, Politics, Additional notes)
+ *     so legacy workbooks still import. Values for fields the v2.0 data model
+ *     no longer carries are read and discarded with a single warning.
+ *   - v0.9.1 columns (Physical location(s), Current Collection, Worker Group)
+ *     so v0.9.1 workbooks import cleanly when PR B's multi-sheet path
+ *     resolves to a per-WG sheet. (PR B adds the multi-sheet enumeration; this
+ *     constant is the canonical column-name table both passes share.)
  */
 export const ALL_SOURCE_IMPORT_HEADER_NAMES: string[] = [
   'Display name',
   'Source',
+  'Physical location(s)',
+  'Current Collection',
+  'Worker Group',
   'Security or Observability or both data?',
   'Stream or Edge?',
   'Type',

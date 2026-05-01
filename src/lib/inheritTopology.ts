@@ -11,7 +11,7 @@ export type SourceLinkOption = {
 export function sourceLinkOptionsFromPlan(plan: PlanState): SourceLinkOption[] {
   return plan.sourceSummary.map((r, i) => ({
     id: r.id,
-    label: (r.displayName || '').trim() || `Source ${i + 1}`,
+    label: r.source?.trim() || `Source ${i + 1}`,
     source: r.source?.trim() ?? '',
     avgDailyGb: r.avgDailyGb?.trim() ?? '',
   }))

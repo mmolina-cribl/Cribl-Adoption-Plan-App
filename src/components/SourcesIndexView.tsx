@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import type { PlanState, SourceSummaryRow } from '../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { PopoverButton } from './PopoverButton'
@@ -97,10 +97,9 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
         (s) => (!onlyHighPriority ? true : /^high$/i.test((s.dataCriticality || '').trim()) || s.complianceRelated),
       )
       .filter((s) => {
-        const name = (s.displayName || '').toLowerCase()
         const src = (s.source || '').toLowerCase()
         const tile = (s.sourceTile || '').toLowerCase()
-        return !needle || name.includes(needle) || src.includes(needle) || tile.includes(needle)
+        return !needle || src.includes(needle) || tile.includes(needle)
       })
   }, [q, sources, onlyUnassigned, onlyHighPriority])
 
@@ -108,23 +107,16 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
 
   /**
-   * Per-source completion %, keyed by source id. Reuses the same
-   * `sourceRowProgress(row, index0)` definition that the WG detail page uses
-   * for its completion histogram (see `lib/planDashboardStats.ts`), so a
-   * source's "% complete" reads identically here, on its detail page, and in
-   * the WG drill-down — one canonical definition.
-   *
-   * `index0` MUST be the row's index in `plan.sourceSummary` (insertion order),
-   * not in the filtered/sorted view, because the "filled" check on
-   * `displayName` looks for the placeholder `Source ${index0 + 1}` to count it
-   * as unfilled. Using the visible-list index would mis-classify renamed
-   * rows after filter/sort. Computed once per `sourceSummary` change so the
-   * filter/sort pipeline doesn't pay for it.
+   * Per-source completion %, keyed by source id. Reuses `sourceRowProgress`
+   * from `lib/planDashboardStats.ts` so a source's "% complete" reads
+   * identically here, on its detail page, and in the WG drill-down. Computed
+   * once per `sourceSummary` change so the filter/sort pipeline doesn't pay
+   * for it.
    */
   const progressById = useMemo(() => {
     const m = new Map<string, number>()
-    plan.sourceSummary.forEach((r, i) => {
-      m.set(r.id, sourceRowProgress(r, i).pct)
+    plan.sourceSummary.forEach((r) => {
+      m.set(r.id, sourceRowProgress(r).pct)
     })
     return m
   }, [plan.sourceSummary])
@@ -167,7 +159,7 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
     const cmp = (a: SourceSummaryRow, b: SourceSummaryRow): number => {
       switch (sortBy) {
         case 'name':
-          return dir * collator.compare(a.displayName || '', b.displayName || '')
+          return dir * collator.compare(a.source || '', b.source || '')
         case 'volume':
           return numericMissingLast(a, b, (r) => parseGb(r.avgDailyGb))
         case 'criticality':
@@ -647,15 +639,14 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
       ) : (
         <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
           {sorted.map((s) => {
-            const name = s.displayName?.trim() || 'Source'
+            // Look up the row's index in the original sourceSummary so the
+            // "Source N" fallback stays stable across filter/sort.
+            const originalIndex = plan.sourceSummary.findIndex((r) => r.id === s.id)
+            const name = sourceLabel(s, originalIndex >= 0 ? originalIndex : 0)
             const tile = s.sourceTile?.trim()
-            const src = s.source?.trim()
             const v = parseGb(s.avgDailyGb)
             const volStr = Number.isFinite(v) ? formatGbOrTbPerDayStr(v) : ''
-            const subtitleBits = [tile, src].filter(Boolean) as string[]
-            const subtitle = subtitleBits
-              .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
-              .join(' · ')
+            const subtitle = tile ?? ''
             const isSelected = selected.has(s.id)
             // Completion % is the same definition used by the WG detail page's
             // histogram — count of populated SourceSummaryRow fields, scored against

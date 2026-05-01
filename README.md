@@ -1,13 +1,22 @@
 # Cribl Adoption Plan
 
 A field-facing planning tool for designing a customer's
-[Cribl Stream](https://cribl.io/stream/) adoption — model worker groups,
-sources, and projected daily volume in one place. The app runs embedded
-inside the [Cribl App Platform](https://docs.cribl.io/dev/) but also works
-standalone in a browser for local development.
+[Cribl Stream](https://cribl.io/stream/) and
+[Cribl Edge](https://cribl.io/edge/) adoption — model worker groups,
+fleets, sources, and projected daily volume in one place. The app runs
+embedded inside the [Cribl App Platform](https://docs.cribl.io/dev/) but
+also works standalone in a browser for local development.
 
-> "Your end-to-end Cribl Stream rollout in one place — the worker groups,
-> the sources feeding them, and the daily volume each one contributes."
+> "Your end-to-end Cribl Stream and Edge rollout in one place — the
+> worker groups and fleets, the sources feeding them, and the daily
+> volume each one contributes."
+
+> **v2.0 in progress.** The app is being aligned to the v0.9.1 gold
+> Excel template (per-WG sheets, Stream + Edge overviews, PS Use Case
+> Worksheet). PR A — data model alignment — is what `2.0.0-rc.1` ships;
+> the multi-sheet I/O rewrite (PR B) and PS Use Case Worksheet (PR C)
+> follow. See [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
+> for the full plan.
 
 ## What it does
 

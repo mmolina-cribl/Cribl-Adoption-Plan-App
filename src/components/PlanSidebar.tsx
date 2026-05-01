@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PlanState, SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
+import {
+  sourceLabel,
+  type PlanState,
+  type SourceSummaryRow,
+  type WorkerGroupKind,
+  type WorkerGroupRow,
+} from '../types/planTypes'
 import { PencilIcon } from './PencilIcon'
 import type { MainView } from './navTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
@@ -44,16 +50,23 @@ type Props = {
   activeWorkerGroupId: string | null
   onSelectOverview: () => void
   onSelectWorkerGroups: () => void
+  /** v2.0: navigate to the Fleets index (only shows kind === 'edge'). */
+  onSelectFleets: () => void
   onSelectSources: () => void
   onSelectSettings: () => void
   onSelectWorkerGroup: (id: string) => void
-  onAddWorkerGroup: () => void
+  /**
+   * Pass `'stream'` from the Worker Groups + button, `'edge'` from the
+   * Fleets + button. Defaults to `'stream'` for any caller that doesn't
+   * specify (mobile compact bar, legacy callers).
+   */
+  onAddWorkerGroup: (kind?: WorkerGroupKind) => void
   onRemoveWorkerGroup: (id: string) => void
   onUpdateWorkerGroupWg: (id: string, wg: string) => void
   onSelectSource: (id: string) => void
   onAddSource: () => void
   onRemoveSource: (id: string) => void
-  onUpdateSourceDisplayName: (id: string, displayName: string) => void
+  onRenameSource: (id: string, name: string) => void
   onSelectImport: () => void
   onSelectExport: () => void
   onClearPlan: () => void
@@ -100,7 +113,7 @@ function SourceRowRail({
   workerGroupName,
   onSelect,
   onRemove,
-  onUpdateDisplayName,
+  onRename,
 }: {
   row: SourceSummaryRow
   index: number
@@ -109,11 +122,11 @@ function SourceRowRail({
   workerGroupName?: string
   onSelect: () => void
   onRemove: () => void
-  onUpdateDisplayName: (displayName: string) => void
+  onRename: (name: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const label = row.displayName?.trim() || `Source ${index + 1}`
+  const label = sourceLabel(row, index)
   const nameKey = label.trim().toLowerCase()
   const tile = row.sourceTile?.trim()
   const src = row.source?.trim()
@@ -150,8 +163,8 @@ function SourceRowRail({
           <input
             ref={inputRef}
             className="w-full min-w-0 max-w-full border-0 bg-transparent p-0 text-sm font-medium text-cribl-ink outline-none"
-            value={row.displayName}
-            onChange={(e) => onUpdateDisplayName(e.target.value)}
+            value={row.source}
+            onChange={(e) => onRename(e.target.value)}
             onBlur={() => setEditing(false)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === 'Escape') {
@@ -233,6 +246,7 @@ function WorkerGroupRowRail({
   onUpdateWg,
 }: {
   row: WorkerGroupRow
+  /** Position within this rail section's filtered list (Stream-only or Fleet-only). */
   index: number
   isActive: boolean
   canRemove: boolean
@@ -244,7 +258,8 @@ function WorkerGroupRowRail({
 }) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const label = row.wg.trim() || `Worker group ${index + 1}`
+  const fallbackLabel = row.kind === 'edge' ? `Fleet ${index + 1}` : `Worker group ${index + 1}`
+  const label = row.wg.trim() || fallbackLabel
   const sub =
     totalSourceIngestGb > 0
       ? `${formatGbOrTbPerDayStr(totalSourceIngestGb)} ingest · ${sourceCount} ${
@@ -287,9 +302,9 @@ function WorkerGroupRowRail({
                 e.currentTarget.blur()
               }
             }}
-            placeholder={`Worker group ${index + 1}`}
+            placeholder={fallbackLabel}
             autoComplete="off"
-            aria-label="Worker group name"
+            aria-label={row.kind === 'edge' ? 'Fleet name' : 'Worker group name'}
           />
           {sub ? (
             <span className="mt-0.5 block max-w-full truncate text-xs font-normal text-cribl-muted">{sub}</span>
@@ -313,7 +328,7 @@ function WorkerGroupRowRail({
           onClick={() => setEditing(true)}
           className="inline-flex w-7 shrink-0 items-center justify-center border-0 border-l border-cribl-border/60 bg-transparent text-cribl-muted hover:bg-cribl-elevate hover:text-cribl-ink"
           title="Edit name"
-          aria-label="Edit worker group name"
+          aria-label={row.kind === 'edge' ? 'Edit fleet name' : 'Edit worker group name'}
         >
           <PencilIcon className="h-3.5 w-3.5" />
         </button>
@@ -333,76 +348,73 @@ function WorkerGroupRowRail({
   )
 }
 
-export function PlanSidebarRail({
+/**
+ * One left-nav section for either Stream worker groups or Edge fleets.
+ *
+ * The two sections are visually + behaviorally identical — the section
+ * header label, the empty-state add-button label, and the `kind` passed
+ * back to the parent's `onAddWorkerGroup` are the only differences.
+ */
+function WorkerGroupKindSection({
+  kind,
   plan,
+  rows,
   mainView,
-  activeSourceId,
   activeWorkerGroupId,
-  onSelectOverview,
-  onSelectWorkerGroups,
-  onSelectSources,
-  onSelectSettings,
+  listOpen,
+  setListOpen,
+  canRemove,
+  onSelectIndex,
   onSelectWorkerGroup,
   onAddWorkerGroup,
   onRemoveWorkerGroup,
   onUpdateWorkerGroupWg,
-  onSelectSource,
-  onAddSource,
-  onRemoveSource,
-  onUpdateSourceDisplayName,
-  onSelectImport,
-  onSelectExport,
-  onClearPlan,
-  className = '',
-}: Props) {
-  const wgs = plan.workerGroups
-  const canRemoveWg = wgs.length > 0
-  const noWgs = wgs.length === 0
-  const sources = plan.sourceSummary
-  const canRemove = sources.length > 0
-  const noSources = sources.length === 0
-  const [wgListOpen, setWgListOpen] = useState(true)
-  const [sourcesListOpen, setSourcesListOpen] = useState(true)
-
+}: {
+  kind: WorkerGroupKind
+  plan: PlanState
+  rows: WorkerGroupRow[]
+  mainView: MainView
+  activeWorkerGroupId: string | null
+  listOpen: boolean
+  setListOpen: (cb: (v: boolean) => boolean) => void
+  canRemove: boolean
+  onSelectIndex: () => void
+  onSelectWorkerGroup: (id: string) => void
+  onAddWorkerGroup: (kind?: WorkerGroupKind) => void
+  onRemoveWorkerGroup: (id: string) => void
+  onUpdateWorkerGroupWg: (id: string, wg: string) => void
+}) {
+  const sectionTitle = kind === 'edge' ? 'Fleets' : 'Worker Groups'
+  const indexView: MainView = kind === 'edge' ? 'fleets' : 'workerGroups'
+  const addLabel = kind === 'edge' ? '+ Add Fleet' : '+ Add Worker Group'
+  const empty = rows.length === 0
   return (
-    <nav
-      className={`flex flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
-      aria-label="Plan, Worker Groups, and Sources"
-    >
-      <NavButton
-        active={mainView === 'overview'}
-        onClick={onSelectOverview}
-        className="mt-2"
-      >
-        Plan
-      </NavButton>
-
+    <>
       <div className="mt-3 flex items-center gap-1">
         <NavButton
-          active={mainView === 'workerGroups'}
-          onClick={onSelectWorkerGroups}
+          active={mainView === indexView}
+          onClick={onSelectIndex}
           className="flex-1"
         >
           <span className="flex items-center gap-2">
-            <span>Worker Groups</span>
-            {wgs.length > 0 ? (
-              <span className="text-xs font-normal text-cribl-muted">({wgs.length})</span>
+            <span>{sectionTitle}</span>
+            {rows.length > 0 ? (
+              <span className="text-xs font-normal text-cribl-muted">({rows.length})</span>
             ) : null}
           </span>
         </NavButton>
-        {wgs.length > 0 ? (
+        {rows.length > 0 ? (
           <ChevronToggle
-            open={wgListOpen}
-            onClick={() => setWgListOpen((v) => !v)}
-            label="Worker Groups list"
+            open={listOpen}
+            onClick={() => setListOpen((v) => !v)}
+            label={`${sectionTitle} list`}
           />
         ) : null}
       </div>
-      {wgListOpen ? (
+      {listOpen ? (
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
-          {wgs.map((r, i) => {
-            const isWg =
-              mainView === 'workerGroup' && activeWorkerGroupId === r.id
+          {rows.map((r, i) => {
+            const isWg = mainView === 'workerGroup' && activeWorkerGroupId === r.id
             const sourceTotal = sumAvgDailyFromSourceSummaryForWg(plan, r.id)
             return (
               <WorkerGroupRowRail
@@ -410,7 +422,7 @@ export function PlanSidebarRail({
                 row={r}
                 index={i}
                 isActive={isWg}
-                canRemove={canRemoveWg}
+                canRemove={canRemove}
                 totalSourceIngestGb={sourceTotal.sum}
                 sourceCount={sourceTotal.count}
                 onSelect={() => onSelectWorkerGroup(r.id)}
@@ -422,17 +434,102 @@ export function PlanSidebarRail({
           <div className="ml-3">
             <button
               type="button"
-              onClick={onAddWorkerGroup}
+              onClick={() => onAddWorkerGroup(kind)}
               className={[
                 'w-full rounded-lg border border-dashed border-cribl-border/90 bg-cribl-canvas/80 px-3 py-2 text-left text-sm font-medium text-cribl-muted transition hover:border-cribl-primary/50 hover:text-cribl-ink',
-                noWgs ? 'mt-1' : 'mt-0.5',
+                empty ? 'mt-1' : 'mt-0.5',
               ].join(' ')}
             >
-              + Add Worker Group
+              {addLabel}
             </button>
           </div>
         </div>
       ) : null}
+    </>
+  )
+}
+
+export function PlanSidebarRail({
+  plan,
+  mainView,
+  activeSourceId,
+  activeWorkerGroupId,
+  onSelectOverview,
+  onSelectWorkerGroups,
+  onSelectFleets,
+  onSelectSources,
+  onSelectSettings,
+  onSelectWorkerGroup,
+  onAddWorkerGroup,
+  onRemoveWorkerGroup,
+  onUpdateWorkerGroupWg,
+  onSelectSource,
+  onAddSource,
+  onRemoveSource,
+  onRenameSource,
+  onSelectImport,
+  onSelectExport,
+  onClearPlan,
+  className = '',
+}: Props) {
+  // v2.0: split worker-group rows into two parallel sections by `kind`. Both
+  // sections look the same and use the same row component — only the labels,
+  // empty-state placeholders, and the kind passed to `onAddWorkerGroup`
+  // differ.
+  const streamWgs = plan.workerGroups.filter((w) => w.kind === 'stream')
+  const fleetWgs = plan.workerGroups.filter((w) => w.kind === 'edge')
+  const canRemoveWg = plan.workerGroups.length > 0
+  const sources = plan.sourceSummary
+  const canRemove = sources.length > 0
+  const noSources = sources.length === 0
+  const [wgListOpen, setWgListOpen] = useState(true)
+  const [fleetListOpen, setFleetListOpen] = useState(true)
+  const [sourcesListOpen, setSourcesListOpen] = useState(true)
+
+  return (
+    <nav
+      className={`flex flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
+      aria-label="Plan, Worker Groups, Fleets, and Sources"
+    >
+      <NavButton
+        active={mainView === 'overview'}
+        onClick={onSelectOverview}
+        className="mt-2"
+      >
+        Plan
+      </NavButton>
+
+      <WorkerGroupKindSection
+        kind="stream"
+        plan={plan}
+        rows={streamWgs}
+        mainView={mainView}
+        activeWorkerGroupId={activeWorkerGroupId}
+        listOpen={wgListOpen}
+        setListOpen={setWgListOpen}
+        canRemove={canRemoveWg}
+        onSelectIndex={onSelectWorkerGroups}
+        onSelectWorkerGroup={onSelectWorkerGroup}
+        onAddWorkerGroup={onAddWorkerGroup}
+        onRemoveWorkerGroup={onRemoveWorkerGroup}
+        onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
+      />
+
+      <WorkerGroupKindSection
+        kind="edge"
+        plan={plan}
+        rows={fleetWgs}
+        mainView={mainView}
+        activeWorkerGroupId={activeWorkerGroupId}
+        listOpen={fleetListOpen}
+        setListOpen={setFleetListOpen}
+        canRemove={canRemoveWg}
+        onSelectIndex={onSelectFleets}
+        onSelectWorkerGroup={onSelectWorkerGroup}
+        onAddWorkerGroup={onAddWorkerGroup}
+        onRemoveWorkerGroup={onRemoveWorkerGroup}
+        onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
+      />
 
       <div className="mt-3 flex items-center gap-1">
         <NavButton
@@ -460,7 +557,7 @@ export function PlanSidebarRail({
           {sources.map((r, i) => {
             const isSrc = mainView === 'source' && activeSourceId === r.id
             const wgName = r.workerGroupId
-              ? wgs.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
+              ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
               : undefined
             return (
               <SourceRowRail
@@ -472,7 +569,7 @@ export function PlanSidebarRail({
                 workerGroupName={wgName}
                 onSelect={() => onSelectSource(r.id)}
                 onRemove={() => onRemoveSource(r.id)}
-                onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
+                onRename={(name) => onRenameSource(r.id, name)}
               />
             )
           })}
@@ -534,7 +631,7 @@ function SourceChipMobile({
   canRemove,
   onSelect,
   onRemove,
-  onUpdateDisplayName,
+  onRename,
 }: {
   row: SourceSummaryRow
   index: number
@@ -542,11 +639,11 @@ function SourceChipMobile({
   canRemove: boolean
   onSelect: () => void
   onRemove: () => void
-  onUpdateDisplayName: (displayName: string) => void
+  onRename: (name: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const label = row.displayName?.trim() || `S${index + 1}`
+  const label = row.source?.trim() || `S${index + 1}`
 
   useEffect(() => {
     if (!editing) {
@@ -579,8 +676,8 @@ function SourceChipMobile({
           <input
             ref={inputRef}
             className="max-w-[10rem] min-w-[6rem] border-0 bg-transparent p-0 text-sm font-medium text-cribl-ink outline-none"
-            value={row.displayName}
-            onChange={(e) => onUpdateDisplayName(e.target.value)}
+            value={row.source}
+            onChange={(e) => onRename(e.target.value)}
             onBlur={() => setEditing(false)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === 'Escape') {
@@ -597,9 +694,9 @@ function SourceChipMobile({
           type="button"
           className={['max-w-[8rem] truncate', chip(isActive)].join(' ')}
           onClick={onSelect}
-          title={row.displayName?.trim() || `Source ${index + 1}`}
+          title={row.source?.trim() || `Source ${index + 1}`}
         >
-          {row.displayName?.trim() || `S${index + 1}`}
+          {row.source?.trim() || `S${index + 1}`}
         </button>
       )}
       {!editing && (
@@ -647,7 +744,8 @@ function WorkerGroupChipMobile({
 }) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const label = row.wg.trim() || `WG${index + 1}`
+  const fallback = row.kind === 'edge' ? `FL${index + 1}` : `WG${index + 1}`
+  const label = row.wg.trim() || fallback
 
   useEffect(() => {
     if (!editing) {
@@ -688,9 +786,9 @@ function WorkerGroupChipMobile({
                 e.currentTarget.blur()
               }
             }}
-            placeholder={`WG${index + 1}`}
+            placeholder={fallback}
             autoComplete="off"
-            aria-label="Worker group name"
+            aria-label={row.kind === 'edge' ? 'Fleet name' : 'Worker group name'}
           />
         </div>
       ) : (
@@ -698,7 +796,10 @@ function WorkerGroupChipMobile({
           type="button"
           className={['max-w-[6.5rem] truncate', chip(isActive)].join(' ')}
           onClick={onSelect}
-          title={row.wg.trim() || `Worker group ${index + 1}`}
+          title={
+            row.wg.trim() ||
+            (row.kind === 'edge' ? `Fleet ${index + 1}` : `Worker group ${index + 1}`)
+          }
         >
           {label}
         </button>
@@ -709,7 +810,7 @@ function WorkerGroupChipMobile({
           onClick={() => setEditing(true)}
           className="inline-flex w-6 shrink-0 items-center justify-center border-0 border-l border-cribl-border/80 bg-white text-cribl-muted hover:bg-cribl-elevate hover:text-cribl-ink"
           title="Edit name"
-          aria-label="Edit worker group name"
+          aria-label={row.kind === 'edge' ? 'Edit fleet name' : 'Edit worker group name'}
         >
           <PencilIcon className="h-3 w-3" />
         </button>
@@ -737,6 +838,7 @@ export function PlanNavMobile({
   activeWorkerGroupId,
   onSelectOverview,
   onSelectWorkerGroups: _onSelectWorkerGroups,
+  onSelectFleets: _onSelectFleets,
   onSelectSources: _onSelectSources,
   onSelectSettings: _onSelectSettings,
   onSelectWorkerGroup,
@@ -746,7 +848,7 @@ export function PlanNavMobile({
   onSelectSource,
   onAddSource,
   onRemoveSource,
-  onUpdateSourceDisplayName,
+  onRenameSource,
   onSelectImport,
   onSelectExport,
   onClearPlan: _onClearPlan,
@@ -755,7 +857,11 @@ export function PlanNavMobile({
   void _onClearPlan
   void _onSelectSettings
   const sources = plan.sourceSummary
-  const wgs = plan.workerGroups
+  // v2.0: keep Stream WGs and Edge fleets in separate runs of chips so each
+  // row's positional fallback ("WG1" / "FL1") matches its index in its own
+  // section, mirroring the desktop rail.
+  const streamWgs = plan.workerGroups.filter((w) => w.kind === 'stream')
+  const fleetWgs = plan.workerGroups.filter((w) => w.kind === 'edge')
   const chip = (active: boolean) =>
     [
       'shrink-0 cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium transition',
@@ -778,13 +884,16 @@ export function PlanNavMobile({
       <button type="button" className={chip(mainView === 'workerGroups')} onClick={_onSelectWorkerGroups}>
         Worker Groups
       </button>
+      <button type="button" className={chip(mainView === 'fleets')} onClick={_onSelectFleets}>
+        Fleets
+      </button>
       <button type="button" className={chip(mainView === 'sources')} onClick={_onSelectSources}>
         Sources
       </button>
       <button type="button" className={chip(mainView === 'settings')} onClick={_onSelectSettings}>
         Settings
       </button>
-      {wgs.map((r, i) => {
+      {streamWgs.map((r, i) => {
         const is = mainView === 'workerGroup' && activeWorkerGroupId === r.id
         return (
           <WorkerGroupChipMobile
@@ -792,7 +901,7 @@ export function PlanNavMobile({
             row={r}
             index={i}
             isActive={is}
-            canRemove={wgs.length > 0}
+            canRemove={plan.workerGroups.length > 0}
             onSelect={() => onSelectWorkerGroup(r.id)}
             onRemove={() => onRemoveWorkerGroup(r.id)}
             onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
@@ -802,10 +911,33 @@ export function PlanNavMobile({
       <button
         type="button"
         className="shrink-0 rounded-full border border-dashed border-cribl-border px-2 py-1.5 text-[10px] font-medium text-cribl-muted"
-        onClick={onAddWorkerGroup}
+        onClick={() => onAddWorkerGroup('stream')}
         title="Add a worker group"
       >
         + Group
+      </button>
+      {fleetWgs.map((r, i) => {
+        const is = mainView === 'workerGroup' && activeWorkerGroupId === r.id
+        return (
+          <WorkerGroupChipMobile
+            key={r.id}
+            row={r}
+            index={i}
+            isActive={is}
+            canRemove={plan.workerGroups.length > 0}
+            onSelect={() => onSelectWorkerGroup(r.id)}
+            onRemove={() => onRemoveWorkerGroup(r.id)}
+            onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
+          />
+        )
+      })}
+      <button
+        type="button"
+        className="shrink-0 rounded-full border border-dashed border-cribl-border px-2 py-1.5 text-[10px] font-medium text-cribl-muted"
+        onClick={() => onAddWorkerGroup('edge')}
+        title="Add a fleet"
+      >
+        + Fleet
       </button>
       {sources.map((r, i) => {
         const is = mainView === 'source' && activeSourceId === r.id
@@ -818,7 +950,7 @@ export function PlanNavMobile({
             canRemove={sources.length > 0}
             onSelect={() => onSelectSource(r.id)}
             onRemove={() => onRemoveSource(r.id)}
-            onUpdateDisplayName={(displayName) => onUpdateSourceDisplayName(r.id, displayName)}
+            onRename={(name) => onRenameSource(r.id, name)}
           />
         )
       })}

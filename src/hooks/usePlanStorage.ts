@@ -23,28 +23,35 @@ function normalizePlan(raw: unknown): PlanState {
   const merged: PlanState = {
     ...p,
     cseNotes: p.cseNotes ?? '',
-    sourceSummary: p.sourceSummary.map((r, i) => {
-      const row = r as Partial<SourceSummaryRow> & { id: string }
+    sourceSummary: p.sourceSummary.map((r) => {
+      const row = r as Partial<SourceSummaryRow> & {
+        id: string
+        // v1.x legacy field names — accepted on hydrate so old saved plans don't lose data:
+        regions?: string
+      }
       return {
         ...r,
-        displayName:
-          typeof row.displayName === 'string' && row.displayName.trim() !== ''
-            ? row.displayName
-            : `Source ${i + 1}`,
-        type: (row as Partial<SourceSummaryRow>).type ?? ('' as SourceSummaryRow['type']),
-        regions: (row as Partial<SourceSummaryRow>).regions ?? '',
+        type: row.type ?? ('' as SourceSummaryRow['type']),
+        // v0.9.1: `regions` field was renamed to `physicalLocations`. Carry old
+        // value across so a v1.3 -> v2.0 KV hydrate doesn't lose location data.
+        physicalLocations:
+          (row.physicalLocations ?? row.regions ?? '').toString(),
+        currentCollection: row.currentCollection ?? '',
       } as SourceSummaryRow
     }),
     workerGroups: (p.workerGroups ?? []).map((w) => {
       const x = w as Partial<WorkerGroupRow>
       return {
         ...w,
+        // v2.0: every WG row is now either 'stream' or 'edge'. Plans saved
+        // before v2.0 default to 'stream' (the only kind that existed).
+        kind: x.kind === 'edge' ? 'edge' : 'stream',
         throughputGbd: x.throughputGbd ?? '',
         diskOneDayGb: x.diskOneDayGb ?? '',
       } as WorkerGroupRow
     }),
   }
-  return assignWorkerGroupIds(backfillSourceSummaryTypeRegion(merged))
+  return assignWorkerGroupIds(backfillSourceSummaryTypePhysicalLocation(merged))
 }
 
 function normalizeSummaryType(s: string): '' | 'On-Prem' | 'Cloud/Internet' {
@@ -66,10 +73,10 @@ function normalizeSummaryType(s: string): '' | 'On-Prem' | 'Cloud/Internet' {
 }
 
 /**
- * If older sessions don't have Type/Region on Source summary, copy from a matching
+ * If older sessions don't have Type/Physical location(s) on Source summary, copy from a matching
  * topology (SourceVolume) row when the source name matches and fields are still empty.
  */
-function backfillSourceSummaryTypeRegion(plan: PlanState): PlanState {
+function backfillSourceSummaryTypePhysicalLocation(plan: PlanState): PlanState {
   if (!plan.sourceVolume || plan.sourceVolume.length === 0) {
     return plan
   }
@@ -85,11 +92,11 @@ function backfillSourceSummaryTypeRegion(plan: PlanState): PlanState {
     ...plan,
     sourceSummary: plan.sourceSummary.map((r) => {
       const needsType = !(r.type || '').trim()
-      const needsRegions = !(r.regions || '').trim()
-      if (!needsType && !needsRegions) {
+      const needsPhysical = !(r.physicalLocations || '').trim()
+      if (!needsType && !needsPhysical) {
         return r
       }
-      const k = (r.source || r.displayName || '').trim().toLowerCase()
+      const k = (r.source || '').trim().toLowerCase()
       if (!k) {
         return r
       }
@@ -101,8 +108,8 @@ function backfillSourceSummaryTypeRegion(plan: PlanState): PlanState {
         candidates.find((x) => (x.workerGroupId && x.workerGroupId === r.workerGroupId) || (!x.workerGroupId && !r.workerGroupId)) ??
         candidates[0]
       const nextType = needsType ? normalizeSummaryType(String(v.type ?? '')) : r.type
-      const nextRegions = needsRegions ? String(v.region ?? '').trim() : r.regions
-      return { ...r, type: nextType, regions: nextRegions }
+      const nextPhysical = needsPhysical ? String(v.region ?? '').trim() : r.physicalLocations
+      return { ...r, type: nextType, physicalLocations: nextPhysical }
     }),
   }
 }

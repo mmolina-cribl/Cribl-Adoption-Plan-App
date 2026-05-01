@@ -26,10 +26,7 @@ function sourcesForTopology(plan: PlanState): SourceVolumeRow[] {
   const explicit = (plan.sourceVolume ?? []).filter((s) => String(s.source ?? '').trim() !== '')
   const seen = new Set(explicit.map((s) => String(s.source ?? '').trim().toLowerCase()))
   const implied = (plan.sourceSummary ?? [])
-    .map((r) => {
-      const label = String(r.source ?? '').trim() || String(r.displayName ?? '').trim()
-      return { r, label }
-    })
+    .map((r) => ({ r, label: String(r.source ?? '').trim() }))
     .filter(({ label }) => label !== '')
     .filter(({ label }) => !seen.has(label.toLowerCase()))
     .map(({ r, label }) => {
@@ -40,8 +37,8 @@ function sourcesForTopology(plan: PlanState): SourceVolumeRow[] {
         source: label,
         dailyVolumeGb: String(r.avgDailyGb ?? '').trim(),
         type: r.type ?? '',
-        region: String(r.regions ?? '').trim(),
-        currentCollection: '',
+        region: String(r.physicalLocations ?? '').trim(),
+        currentCollection: String(r.currentCollection ?? '').trim(),
         criblCollection: '',
         wg: wgName,
         useCases: '',
@@ -457,7 +454,7 @@ export async function planToBlobWithShellExcelJs(plan: PlanState, buffer: ArrayB
       if (cIdx < 0) {
         continue
       }
-      const v = sourceSummaryValueForHeaderName(name, s)
+      const v = sourceSummaryValueForHeaderName(name, s, { plan })
       if (v === undefined) {
         continue
       }

@@ -55,6 +55,26 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
         </div>
       )
 
+    case 'physicalLocations':
+      return (
+        <div className="mt-4">
+          <LabeledField
+            id={`w-${row.id}-loc`}
+            label="Physical location(s)"
+            hint="Type a location, press Enter to bubble it, or use commas."
+          >
+            <MultiComboboxChips
+              id={`w-${row.id}-loc`}
+              value={row.physicalLocations}
+              onChange={(v) => s('physicalLocations', v)}
+              options={[]}
+              showSuggestions={false}
+              placeholder="e.g. us-east-1, DC4 / Stockholm…"
+            />
+          </LabeledField>
+        </div>
+      )
+
     case 'sourceTile':
       return (
         <div className="mt-4">
@@ -179,6 +199,25 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               value={row.stakeholders}
               onChange={(e) => s('stakeholders', e.target.value)}
               rows={2}
+            />
+          </LabeledField>
+        </div>
+      )
+
+    case 'currentCollection':
+      return (
+        <div className="mt-4">
+          <LabeledField
+            id={`w-${row.id}-cc`}
+            label="Current Collection"
+            hint="The pre-Cribl ingestion path (e.g. Splunk UF, syslog-ng, Datadog Agent)."
+          >
+            <input
+              id={`w-${row.id}-cc`}
+              className="field-strong"
+              value={row.currentCollection}
+              onChange={(e) => s('currentCollection', e.target.value)}
+              placeholder="e.g. Splunk Heavy Forwarder"
             />
           </LabeledField>
         </div>
@@ -406,21 +445,6 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               value={row.politics}
               onChange={(e) => s('politics', e.target.value)}
               rows={2}
-            />
-          </LabeledField>
-        </div>
-      )
-
-    case 'additionalNotes':
-      return (
-        <div className="mt-4">
-          <LabeledField id={`w-${row.id}-n`} label="Additional notes">
-            <textarea
-              id={`w-${row.id}-n`}
-              className="field-strong min-h-10 resize-y"
-              value={row.additionalNotes}
-              onChange={(e) => s('additionalNotes', e.target.value)}
-              rows={3}
             />
           </LabeledField>
         </div>

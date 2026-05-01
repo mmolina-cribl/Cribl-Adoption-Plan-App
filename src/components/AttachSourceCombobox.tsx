@@ -53,16 +53,10 @@ export function AttachSourceCombobox({
         if (!needle) {
           return true
         }
-        const name = (c.row.displayName || '').toLowerCase()
         const src = (c.row.source || '').toLowerCase()
         const tile = (c.row.sourceTile || '').toLowerCase()
         const wg = (c.currentWgName || '').toLowerCase()
-        return (
-          name.includes(needle) ||
-          src.includes(needle) ||
-          tile.includes(needle) ||
-          wg.includes(needle)
-        )
+        return src.includes(needle) || tile.includes(needle) || wg.includes(needle)
       })
       // Unassigned sources surface first; assigned-elsewhere sources after.
       .sort((a, b) => {
@@ -93,9 +87,9 @@ export function AttachSourceCombobox({
       {open && matches.length > 0 ? (
         <ul className="absolute left-0 right-0 z-20 mt-1 max-h-80 list-none overflow-auto rounded-lg border border-cribl-border bg-white p-1 shadow-card-float">
           {matches.map((c) => {
-            const name = c.row.displayName?.trim() || 'Source'
-            const tile = c.row.sourceTile?.trim()
             const src = c.row.source?.trim()
+            const name = src || 'Source'
+            const tile = c.row.sourceTile?.trim()
             const subtitleBits = [tile, src].filter(Boolean) as string[]
             const subtitle = subtitleBits
               .filter((b, i) => subtitleBits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)

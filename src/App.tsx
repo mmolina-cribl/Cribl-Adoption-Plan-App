@@ -21,7 +21,13 @@ import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
 import { usePlanStorage } from './hooks/usePlanStorage'
 import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from './lib/postAddPreference'
-import { newId, type PlanState, type SourceSummaryRow } from './types/planTypes'
+import {
+  newId,
+  sourceLabel,
+  type PlanState,
+  type SourceSummaryRow,
+  type WorkerGroupKind,
+} from './types/planTypes'
 import { fetchAdoptionPlanEmptyBufferIfMissing } from './lib/adoptionPlanTemplateExport'
 import { hydrateImportShell } from './lib/importShellStore'
 
@@ -71,7 +77,11 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
   const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
   const [addSourceOpen, setAddSourceOpen] = useState(false)
-  const [addWorkerGroupOpen, setAddWorkerGroupOpen] = useState(false)
+  // v2.0: a worker-group row is either a Stream worker group or an Edge
+  // fleet, surfaced under separate left-nav sections. Tracking the in-flight
+  // kind keeps the AddWorkerGroupDialog's copy / placeholder / next-id in
+  // sync with which "+" the user clicked.
+  const [addWorkerGroupOpen, setAddWorkerGroupOpen] = useState<null | WorkerGroupKind>(null)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [confirmRemoveWorkerGroupId, setConfirmRemoveWorkerGroupId] = useState<string | null>(null)
   const [confirmRemoveSourceId, setConfirmRemoveSourceId] = useState<string | null>(null)
@@ -86,7 +96,13 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   }, [])
 
   const nextSourcePlaceholder = `Source ${plan.sourceSummary.length + 1}`
-  const nextWorkerGroupPlaceholder = `Worker group ${plan.workerGroups.length + 1}`
+  // Per-kind running counters: "Worker group N" stays scoped to Stream
+  // entries, "Fleet N" stays scoped to Edge entries. Mixing them would make
+  // the placeholder less useful as soon as you have one of each kind.
+  const streamCount = plan.workerGroups.filter((w) => w.kind === 'stream').length
+  const fleetCount = plan.workerGroups.filter((w) => w.kind === 'edge').length
+  const nextWorkerGroupPlaceholder =
+    addWorkerGroupOpen === 'edge' ? `Fleet ${fleetCount + 1}` : `Worker group ${streamCount + 1}`
 
   useEffect(() => {
     if (plan.sourceSummary.length === 0) {
@@ -116,17 +132,18 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   }, [plan.workerGroups])
 
   const openAddSource = () => setAddSourceOpen(true)
-  const openAddWorkerGroup = () => setAddWorkerGroupOpen(true)
+  const openAddWorkerGroup = (kind: WorkerGroupKind = 'stream') =>
+    setAddWorkerGroupOpen(kind)
 
-  const addSourceWithName = (displayName: string) => {
+  const addSourceWithName = (name: string) => {
     const id = newId()
     setPlan((p) => {
       const s = defaultSourceRow(p.sourceSummary.length, '')
       s.id = id
-      s.displayName = displayName
-      // Treat the initial "Add source" name as the canonical Source value too.
-      // Users can still change the Source field later if needed.
-      s.source = displayName
+      // v0.9.1 dropped the dedicated Display name column — the Source field
+      // is the row's identity. Users can rename it later via the inline pencil
+      // in the source detail view, which writes back to `source` directly.
+      s.source = name
       return { ...p, sourceSummary: [...p.sourceSummary, s] }
     })
     setActiveSourceId(id)
@@ -137,7 +154,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     } else if (pref === 'manual') {
       setPostAdd(null)
     } else {
-      setPostAdd({ kind: 'choice', sourceDisplayName: displayName })
+      setPostAdd({ kind: 'choice', sourceDisplayName: name })
     }
   }
 
@@ -195,17 +212,14 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     })
   }
 
-  const updateSourceDisplayName = (id: string, displayName: string) => {
+  /**
+   * Renames a source. v0.9.1 dropped the Display name column — `source` is
+   * now the row's identity, so this writes directly to that field.
+   */
+  const updateSourceName = (id: string, name: string) => {
     setPlan((p) => ({
       ...p,
-      sourceSummary: p.sourceSummary.map((r) => {
-        if (r.id !== id) {
-          return r
-        }
-        const prevName = r.displayName
-        const shouldKeepImpliedSource = (r.source ?? '').trim() === '' || (r.source ?? '') === prevName
-        return { ...r, displayName, source: shouldKeepImpliedSource ? displayName : r.source }
-      }),
+      sourceSummary: p.sourceSummary.map((r) => (r.id === id ? { ...r, source: name } : r)),
     }))
   }
 
@@ -216,10 +230,10 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     }))
   }
 
-  const addWorkerGroupWithName = (wg: string) => {
+  const addWorkerGroupWithName = (wg: string, kind: WorkerGroupKind = 'stream') => {
     const id = newId()
     setPlan((p) => {
-      const w = defaultWorkerGroupRow()
+      const w = defaultWorkerGroupRow(kind)
       w.id = id
       w.wg = wg
       if (p.workerGroups.length > 0) {
@@ -311,11 +325,11 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
       />
       <ConfirmRemoveSourceDialog
         open={confirmRemoveSourceId != null}
-        sourceName={
-          confirmRemoveSourceId
-            ? plan.sourceSummary.find((s) => s.id === confirmRemoveSourceId)?.displayName ?? 'Source'
-            : 'Source'
-        }
+        sourceName={(() => {
+          if (!confirmRemoveSourceId) return 'Source'
+          const i = plan.sourceSummary.findIndex((s) => s.id === confirmRemoveSourceId)
+          return i >= 0 ? sourceLabel(plan.sourceSummary[i]!, i) : 'Source'
+        })()}
         onCancel={() => setConfirmRemoveSourceId(null)}
         onConfirm={() => {
           const id = confirmRemoveSourceId
@@ -337,11 +351,12 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
       )}
       {addWorkerGroupOpen && (
         <AddWorkerGroupDialog
+          kind={addWorkerGroupOpen}
           nextLabel={nextWorkerGroupPlaceholder}
-          onCancel={() => setAddWorkerGroupOpen(false)}
+          onCancel={() => setAddWorkerGroupOpen(null)}
           onConfirm={(name) => {
-            addWorkerGroupWithName(name)
-            setAddWorkerGroupOpen(false)
+            addWorkerGroupWithName(name, addWorkerGroupOpen)
+            setAddWorkerGroupOpen(null)
           }}
         />
       )}
@@ -415,13 +430,14 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   activeWorkerGroupId={activeWorkerGroupId}
                   onSelectOverview={() => setMainView('overview')}
                   onSelectWorkerGroups={() => setMainView('workerGroups')}
+                  onSelectFleets={() => setMainView('fleets')}
                   onSelectSources={() => setMainView('sources')}
                   onSelectSettings={() => setMainView('settings')}
                   onSelectWorkerGroup={(id) => {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')
                   }}
-                  onAddWorkerGroup={openAddWorkerGroup}
+                  onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
                   onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
                   onUpdateWorkerGroupWg={updateWorkerGroupWg}
                   onSelectSource={(id) => {
@@ -430,7 +446,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   }}
                   onAddSource={openAddSource}
                   onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
-                  onUpdateSourceDisplayName={updateSourceDisplayName}
+                  onRenameSource={updateSourceName}
                   onSelectImport={() => setMainView('import')}
                   onSelectExport={() => setMainView('export')}
                   onClearPlan={() => setConfirmClearOpen(true)}
@@ -492,13 +508,14 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               activeWorkerGroupId={activeWorkerGroupId}
               onSelectOverview={() => setMainView('overview')}
               onSelectWorkerGroups={() => setMainView('workerGroups')}
+              onSelectFleets={() => setMainView('fleets')}
               onSelectSources={() => setMainView('sources')}
               onSelectSettings={() => setMainView('settings')}
               onSelectWorkerGroup={(id) => {
                 setActiveWorkerGroupId(id)
                 setMainView('workerGroup')
               }}
-              onAddWorkerGroup={openAddWorkerGroup}
+              onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
               onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
               onUpdateWorkerGroupWg={updateWorkerGroupWg}
               onSelectSource={(id) => {
@@ -507,7 +524,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               }}
               onAddSource={openAddSource}
               onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
-              onUpdateSourceDisplayName={updateSourceDisplayName}
+              onRenameSource={updateSourceName}
               onSelectImport={() => setMainView('import')}
               onSelectExport={() => setMainView('export')}
               onClearPlan={() => setConfirmClearOpen(true)}
@@ -541,6 +558,19 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 <WorkerGroupsIndexView
                   plan={plan}
                   setPlan={setPlan}
+                  kind="stream"
+                  onOpenGroup={(id) => {
+                    setActiveWorkerGroupId(id)
+                    setMainView('workerGroup')
+                  }}
+                />
+              )}
+
+              {mainView === 'fleets' && (
+                <WorkerGroupsIndexView
+                  plan={plan}
+                  setPlan={setPlan}
+                  kind="edge"
                   onOpenGroup={(id) => {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')

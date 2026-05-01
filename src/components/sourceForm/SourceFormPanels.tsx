@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { inputData, securityDataTypes, sourceTypes, streamOrEdge } from '../../data/referenceData'
 import { PencilIcon } from '../PencilIcon'
-import type { PlanState, SourceSummaryRow } from '../../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow } from '../../types/planTypes'
 import {
   CheckboxLabeled,
   LabeledField,
@@ -70,17 +70,17 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
         />
       </LabeledField>
       <LabeledField
-        id={`s-${row.id}-regions`}
-        label="Region(s)"
-        hint="Type a region, press Enter to bubble it, or use commas."
+        id={`s-${row.id}-loc`}
+        label="Physical location(s)"
+        hint="Free text — region, data center, or host range. Press Enter to bubble a value, or use commas."
       >
         <MultiComboboxChips
-          id={`s-${row.id}-regions`}
-          value={row.regions}
-          onChange={(v) => s('regions', v)}
+          id={`s-${row.id}-loc`}
+          value={row.physicalLocations}
+          onChange={(v) => s('physicalLocations', v)}
           options={[]}
           showSuggestions={false}
-          placeholder="Type a region, press Enter…"
+          placeholder="e.g. us-east-1, DC4 / Stockholm…"
         />
       </LabeledField>
       <LabeledField id={`s-${row.id}-tile`} label="Source tile">
@@ -283,7 +283,14 @@ export function PhaseRoadmapBlock({ row, s }: Base) {
   )
 }
 
-/** INITIATIVE, USE CASES, VALUE LEVERS */
+/**
+ * INITIATIVE, USE CASES, VALUE LEVERS
+ *
+ * Mirrors the gold v0.9.1 per-WG sheet's "INITIATIVE, USE CASES, VALUE
+ * LEVERS" header group. v0.9.1 only dropped `Additional notes` from this
+ * section vs v0.8.6; the value-lever fields (Operational / Risk Reduction
+ * / Strategic / Onboarding Effort / Politics) all stay.
+ */
 export function InitiativeValueLeversBlock({ row, s }: Base) {
   return (
     <div className="grid grid-cols-1 gap-4">
@@ -358,19 +365,6 @@ export function InitiativeValueLeversBlock({ row, s }: Base) {
             rows={2}
           />
         </LabeledField>
-        <LabeledField
-          id={`s-${row.id}-n`}
-          label="Additional notes"
-          className="md:col-span-2 lg:col-span-3"
-        >
-          <textarea
-            id={`s-${row.id}-n`}
-            className="field-strong min-h-10 resize-y"
-            value={row.additionalNotes}
-            onChange={(e) => s('additionalNotes', e.target.value)}
-            rows={3}
-          />
-        </LabeledField>
       </div>
     </div>
   )
@@ -420,7 +414,11 @@ function WorkerGroupAssignmentBlock({ plan, row, s }: { plan: PlanState; row: So
 export function SourceSummaryStack({ plan, row, s, sourceIndex, onOpenGuidedTour }: StackProps) {
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const label = row.displayName?.trim() || `Source ${sourceIndex + 1}`
+  // v0.9.1 dropped the dedicated "Display name" column — the gold per-WG sheet
+  // uses the Source name as the row title. The header inline-edit now writes
+  // directly to `source`; the disabled "Source" field inside Primary Data
+  // Points mirrors the same value so both spots stay in sync.
+  const label = sourceLabel(row, sourceIndex)
   const expandByDefault = getSourceDetailCardsExpanded()
 
   useEffect(() => {
@@ -442,10 +440,10 @@ export function SourceSummaryStack({ plan, row, s, sourceIndex, onOpenGuidedTour
           <div className="mt-0.5 flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 gap-y-1">
             <input
               ref={inputRef}
-              id={`s-${row.id}-displayName`}
+              id={`s-${row.id}-source`}
               className="min-w-[10rem] max-w-full border-0 border-b border-transparent bg-transparent py-0.5 text-lg font-semibold text-cribl-ink outline-none focus:border-cribl-primary/40"
-              value={row.displayName}
-              onChange={(e) => s('displayName', e.target.value)}
+              value={row.source}
+              onChange={(e) => s('source', e.target.value)}
               onBlur={() => setEditing(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === 'Escape') {

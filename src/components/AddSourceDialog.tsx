@@ -4,7 +4,7 @@ type Props = {
   /** e.g. "Source 3" — used as the input placeholder and default if the field is left blank. */
   nextLabel: string
   onCancel: () => void
-  onConfirm: (displayName: string) => void
+  onConfirm: (name: string) => void
 }
 
 /**
@@ -65,7 +65,7 @@ export function AddSourceDialog({ nextLabel, onCancel, onConfirm }: Props) {
             <input
               ref={inputRef}
               id={id + 'input'}
-              name="sourceDisplayName"
+              name="sourceName"
               type="text"
               className="w-full rounded-lg border-cribl-border"
               autoComplete="off"

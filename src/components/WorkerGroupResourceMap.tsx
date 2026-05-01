@@ -158,13 +158,13 @@ export function WorkerGroupResourceMap({
     () =>
       sources.map((r) => {
         const vol = parseGb(r.avgDailyGb)
+        // v0.9.1 dropped Display name; the Source field IS the row's name.
+        // Subtitle no longer dedupes name vs source.
+        const tile = r.sourceTile?.trim()
         return {
           id: r.id,
-          name: r.displayName?.trim() || 'Source',
-          subtitle: [r.sourceTile?.trim(), r.source?.trim()]
-            .filter(Boolean)
-            .filter((b, i, arr) => arr.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
-            .join(' · '),
+          name: r.source?.trim() || 'Source',
+          subtitle: tile ?? '',
           volumeGb: Number.isFinite(vol) && vol >= 0 ? vol : 0,
           hasVolume: Number.isFinite(vol) && vol > 0,
           isCompliance: r.complianceRelated,
@@ -862,9 +862,8 @@ function UnassignedSection({
     if (!trimmed) return sources
     return sources.filter((r) => {
       const haystack = [
-        r.displayName,
-        r.sourceTile,
         r.source,
+        r.sourceTile,
         r.avgDailyGb,
       ]
         .map((v) => (v ?? '').toString().toLowerCase())
@@ -914,14 +913,8 @@ function UnassignedSection({
         {filtered.map((r) => {
           const vol = parseGb(r.avgDailyGb)
           const hasVol = Number.isFinite(vol) && vol > 0
-          const name = r.displayName?.trim() || 'Source'
-          const subtitle = [r.sourceTile?.trim(), r.source?.trim()]
-            .filter(Boolean)
-            .filter(
-              (b, i, arr) =>
-                arr.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i,
-            )
-            .join(' · ')
+          const name = r.source?.trim() || 'Source'
+          const subtitle = r.sourceTile?.trim() ?? ''
           const volStr = hasVol ? formatGbOrTbPerDayStr(vol) : '—'
           const isDragSubject = draggedSourceId === r.id
           return (

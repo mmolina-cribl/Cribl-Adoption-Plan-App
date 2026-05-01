@@ -1,18 +1,50 @@
 import { useEffect, useId, useRef } from 'react'
+import type { WorkerGroupKind } from '../types/planTypes'
 
 type Props = {
-  /** e.g. "Worker group 2" — used as the placeholder and default if the field is left blank. */
+  /**
+   * v2.0: choose between creating a Cribl Stream worker group ("stream") or a
+   * Cribl Edge fleet ("edge"). Same dialog, different copy / placeholder /
+   * submit-button label, so the user always sees the correct vocabulary for
+   * the section of the left nav they clicked "+" on.
+   */
+  kind: WorkerGroupKind
+  /** e.g. "Worker group 2" / "Fleet 2" — used as the placeholder and default if the field is left blank. */
   nextLabel: string
   onCancel: () => void
   onConfirm: (wg: string) => void
 }
 
+const COPY: Record<WorkerGroupKind, {
+  title: string
+  helper: string
+  fieldLabel: string
+  ariaLabel: string
+  submit: string
+}> = {
+  stream: {
+    title: 'New worker group',
+    helper: 'Enter a name. You can change it later in the sidebar.',
+    fieldLabel: 'Worker group name',
+    ariaLabel: 'Worker group name',
+    submit: 'Add worker group',
+  },
+  edge: {
+    title: 'New fleet',
+    helper: 'Enter a name. You can change it later in the sidebar.',
+    fieldLabel: 'Fleet name',
+    ariaLabel: 'Fleet name',
+    submit: 'Add fleet',
+  },
+}
+
 /**
- * Simple modal: prompt for a new worker group name before it is created.
+ * Simple modal: prompt for a new worker group / fleet name before it is created.
  */
-export function AddWorkerGroupDialog({ nextLabel, onCancel, onConfirm }: Props) {
+export function AddWorkerGroupDialog({ kind, nextLabel, onCancel, onConfirm }: Props) {
   const id = useId()
   const inputRef = useRef<HTMLInputElement>(null)
+  const copy = COPY[kind]
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,9 +76,9 @@ export function AddWorkerGroupDialog({ nextLabel, onCancel, onConfirm }: Props) 
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id={id + '-title'} className="m-0 text-base font-semibold text-cribl-ink">
-          New worker group
+          {copy.title}
         </h2>
-        <p className="m-0 mt-1 text-sm text-cribl-muted">Enter a name. You can change it later in the sidebar.</p>
+        <p className="m-0 mt-1 text-sm text-cribl-muted">{copy.helper}</p>
         <form
           className="mt-4 space-y-4"
           onSubmit={(e) => {
@@ -60,7 +92,7 @@ export function AddWorkerGroupDialog({ nextLabel, onCancel, onConfirm }: Props) 
               className="text-xs font-medium uppercase tracking-wide text-cribl-muted"
               htmlFor={id + 'input'}
             >
-              Worker group name
+              {copy.fieldLabel}
             </label>
             <input
               ref={inputRef}
@@ -71,7 +103,7 @@ export function AddWorkerGroupDialog({ nextLabel, onCancel, onConfirm }: Props) 
               autoComplete="off"
               autoFocus
               placeholder={nextLabel}
-              aria-label="Worker group name"
+              aria-label={copy.ariaLabel}
             />
           </div>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -86,7 +118,7 @@ export function AddWorkerGroupDialog({ nextLabel, onCancel, onConfirm }: Props) 
               type="submit"
               className="h-9 rounded-lg bg-cribl-primary px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-cribl-primary-hover"
             >
-              Add worker group
+              {copy.submit}
             </button>
           </div>
         </form>

@@ -1,12 +1,19 @@
 /**
  * One guided step per field (or one tight pair for data optimization), with
  * a plain-language lede above each input.
+ *
+ * v2.0 (gold v0.9.1): added `physicalLocations` and `currentCollection`.
+ * Removed `additionalNotes` (the only per-source column the gold actually
+ * dropped). The value-lever fields (operational / riskReduction / strategic
+ * / onboardingEffort / politics) remain — they're still on every per-WG
+ * and per-Fleet sheet of the gold template.
  */
 export type SourceWizardFieldKind =
   | 'intro'
   | 'wrap'
   | 'securityOrObs'
   | 'streamOrEdge'
+  | 'physicalLocations'
   | 'sourceTile'
   | 'pipelineUsecase'
   | 'destinations'
@@ -15,6 +22,7 @@ export type SourceWizardFieldKind =
   | 'complianceRelated'
   | 'dataCriticality'
   | 'stakeholders'
+  | 'currentCollection'
   | 'isCurrent'
   | 'targetOnboardStart'
   | 'targetOnboardEnd'
@@ -30,7 +38,6 @@ export type SourceWizardFieldKind =
   | 'strategic'
   | 'onboardingEffort'
   | 'politics'
-  | 'additionalNotes'
 
 export type SourceWizardFieldStep = {
   id: string
@@ -67,6 +74,14 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'How this data is ingested in Cribl when that matters for design (Stream in the data center, Edge on the source, and so on). Leave it blank if it is still being decided.',
     kind: 'streamOrEdge',
+  },
+  {
+    id: 'physicalLocations',
+    section: 'Primary data',
+    headline: 'Physical location(s)',
+    lede:
+      'Where this data physically lives — a region, a data center, or a host range. Free text. v0.9.1 of the gold template uses "Physical location(s)" instead of "Region(s)" because Edge fleets can live on hosts, not in cloud regions.',
+    kind: 'physicalLocations',
   },
   {
     id: 'sourceTile',
@@ -131,6 +146,14 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'Who owns this source, who is waiting on the outcome, and which app or line of business should stay in the loop. Names, teams, or org names are all fine.',
     kind: 'stakeholders',
+  },
+  {
+    id: 'currentCollection',
+    section: 'Phase & roadmap',
+    headline: 'Current collection',
+    lede:
+      'How is this data being collected today, before Cribl? For example "Splunk UF", "Heavy Forwarder", "syslog-ng", "Datadog Agent". This drives migration use cases and is new in v0.9.1.',
+    kind: 'currentCollection',
   },
   {
     id: 'isCurrent',
@@ -251,14 +274,6 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'Organizational dynamics to be aware of: competing teams, a vocal critic, or past project friction. Keep it short and factual—this helps your team plan conversations.',
     kind: 'politics',
-  },
-  {
-    id: 'notes',
-    section: 'Initiative & value',
-    headline: 'Additional notes',
-    lede:
-      'Anything that did not fit the questions above: call context, acronyms, or edge cases. This is free text for your own reference.',
-    kind: 'additionalNotes',
   },
   {
     id: 'wrap',

@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { PlanState, SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow, type WorkerGroupRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import {
@@ -133,14 +133,14 @@ type Branch =
       dst: Point
     }
 
-function buildSourceLeaf(row: SourceSummaryRow): SourceLeaf {
+function buildSourceLeaf(row: SourceSummaryRow, index: number): SourceLeaf {
   const vol = parseGb(row.avgDailyGb)
-  const subtitleBits = [row.sourceTile?.trim(), row.source?.trim()]
-    .filter(Boolean)
-    .filter((b, i, arr) => arr.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
+  // v0.9.1 dropped Display name; the Source field is the row's identity.
+  // The subtitle no longer dedupes name vs source — they're the same now.
+  const subtitleBits = [row.sourceTile?.trim()].filter(Boolean) as string[]
   return {
     id: row.id,
-    name: row.displayName?.trim() || 'Source',
+    name: sourceLabel(row, index),
     subtitle: subtitleBits.join(' · '),
     volumeGb: Number.isFinite(vol) && vol >= 0 ? vol : 0,
     hasVolume: Number.isFinite(vol) && vol > 0,
@@ -225,23 +225,30 @@ export function PlanResourceMap({
     groups: WgGroup[]
     unassignedSources: SourceLeaf[]
   }>(() => {
+    // Index source rows by their position in plan.sourceSummary so the leaf
+    // builder can render a stable "Source N" fallback for unnamed rows.
+    const indexById = new Map(plan.sourceSummary.map((r, i) => [r.id, i]))
     const groups: WgGroup[] = plan.workerGroups.map((wg) => {
       const sources = plan.sourceSummary
         .filter((r) => r.workerGroupId === wg.id)
-        .map(buildSourceLeaf)
+        .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
         .sort((a, b) => b.volumeGb - a.volumeGb)
       const totalGb = sources.reduce((acc, s) => acc + s.volumeGb, 0)
+      // Stream WGs and Edge fleets share the resource map for now (PR A);
+      // only the empty-name fallback differs so an unnamed Fleet does not
+      // present as "Untitled worker group" in the tree.
+      const fallback = wg.kind === 'edge' ? 'Untitled fleet' : 'Untitled worker group'
       return {
         id: wg.id,
         wg,
-        name: wg.wg.trim() || 'Untitled worker group',
+        name: wg.wg.trim() || fallback,
         sources,
         totalGb,
       }
     })
     const unassignedSources = plan.sourceSummary
       .filter((r) => !r.workerGroupId)
-      .map(buildSourceLeaf)
+      .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
       .sort((a, b) => b.volumeGb - a.volumeGb)
     return { groups, unassignedSources }
   }, [plan.workerGroups, plan.sourceSummary])

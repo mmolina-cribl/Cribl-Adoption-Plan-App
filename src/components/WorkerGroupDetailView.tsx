@@ -1,7 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react'
 import { WorkerGroupEditor } from './WorkerGroupEditor'
 import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
-import type { PlanState } from '../types/planTypes'
+import { sourceLabel, type PlanState } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
 import { LabeledField, SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
@@ -192,7 +192,7 @@ export function WorkerGroupDetailView({
   }))
 
   const vols = sourcesWithIndex
-    .map(({ row }) => ({ label: row.displayName?.trim() || 'Source', value: parseGb(row.avgDailyGb) }))
+    .map(({ row, index0 }) => ({ label: sourceLabel(row, index0), value: parseGb(row.avgDailyGb) }))
     .filter((x) => Number.isFinite(x.value) && x.value >= 0)
     .sort((a, b) => b.value - a.value)
   const totalVol = vols.reduce((a, x) => a + x.value, 0)
@@ -202,7 +202,7 @@ export function WorkerGroupDetailView({
   const volScale = volUnit === 'TB/d' ? 1 / 1024 : 1
 
   const reductions = sourcesWithIndex
-    .map(({ row }) => {
+    .map(({ row, index0 }) => {
       const avg = parseGb(row.avgDailyGb)
       const optGb = parseGb(row.dataOptGb)
       const optPct = parsePct(row.dataOptPct)
@@ -219,7 +219,7 @@ export function WorkerGroupDetailView({
       }
       return {
         id: row.id,
-        name: row.displayName?.trim() || 'Source',
+        name: sourceLabel(row, index0),
         avg,
         reducible,
         basis,
@@ -247,13 +247,16 @@ export function WorkerGroupDetailView({
 
   const priorityRows = sources
     .filter((r) => /^high$/i.test((r.dataCriticality || '').trim()) || r.complianceRelated)
-    .map((r) => ({
-      id: r.id,
-      name: r.displayName?.trim() || 'Source',
-      vol: parseGb(r.avgDailyGb),
-      compliance: r.complianceRelated,
-      crit: (r.dataCriticality || '').trim() || 'Unknown',
-    }))
+    .map((r) => {
+      const i = plan.sourceSummary.findIndex((x) => x.id === r.id)
+      return {
+        id: r.id,
+        name: sourceLabel(r, i >= 0 ? i : 0),
+        vol: parseGb(r.avgDailyGb),
+        compliance: r.complianceRelated,
+        crit: (r.dataCriticality || '').trim() || 'Unknown',
+      }
+    })
     .sort((a, b) => {
       const av = Number.isFinite(a.vol) ? a.vol : -1
       const bv = Number.isFinite(b.vol) ? b.vol : -1
@@ -277,7 +280,7 @@ export function WorkerGroupDetailView({
 
   const regionCounts = new Map<string, number>()
   for (const r of sources) {
-    for (const reg of parseMultiValue(r.regions || '')) {
+    for (const reg of parseMultiValue(r.physicalLocations || '')) {
       regionCounts.set(reg, (regionCounts.get(reg) || 0) + 1)
     }
   }
@@ -287,8 +290,8 @@ export function WorkerGroupDetailView({
     .map(([label, value]) => ({ label, value }))
 
   const completionBuckets = { '0–25%': 0, '25–50%': 0, '50–75%': 0, '75–100%': 0 }
-  for (const { row, index0 } of sourcesWithIndex) {
-    const pct = sourceRowProgress(row, index0).pct
+  for (const { row } of sourcesWithIndex) {
+    const pct = sourceRowProgress(row).pct
     if (pct < 25) completionBuckets['0–25%'] += 1
     else if (pct < 50) completionBuckets['25–50%'] += 1
     else if (pct < 75) completionBuckets['50–75%'] += 1
@@ -342,16 +345,16 @@ export function WorkerGroupDetailView({
       <header
         id="wg-header"
         className="flex min-w-0 flex-col gap-1 px-1"
-        aria-label="Worker group title"
+        aria-label={g.kind === 'edge' ? 'Fleet title' : 'Worker group title'}
       >
         <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">
-          Worker group
+          {g.kind === 'edge' ? 'Fleet' : 'Worker group'}
         </p>
         <EditableWorkerGroupName
           groupId={g.id}
           value={g.wg}
           onChange={(v) => s('wg', v)}
-          emptyLabel="Worker group"
+          emptyLabel={g.kind === 'edge' ? 'Fleet' : 'Worker group'}
           size="section"
         />
       </header>
@@ -466,11 +469,11 @@ export function WorkerGroupDetailView({
             </div>
 
             <div className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl">
-              <p className="m-0 text-xs font-semibold text-cribl-ink">Regions</p>
-              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">By region tag in this group</p>
+              <p className="m-0 text-xs font-semibold text-cribl-ink">Physical locations</p>
+              <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">By location tag in this group</p>
               <div className="mt-3">
                 {topRegions.length === 0 ? (
-                  <p className="m-0 text-sm text-cribl-muted">No region tags yet.</p>
+                  <p className="m-0 text-sm text-cribl-muted">No location tags yet.</p>
                 ) : (
                   <MiniBars items={topRegions} />
                 )}
@@ -661,31 +664,27 @@ export function WorkerGroupDetailView({
           </p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
-            {sources.map((r) => (
+            {sources.map((r) => {
+              const idx = plan.sourceSummary.findIndex((x) => x.id === r.id)
+              const label = sourceLabel(r, idx >= 0 ? idx : 0)
+              return (
               <li key={r.id} className="min-w-0">
                 <div className="card-axiom flex min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 shadow-ctrl sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span className="text-sm font-semibold text-cribl-ink">
-                        {r.displayName?.trim() || 'Source'}
+                        {label}
                       </span>
                     </div>
-                    {r.source?.trim() ? (
-                      (() => {
-                        const name = (r.displayName || '').trim().toLowerCase()
-                        const tile = (r.sourceTile || '').trim()
-                        const src = (r.source || '').trim()
-                        const vol = (r.avgDailyGb || '').trim()
-                        const volStr = vol ? formatGbOrTbPerDayStr(parseGb(vol)) : ''
-                        const bits = [tile, src, volStr].filter(Boolean)
-                        const subtitle = bits
-                          .filter((b, i) => bits.findIndex((x) => x.toLowerCase() === b.toLowerCase()) === i)
-                          .filter((b) => b.toLowerCase() !== name)
-                          .join(' · ')
-                        if (!subtitle) return null
-                        return <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p>
-                      })()
-                    ) : null}
+                    {(() => {
+                      const tile = (r.sourceTile || '').trim()
+                      const vol = (r.avgDailyGb || '').trim()
+                      const volStr = vol ? formatGbOrTbPerDayStr(parseGb(vol)) : ''
+                      const bits = [tile, volStr].filter(Boolean) as string[]
+                      const subtitle = bits.join(' · ')
+                      if (!subtitle) return null
+                      return <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p>
+                    })()}
                     {(() => {
                       const v = parseGb(r.avgDailyGb)
                       if (!Number.isFinite(v) || v < 0 || maxVol <= 0) return null
@@ -720,7 +719,8 @@ export function WorkerGroupDetailView({
                   </div>
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
       </SectionBox>

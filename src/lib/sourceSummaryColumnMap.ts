@@ -22,12 +22,24 @@ export function findColumnIndexByHeader(headerRow: string[], ...candidates: stri
   return -1
 }
 
-/** Optional extra title rows for a canonical Source summary header. */
+/**
+ * Optional extra title rows for a canonical Source summary header.
+ *
+ * `Physical location(s)` (v0.9.1) treats `Region(s)` / `Region` / `Regions`
+ * (v0.8.6) as fallback aliases so a v0.8.6 workbook imports cleanly into the
+ * `physicalLocations` field. The legacy `Region(s)` entry remains so the
+ * import column map still resolves it on workbooks that have a literal
+ * `Region(s)` header — value lands in the same `physicalLocations` field via
+ * the import path.
+ */
 const SOURCE_HEADER_EXTRA_CANDIDATES: Partial<Record<string, string[]>> = {
   'Display name': ['Name', 'Source name', 'Source display name'],
+  'Physical location(s)': ['Physical location', 'Physical Locations', 'Region(s)', 'Region', 'Regions'],
   'Region(s)': ['Region', 'Regions'],
+  'Worker Group': ['WG', 'Worker group'],
   'Pipeline usecase': ['Pipeline use case'],
   'Data optimization %': ['Data optimization%', 'Data Optimization %', 'Data optimization  %'],
+  'Current Collection': ['Current collection'],
 }
 
 /**
