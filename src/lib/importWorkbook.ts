@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { defaultSourceRow } from './defaultState'
+import { defaultActivation, defaultSourceRow } from './defaultState'
 import {
   SHEET_COPY_SOURCES_WG,
   SHEET_COPY_SOURCES_WG_LEGACY,
@@ -616,6 +616,11 @@ export function importAdoptionPlanXlsx(
       // the app fills it lazily where it still consumes the legacy shape.
       sourceVolume: [],
       workerGroups: v091.workerGroups,
+      // PR C wires real PS Use Case Worksheet parsing here. For now the
+      // importer drops in the default empty Activation so the rest of the
+      // app can rely on the field being present after import; the real
+      // sheet reader lands alongside the Activation page UI.
+      activation: defaultActivation(),
     })
     return { ok: true, plan, warnings }
   }
@@ -646,6 +651,12 @@ export function importAdoptionPlanXlsx(
       sourceSummary,
       sourceVolume: topology.sourceVolume,
       workerGroups: topology.workerGroups,
+      // v0.8.6 workbooks predate the PS Use Case Worksheet feature; the
+      // sheet may exist (the gold ships an empty one) but it isn't read
+      // here. Always default to an empty Activation; if the user later
+      // re-imports a v0.9.1 workbook the activation block will be
+      // hydrated from the gold sheet.
+      activation: defaultActivation(),
     })
     return { ok: true, plan, warnings }
   }

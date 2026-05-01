@@ -104,6 +104,89 @@ export type WorkerGroupRow = {
   diskOneDayGb: string
 }
 
+/**
+ * Status value for any row of the gold's `PS Use Case Worksheet` sheet
+ * (blocks 1 and 3). Restricted to the 4-value list the gold's data
+ * validation enforces. Used by every editable Status cell on the
+ * Activation page.
+ */
+export type ActivationStatus =
+  | 'Not Started'
+  | 'In Progress'
+  | 'Pending Review'
+  | 'Complete'
+
+/**
+ * Cribl PS engagement tier the customer purchased. Drives soft-gating
+ * of use case slots in the Activation page (Silver = first 2 slots in
+ * scope, Gold = first 3, Platinum = all 5). Stored in PlanState but
+ * does NOT round-trip through the .xlsx — the gold has no cell for it.
+ * `null` when the user hasn't picked yet (initial state, or explicit
+ * "I'll pick later" dismiss).
+ */
+export type ActivationTier = 'Silver' | 'Gold' | 'Platinum'
+
+/**
+ * One row of the `PS Use Case Worksheet` block 1 (Activation Base
+ * Scope, rows 3–7). Item / Deliverable column-A and column-C labels
+ * are static (sourced from `psUseCaseLayout.PS_BASE_SCOPE_ITEMS`); we
+ * only persist the customer-edited fields.
+ */
+export type ActivationBaseScopeRow = {
+  status: ActivationStatus
+  notes: string
+}
+
+/**
+ * One row of the `PS Use Case Worksheet` block 2 (Activation Use Case
+ * Overview, rows 11–15). The customer picks a kind from a 12-value
+ * dropdown; an empty string means "no pick yet" (renders as blank).
+ */
+export type ActivationUseCaseOverviewRow = {
+  kind: string
+}
+
+/**
+ * One row of the `PS Use Case Worksheet` block 3 (Activation Use Case
+ * Worksheet) — the row layout shared by the 3 base-scope sub-rows
+ * (rows 19–21) and every use-case parameter row (rows 22–46). Column
+ * A / B labels are static and live in `psUseCaseLayout.ts`; we only
+ * persist the customer-edited fields.
+ */
+export type ActivationWorksheetRow = {
+  parameters: string
+  status: ActivationStatus
+  notes: string
+}
+
+/**
+ * One use-case slot on the worksheet (block 3, rows 22–46). Each slot
+ * owns 5 parameter rows. Tier of the slot is derived by index from
+ * `psUseCaseLayout.PS_USE_CASE_TIERS` and is not stored here.
+ */
+export type ActivationUseCase = {
+  parameters: ActivationWorksheetRow[]
+}
+
+/**
+ * Top-level activation tracker — a 1-to-1 model of the gold's
+ * `PS Use Case Worksheet` sheet plus a soft tier picker. See
+ * `CRIBL_DEV_NOTES.md` → "PR C — feat/v2.0-ps-use-cases" for the
+ * full design and `psUseCaseLayout.ts` for the static labels.
+ */
+export type Activation = {
+  /** PS engagement tier; `null` until the picker modal is answered. */
+  tier: ActivationTier | null
+  /** 5 base-scope deliverables (rows 3–7). */
+  baseScope: ActivationBaseScopeRow[]
+  /** 5 use-case overview slots (rows 11–15). */
+  useCaseOverview: ActivationUseCaseOverviewRow[]
+  /** 3 base-scope worksheet rows (rows 19–21). */
+  baseScopeWorksheet: ActivationWorksheetRow[]
+  /** 5 use cases × 5 parameter rows each (rows 22–46). */
+  useCases: ActivationUseCase[]
+}
+
 export type PlanState = {
   version: 1
   customerName: string
@@ -111,6 +194,14 @@ export type PlanState = {
   sourceSummary: SourceSummaryRow[]
   sourceVolume: SourceVolumeRow[]
   workerGroups: WorkerGroupRow[]
+  /**
+   * Activation tracker for the `PS Use Case Worksheet` sheet (PR C,
+   * v2.0.0). Plans imported from older v0.8.6 / v0.9.1 workbooks (or
+   * hydrated from pre-PR-C KV blobs) backfill this with default empty
+   * values via `defaultActivation()` — the field is non-optional so
+   * the rest of the app can rely on its shape.
+   */
+  activation: Activation
 }
 
 export function newId(): string {

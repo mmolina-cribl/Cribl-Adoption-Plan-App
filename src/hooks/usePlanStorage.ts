@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { createEmptyPlan } from '../lib/defaultState'
+import { backfillActivation } from '../lib/activationNormalize'
 import { clearImportShell } from '../lib/importShellStore'
 import { kvGet, kvSet } from '../lib/kvStore'
 import { assignWorkerGroupIds } from '../lib/workerGroupIds'
-import type { PlanState, SourceSummaryRow, SourceVolumeRow, WorkerGroupRow } from '../types/planTypes'
+import type {
+  Activation,
+  PlanState,
+  SourceSummaryRow,
+  SourceVolumeRow,
+  WorkerGroupRow,
+} from '../types/planTypes'
 
 const KEY = 'plan'
 
@@ -50,6 +57,13 @@ function normalizePlan(raw: unknown): PlanState {
         diskOneDayGb: x.diskOneDayGb ?? '',
       } as WorkerGroupRow
     }),
+    // v2.0 PR C: every PlanState now carries an `activation` block
+    // mirroring the gold's PS Use Case Worksheet sheet. Older saved
+    // plans (v1.x KV blobs and v0.8.6 imports) didn't have it, so we
+    // backfill defaults here. `backfillActivation` is shape-tolerant
+    // and fills in any missing sub-arrays / rows / fields without
+    // dropping data the user has already entered.
+    activation: backfillActivation((p as Partial<PlanState>).activation as Activation | undefined),
   }
   return assignWorkerGroupIds(backfillSourceSummaryTypePhysicalLocation(merged))
 }
