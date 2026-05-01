@@ -13,6 +13,7 @@ import {
   PS_PARAMETERS_PER_USE_CASE,
   PS_PARAMETER_NUMBERS,
   PS_STATUS_OPTIONS,
+  PS_USE_CASE_COUNT,
   PS_USE_CASE_KIND_OPTIONS,
   PS_USE_CASE_OVERVIEW_NUMBERS,
   PS_USE_CASE_TIERS,
@@ -62,9 +63,12 @@ const TABS: ReadonlyArray<{
  * content renders at a time so each block has the full content width
  * for writing and selections.
  *
- * Soft-gating: when `tier` is set, use-case cards beyond the tier's
- * unlocked count fade to ~50% opacity with an "Out of scope" pill but
- * stay fully editable. When `tier` is `null`, no fading happens.
+ * Tier scope: when `tier` is set, the Use Case Overview and Use Case
+ * Worksheet tabs only render the slots actually in scope (Silver = 2,
+ * Gold = 3, Platinum = 5) — out-of-scope slots are hidden so the page
+ * isn't longer than it needs to be. Their data is preserved in state,
+ * so changing tier later restores the hidden picks unchanged. When
+ * `tier` is `null`, all 5 slots render (no gating).
  */
 export function ActivationView({ plan, setPlan }: Props) {
   const activation = plan.activation
@@ -331,21 +335,22 @@ function UseCaseOverviewCard({
     setActivation({ ...activation, useCaseOverview: next })
   }
 
+  // Hide (don't fade) slots beyond the picked tier so the page only
+  // surfaces what's actually in scope. Out-of-scope picks remain in
+  // `activation.useCaseOverview[3..4]` so a later tier upgrade restores
+  // them — only the rendering is gated.
   const unlockedCount = unlockedUseCaseCountForTier(activation.tier)
+  const visible = activation.useCaseOverview.slice(0, unlockedCount)
 
   return (
     <div className="grid gap-3">
-      {activation.useCaseOverview.map((row, i) => {
+      {visible.map((row, i) => {
         const number = PS_USE_CASE_OVERVIEW_NUMBERS[i]
         const tier = PS_USE_CASE_TIERS[i]
-        const isLocked = activation.tier !== null && i >= unlockedCount
         return (
           <div
             key={number}
-            className={[
-              'rounded-xl border border-cribl-border/80 bg-cribl-card-body/40 p-3 transition sm:p-4',
-              isLocked ? 'opacity-50' : '',
-            ].join(' ')}
+            className="rounded-xl border border-cribl-border/80 bg-cribl-card-body/40 p-3 sm:p-4"
           >
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,90px)_minmax(0,90px)_minmax(0,1fr)] md:items-center">
               <div className="min-w-0">
@@ -358,7 +363,7 @@ function UseCaseOverviewCard({
                 <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
                   Tier
                 </p>
-                <TierBadge tier={tier} faded={isLocked} />
+                <TierBadge tier={tier} faded={false} />
               </div>
               <FieldLabel label="Use case kind">
                 <UseCaseKindSelect
@@ -371,6 +376,7 @@ function UseCaseOverviewCard({
           </div>
         )
       })}
+      <TierScopeFooter unlockedCount={unlockedCount} tier={activation.tier} noun="use case" />
     </div>
   )
 }
@@ -386,11 +392,17 @@ function UseCaseWorksheetTab({
   activation: Activation
   setActivation: (next: Activation) => void
 }) {
+  // Hide (don't fade) cards beyond the picked tier so the worksheet
+  // tab only surfaces what's actually in scope. Card data for
+  // out-of-scope slots is preserved in `activation.useCases[3..4]` so
+  // a later tier upgrade brings them back unchanged.
+  const unlockedCount = unlockedUseCaseCountForTier(activation.tier)
+
   return (
     <div className="space-y-4">
       <BaseScopeWorksheetCard activation={activation} setActivation={setActivation} />
       <div className="grid gap-3">
-        {activation.useCases.map((_, useCaseIndex) => (
+        {activation.useCases.slice(0, unlockedCount).map((_, useCaseIndex) => (
           <UseCaseWorksheetCard
             key={useCaseIndex}
             useCaseIndex={useCaseIndex}
@@ -399,6 +411,7 @@ function UseCaseWorksheetTab({
           />
         ))}
       </div>
+      <TierScopeFooter unlockedCount={unlockedCount} tier={activation.tier} noun="use case" />
     </div>
   )
 }
@@ -489,8 +502,6 @@ function UseCaseWorksheetCard({
   const headerLabel = useCaseHeaderLabel(useCaseIndex)
   const useCase = activation.useCases[useCaseIndex]
   const overviewKind = activation.useCaseOverview[useCaseIndex]?.kind ?? ''
-  const unlockedCount = unlockedUseCaseCountForTier(activation.tier)
-  const isLocked = activation.tier !== null && useCaseIndex >= unlockedCount
 
   const updateParam = (
     paramIndex: number,
@@ -506,12 +517,7 @@ function UseCaseWorksheetCard({
   }
 
   return (
-    <div
-      className={[
-        'rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 transition sm:p-4',
-        isLocked ? 'opacity-50' : '',
-      ].join(' ')}
-    >
+    <div className="rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 sm:p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
@@ -521,17 +527,7 @@ function UseCaseWorksheetCard({
             {overviewKind || <span className="text-cribl-muted">— no kind picked —</span>}
           </p>
         </div>
-        <div className="flex items-center gap-1.5">
-          <TierBadge tier={tier} faded={false} />
-          {isLocked ? (
-            <span
-              className="rounded-md border border-cribl-border bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted"
-              title={`Out of scope for ${activation.tier} tier — still editable`}
-            >
-              Out of scope
-            </span>
-          ) : null}
-        </div>
+        <TierBadge tier={tier} faded={false} />
       </div>
       <div className="mt-3 grid gap-3">
         {useCase.parameters.map((p, paramIndex) => (
@@ -707,6 +703,31 @@ function ParametersTextarea({
       placeholder="Specific logs / tasks — drag to expand…"
       className="field-strong min-h-10 w-full resize-y text-sm text-cribl-ink placeholder:text-cribl-muted/70"
     />
+  )
+}
+
+/**
+ * Soft footer surfaced under the visible cards on Tabs 2 + 3 when a
+ * tier is picked AND its unlocked count is fewer than 5. Reassures
+ * the user that hidden cards aren't lost — they'll come back if the
+ * tier picker is changed.
+ */
+function TierScopeFooter({
+  unlockedCount,
+  tier,
+  noun,
+}: {
+  unlockedCount: number
+  tier: ActivationTier | null
+  noun: string
+}) {
+  if (tier === null || unlockedCount >= PS_USE_CASE_COUNT) return null
+  const hidden = PS_USE_CASE_COUNT - unlockedCount
+  return (
+    <p className="m-0 text-[11px] text-cribl-muted">
+      Showing {unlockedCount} of {PS_USE_CASE_COUNT} {noun}s — {tier} tier scope. Change tier in the
+      page header to see the remaining {hidden}.
+    </p>
   )
 }
 
