@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useState,
   type Dispatch,
   type KeyboardEvent,
+  type ReactNode,
   type SetStateAction,
 } from 'react'
 import { TierPickerDialog } from './TierPickerDialog'
@@ -433,17 +435,20 @@ function BaseScopeWorksheetCard({
     setActivation({ ...activation, baseScopeWorksheet: next })
   }
 
+  // Open by default if any anchor row has user-edited content so a
+  // returning user immediately sees their work; otherwise stay
+  // collapsed and let the user expand explicitly.
+  const hasContent = activation.baseScopeWorksheet.some(
+    (r) => r.parameters.trim() || r.notes.trim() || r.status !== 'Not Started',
+  )
+
   return (
-    <div className="rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 sm:p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-muted">
-          Base scope anchors
-        </p>
-        <p className="m-0 text-[11px] text-cribl-muted">
-          Pre-engagement infrastructure (rows 19–21).
-        </p>
-      </div>
-      <div className="mt-3 grid gap-3">
+    <CollapsibleCard
+      defaultOpen={hasContent}
+      title="Base scope anchors"
+      subtitle="Pre-engagement infrastructure (rows 19–21)."
+    >
+      <div className="grid gap-3">
         {PS_BASE_SCOPE_WORKSHEET_LABELS.map((label, i) => {
           const row = activation.baseScopeWorksheet[i]
           const shortLabel = label.replace(/^Base Scope - /, '')
@@ -485,7 +490,7 @@ function BaseScopeWorksheetCard({
           )
         })}
       </div>
-    </div>
+    </CollapsibleCard>
   )
 }
 
@@ -516,20 +521,26 @@ function UseCaseWorksheetCard({
     setActivation({ ...activation, useCases: nextUseCases })
   }
 
+  // Open a card by default when it carries any user-edited content
+  // (parameters, notes, or non-default status on any of its 5
+  // parameter rows, OR the overview kind has been picked) so a
+  // returning user immediately sees their work. Untouched cards stay
+  // collapsed to keep the page short.
+  const hasContent =
+    overviewKind.trim().length > 0 ||
+    useCase.parameters.some(
+      (p) => p.parameters.trim() || p.notes.trim() || p.status !== 'Not Started',
+    )
+
   return (
-    <div className="rounded-xl border border-cribl-border/80 bg-cribl-canvas p-3 sm:p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="min-w-0">
-          <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
-            {headerLabel}
-          </p>
-          <p className="m-0 text-sm font-semibold text-cribl-ink">
-            {overviewKind || <span className="text-cribl-muted">— no kind picked —</span>}
-          </p>
-        </div>
-        <TierBadge tier={tier} faded={false} />
-      </div>
-      <div className="mt-3 grid gap-3">
+    <CollapsibleCard
+      defaultOpen={hasContent}
+      title={headerLabel}
+      subtitle={overviewKind || '— no kind picked —'}
+      subtitleMuted={!overviewKind}
+      rightSlot={<TierBadge tier={tier} faded={false} />}
+    >
+      <div className="grid gap-3">
         {useCase.parameters.map((p, paramIndex) => (
           <div
             key={paramIndex}
@@ -572,7 +583,101 @@ function UseCaseWorksheetCard({
       <p className="m-0 mt-3 text-[10px] text-cribl-muted">
         {PS_PARAMETERS_PER_USE_CASE} parameter rows · gold-fixed layout
       </p>
+    </CollapsibleCard>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Collapsible card wrapper (Tab 3 only)
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Card with a clickable header that toggles a collapsed body. Used on
+ * the Use Case Worksheet tab so the user can collapse the sub-sections
+ * they aren't currently editing — keeps the page from getting taller
+ * than necessary while still showing every in-scope card. Cards that
+ * already carry user-edited content open by default (so a returning
+ * user immediately sees their work); empty cards stay collapsed.
+ *
+ * The right-slot (e.g. tier badge) renders OUTSIDE the toggle button
+ * so badges aren't accidentally interactive — keyboard / screen-reader
+ * users only hear "expand/collapse" semantics on the title button.
+ */
+function CollapsibleCard({
+  defaultOpen = false,
+  title,
+  subtitle,
+  subtitleMuted = false,
+  rightSlot,
+  children,
+}: {
+  defaultOpen?: boolean
+  title: string
+  subtitle?: string
+  /** Render the subtitle in muted color (used for empty placeholders). */
+  subtitleMuted?: boolean
+  rightSlot?: ReactNode
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const headerId = useId()
+  const bodyId = useId()
+  return (
+    <div className="rounded-xl border border-cribl-border/80 bg-cribl-canvas">
+      <div className="flex items-center gap-2 px-2.5 py-2 sm:px-3 sm:py-2.5">
+        <button
+          type="button"
+          id={headerId}
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1 text-left transition hover:bg-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/40"
+        >
+          <ChevronGlyph open={open} />
+          <div className="min-w-0 flex-1">
+            <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+              {title}
+            </p>
+            {subtitle ? (
+              <p
+                className={[
+                  'm-0 text-sm font-medium',
+                  subtitleMuted ? 'text-cribl-muted' : 'text-cribl-ink',
+                ].join(' ')}
+              >
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        </button>
+        {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
+      </div>
+      {open ? (
+        <div id={bodyId} role="region" aria-labelledby={headerId} className="px-3 pb-3 sm:px-4 sm:pb-4">
+          {children}
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function ChevronGlyph({ open }: { open: boolean }) {
+  return (
+    <span
+      className={[
+        'inline-flex h-5 w-5 shrink-0 items-center justify-center text-cribl-muted transition-transform duration-150',
+        open ? 'rotate-0' : '-rotate-90',
+      ].join(' ')}
+      aria-hidden
+    >
+      <svg viewBox="0 0 20 20" className="h-full w-full" fill="currentColor">
+        <path
+          fillRule="evenodd"
+          d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
+          clipRule="evenodd"
+        />
+      </svg>
+    </span>
   )
 }
 
