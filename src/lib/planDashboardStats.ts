@@ -1,4 +1,5 @@
 import { sourceLabel, type PlanState, type SourceSummaryRow, type SourceVolumeRow, type WorkerGroupRow } from '../types/planTypes'
+import { getOnboardingStatus, type OnboardingStatus } from './onboardingStatus'
 
 /**
  * v0.9.1 schema: completeness score is computed over every per-WG / per-Fleet
@@ -71,14 +72,93 @@ function wgLine(w: WorkerGroupRow): string {
   return w.wg?.trim() || 'Unnamed worker group'
 }
 
+/**
+ * Normalize the free-text criticality field to a small canonical
+ * vocabulary so the dashboard can color-code it consistently. The
+ * gold workbook uses "High / Medium / Low" but customers sometimes
+ * type variants ("HIGH", "med", etc.); fall through to "Other" if a
+ * value is set but doesn't match, and `null` when blank.
+ */
+type CriticalityBucket = 'High' | 'Medium' | 'Low' | 'Other' | null
+function normalizeCriticality(raw: string | undefined): CriticalityBucket {
+  const v = (raw || '').trim()
+  if (!v) return null
+  if (/^high$/i.test(v)) return 'High'
+  if (/^medium$/i.test(v)) return 'Medium'
+  if (/^low$/i.test(v)) return 'Low'
+  return 'Other'
+}
+
+/**
+ * Truncate a free-text stakeholders field to a comma-joined preview
+ * suitable for a dashboard row. Splits on the same separators the
+ * source form accepts (commas, semicolons, newlines) so the rendered
+ * string survives a round-trip through whatever the user typed.
+ */
+function summarizeStakeholders(raw: string | undefined): { display: string; total: number } {
+  const v = (raw || '').trim()
+  if (!v) return { display: '', total: 0 }
+  const parts = v
+    .split(/[,;\n]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return { display: '', total: 0 }
+  // Show the first three; mention the overflow as " +N more" so the
+  // row stays scannable when a customer lists 5+ teams.
+  const head = parts.slice(0, 3).join(', ')
+  return {
+    display: parts.length > 3 ? `${head} +${parts.length - 3} more` : head,
+    total: parts.length,
+  }
+}
+
+export type DashboardSourceRow = {
+  id: string
+  name: string
+  label: string
+  volGb: string
+  filled: number
+  total: number
+  pct: number
+  /** Resolved name of the attached worker group / fleet, or `null`. */
+  wgName: string | null
+  /** Kind of the attached worker group (`null` for unassigned rows). */
+  wgKind: 'stream' | 'edge' | null
+  /** Tri-state derived onboarding lifecycle. */
+  status: OnboardingStatus
+  /** Bucketed criticality (`null` when the customer hasn't filled it in). */
+  criticality: CriticalityBucket
+  /**
+   * Target onboarding end date as a raw ISO string (or whatever the
+   * customer typed); empty string when unset. The UI renders this
+   * verbatim so a customer's "Q3 2026" entry still shows.
+   */
+  targetEnd: string
+  /** Stakeholder preview line + the total count for sizing the badge. */
+  stakeholders: { display: string; total: number }
+}
+
 export function buildDashboardSnapshot(plan: PlanState) {
-  const sourceRows = plan.sourceSummary.map((r, i) => ({
-    id: r.id,
-    name: sourceLabel(r, i),
-    label: r.source?.trim() || '—',
-    volGb: r.avgDailyGb?.trim() || '—',
-    ...sourceRowProgress(r),
-  }))
+  const wgById = new Map<string, WorkerGroupRow>()
+  for (const w of plan.workerGroups) {
+    wgById.set(w.id, w)
+  }
+  const sourceRows: DashboardSourceRow[] = plan.sourceSummary.map((r, i) => {
+    const wg = r.workerGroupId ? wgById.get(r.workerGroupId) ?? null : null
+    return {
+      id: r.id,
+      name: sourceLabel(r, i),
+      label: r.source?.trim() || '—',
+      volGb: r.avgDailyGb?.trim() || '—',
+      ...sourceRowProgress(r),
+      wgName: wg ? wg.wg.trim() || 'Unnamed' : null,
+      wgKind: wg ? wg.kind : null,
+      status: getOnboardingStatus(r),
+      criticality: normalizeCriticality(r.dataCriticality),
+      targetEnd: (r.targetOnboardEnd || '').trim(),
+      stakeholders: summarizeStakeholders(r.stakeholders),
+    }
+  })
 
   const vLines = plan.sourceVolume.map(volumeRowLine)
   const wgRowPreview = plan.workerGroups.map((w) => ({

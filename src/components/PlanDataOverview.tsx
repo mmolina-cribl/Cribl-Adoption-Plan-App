@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatGbOrTbPerDayStr } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
-import { buildDashboardSnapshot } from '../lib/planDashboardStats'
+import { buildDashboardSnapshot, type DashboardSourceRow } from '../lib/planDashboardStats'
 import {
   effectiveIngestEgressGbdForWg,
   sumAvgDailyFromSourceSummaryForWg,
@@ -185,6 +185,146 @@ function StatCard({
       </p>
       <p className="m-0 mt-0.5 text-xs text-cribl-muted">{hint}</p>
     </div>
+  )
+}
+
+/**
+ * Single Recent Sources entry on the Plan dashboard. The whole card
+ * is a `<button>` so the entire surface is the click target — no
+ * mini "Open" affordance to hunt for. Shows an at-a-glance snapshot:
+ * worker-group / fleet attachment, onboarding status, criticality,
+ * target onboard end, and stakeholder preview, in addition to the
+ * existing name / sourcetype / completion-progress row.
+ */
+function RecentSourceCard({
+  row,
+  onOpen,
+}: {
+  row: DashboardSourceRow
+  onOpen: () => void
+}) {
+  const volSuffix = row.volGb !== '—' ? ' GB/d' : ''
+  const wgLabel = row.wgName ?? 'Unassigned'
+  const wgKindLabel = row.wgKind === 'edge' ? 'Fleet' : row.wgKind === 'stream' ? 'WG' : 'Unassigned'
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="card-axiom group flex w-full min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 text-left shadow-ctrl transition hover:border-cribl-primary/50 hover:bg-cribl-elevate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/40 sm:p-4"
+      aria-label={`Open source ${row.name}`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-sm font-semibold text-cribl-ink sm:text-base">{row.name}</span>
+        <OnboardingBadge status={row.status} />
+        <CriticalityBadge value={row.criticality} />
+        <WgAttachmentBadge label={wgLabel} kindLabel={wgKindLabel} kind={row.wgKind} />
+        <span className="ml-auto text-xs tabular-nums text-cribl-muted">
+          {row.pct}% · {row.filled}/{row.total} fields
+        </span>
+      </div>
+      <p className="m-0 text-xs text-cribl-muted">
+        <span className="text-cribl-ink/90">Sourcetype:</span> {row.label}
+        <span className="mx-1 text-cribl-border/90">·</span>
+        <span className="text-cribl-ink/90">Est.</span>{' '}
+        <span className="tabular-nums">
+          {row.volGb}
+          {volSuffix}
+        </span>
+        {row.targetEnd ? (
+          <>
+            <span className="mx-1 text-cribl-border/90">·</span>
+            <span className="text-cribl-ink/90">Target onboard:</span>{' '}
+            <span className="tabular-nums">{row.targetEnd}</span>
+          </>
+        ) : null}
+      </p>
+      {row.stakeholders.total > 0 ? (
+        <p className="m-0 text-xs text-cribl-muted">
+          <span className="text-cribl-ink/90">Stakeholders:</span> {row.stakeholders.display}
+        </p>
+      ) : null}
+      <div className="max-w-md">
+        <ProgressMini pct={row.pct} />
+      </div>
+    </button>
+  )
+}
+
+function OnboardingBadge({ status }: { status: DashboardSourceRow['status'] }) {
+  // Reuse the donut palette so the badges match the Source Onboarding
+  // stat-card on the same page.
+  const palette: Record<DashboardSourceRow['status'], { dot: string; bg: string; text: string; label: string }> = {
+    complete: {
+      dot: 'bg-emerald-500',
+      bg: 'bg-emerald-50 border-emerald-200',
+      text: 'text-emerald-700',
+      label: 'Complete',
+    },
+    current: {
+      dot: 'bg-cribl-primary',
+      bg: 'bg-cribl-primary-soft border-cribl-primary/30',
+      text: 'text-cribl-primary-ink',
+      label: 'In progress',
+    },
+    planned: {
+      dot: 'bg-slate-400',
+      bg: 'bg-slate-50 border-slate-200',
+      text: 'text-slate-700',
+      label: 'Planned',
+    },
+  }
+  const p = palette[status]
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${p.bg} ${p.text}`}
+    >
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden />
+      {p.label}
+    </span>
+  )
+}
+
+function CriticalityBadge({ value }: { value: DashboardSourceRow['criticality'] }) {
+  if (value === null) return null
+  const palette: Record<Exclude<DashboardSourceRow['criticality'], null>, string> = {
+    High: 'border-rose-200 bg-rose-50 text-rose-700',
+    Medium: 'border-amber-200 bg-amber-50 text-amber-800',
+    Low: 'border-slate-200 bg-slate-50 text-slate-700',
+    Other: 'border-cribl-border bg-cribl-card-body text-cribl-muted',
+  }
+  return (
+    <span
+      title={`Data criticality: ${value}`}
+      className={`inline-flex shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${palette[value]}`}
+    >
+      {value}
+    </span>
+  )
+}
+
+function WgAttachmentBadge({
+  label,
+  kindLabel,
+  kind,
+}: {
+  label: string
+  kindLabel: string
+  kind: 'stream' | 'edge' | null
+}) {
+  const palette =
+    kind === 'edge'
+      ? 'border-cribl-primary/30 bg-cribl-primary-soft text-cribl-primary-ink'
+      : kind === 'stream'
+      ? 'border-cribl-border bg-cribl-card-body text-cribl-ink/80'
+      : 'border-dashed border-cribl-border bg-cribl-canvas text-cribl-muted'
+  const display = kind === null ? 'Unassigned' : `${kindLabel}: ${label}`
+  return (
+    <span
+      title={kind === null ? 'No worker group or fleet attached' : `Routes to ${kindLabel} ${label}`}
+      className={`inline-flex min-w-0 max-w-[16ch] truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${palette}`}
+    >
+      {display}
+    </span>
   )
 }
 
@@ -522,31 +662,7 @@ export function PlanDataOverview({
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
               {filteredRecentSources.map((row) => (
                 <li key={row.id} className="min-w-0">
-                  <div className="card-axiom flex min-w-0 flex-col gap-2.5 border-cribl-border/80 bg-white p-3.5 shadow-ctrl sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span className="text-sm font-semibold text-cribl-ink">{row.name}</span>
-                        <span className="text-xs tabular-nums text-cribl-muted">
-                          {row.pct}% · {row.filled}/{row.total} fields
-                        </span>
-                      </div>
-                      <p className="m-0 text-xs text-cribl-muted">
-                        <span className="text-cribl-ink">Source (sourcetype):</span> {row.label} ·{' '}
-                        <span className="text-cribl-ink">Est. daily volume:</span> {row.volGb}{' '}
-                        {row.volGb !== '—' ? 'GB' : ''}
-                      </p>
-                      <div className="mt-2 max-w-md">
-                        <ProgressMini pct={row.pct} />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onSelectSource(row.id)}
-                      className="h-9 shrink-0 self-stretch rounded-lg border border-cribl-border bg-cribl-canvas px-3 text-sm font-medium text-cribl-ink sm:self-center sm:px-4"
-                    >
-                      Open
-                    </button>
-                  </div>
+                  <RecentSourceCard row={row} onOpen={() => onSelectSource(row.id)} />
                 </li>
               ))}
             </ul>
