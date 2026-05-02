@@ -19,6 +19,7 @@ import {
   PS_USE_CASE_KIND_OPTIONS,
   PS_USE_CASE_OVERVIEW_NUMBERS,
   PS_USE_CASE_TIERS,
+  getUseCaseKindDescription,
   unlockedUseCaseCountForTier,
   useCaseHeaderLabel,
 } from '../lib/psUseCaseLayout'
@@ -349,6 +350,7 @@ function UseCaseOverviewCard({
       {visible.map((row, i) => {
         const number = PS_USE_CASE_OVERVIEW_NUMBERS[i]
         const tier = PS_USE_CASE_TIERS[i]
+        const description = getUseCaseKindDescription(row.kind)
         return (
           <div
             key={number}
@@ -375,6 +377,14 @@ function UseCaseOverviewCard({
                 />
               </FieldLabel>
             </div>
+            {description ? (
+              <div className="mt-3 rounded-lg border border-cribl-border/70 bg-white/70 p-2.5 sm:p-3">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+                  About {row.kind}
+                </p>
+                <p className="m-0 mt-1 text-sm leading-relaxed text-cribl-ink/90">{description}</p>
+              </div>
+            ) : null}
           </div>
         )
       })}

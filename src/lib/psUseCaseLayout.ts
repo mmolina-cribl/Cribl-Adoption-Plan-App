@@ -102,6 +102,62 @@ export const PS_USE_CASE_KIND_OPTIONS = [
 
 export type UseCaseKind = (typeof PS_USE_CASE_KIND_OPTIONS)[number]
 
+/**
+ * Short customer-friendly description per use-case kind, surfaced
+ * under the Use Case Overview picker so a CSE / customer immediately
+ * sees what they're committing to. Wording aims at "what does this
+ * solve" rather than "how does Cribl implement it" — the implementation
+ * details belong on the Use Case Worksheet tab parameter rows.
+ *
+ * Keys MUST match `PS_USE_CASE_KIND_OPTIONS` exactly (case + whitespace).
+ * The 'Other' entry intentionally points the user at the Notes column
+ * because the canned blurb can't cover an unknown bespoke ask.
+ */
+export const PS_USE_CASE_KIND_DESCRIPTIONS: Record<UseCaseKind, string> = {
+  'Data Onboarding':
+    'Onboard new data sources into Cribl Stream so they can be normalized, enriched, and routed to one or more destinations. The bread-and-butter use case for getting first-party logs and metrics into your observability stack.',
+  'Advanced Data Onboarding':
+    'Complex onboarding scenarios — custom protocols, encrypted feeds, multiple destinations per source, dynamic transformations. Built on top of standard Data Onboarding with extra pipeline logic.',
+  'Data Archiving':
+    'Tier cold or rarely-queried data into low-cost object storage (S3, GCS, Azure Blob) while keeping the option to replay archived data back into your tooling on demand.',
+  'Data Reduction':
+    'Drop noisy fields, deduplicate events, sample low-value traffic, or aggregate metrics before they hit downstream tools — typically the fastest path to reducing SIEM and observability ingest cost.',
+  'Logs to Metrics':
+    'Extract numerical values from log events and emit them as time-series metrics. Trims high-volume logs while preserving the signal needed for dashboards and alerts.',
+  'Edge Deployment':
+    'Deploy Cribl Edge agents on host nodes, containers, or Kubernetes to collect data closer to its source — reduces the leader-side ingestion footprint and enables host-level enrichment.',
+  'Data Enrichment':
+    'Add context to events before routing — lookup tables, GeoIP, threat intel feeds, asset metadata — so downstream tools can correlate and search against richer fields.',
+  'Format Conversion':
+    'Translate events between formats (JSON ↔ XML ↔ syslog ↔ CSV) so you can route the same data to multiple destinations that each expect a different shape, without duplicating collection.',
+  'Data Routing':
+    'Send a single source to multiple destinations with different filters / transformations per route — e.g. full fidelity to cold storage, sampled to the SIEM, only error events to a paging tool.',
+  'Cribl Search':
+    'Federated search across in-flight Stream data, archived data in object storage, and external systems — investigate without rehydrating data into a SIEM and paying ingest twice.',
+  'Container Deployment':
+    'Run Cribl Stream or Edge in a containerized environment (Docker, Kubernetes, OpenShift) — Helm charts, persistent volumes, autoscaling, and HA leader patterns.',
+  Other:
+    'Custom or non-standard use case not covered by the canned list. Use the Notes column on each parameter row to describe what the customer is solving.',
+}
+
+/**
+ * Look up the description for a kind value. Returns `null` for empty
+ * picks (no kind chosen yet) or strings that aren't in the canonical
+ * vocabulary — callers should hide the description block in that case
+ * rather than showing a "no description" placeholder.
+ *
+ * Named with a `get*` prefix (rather than `useCaseKindDescription`) so
+ * `react-hooks/rules-of-hooks` doesn't mistake it for a hook when
+ * called inside `.map()` callbacks during render.
+ */
+export function getUseCaseKindDescription(kind: string): string | null {
+  if (!kind) return null
+  if (kind in PS_USE_CASE_KIND_DESCRIPTIONS) {
+    return PS_USE_CASE_KIND_DESCRIPTIONS[kind as UseCaseKind]
+  }
+  return null
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Block 3 — Activation Use Case Worksheet (rows 17–46)
 // ────────────────────────────────────────────────────────────────────
