@@ -17,6 +17,7 @@ import { ConfirmClearDialog } from './components/ConfirmClearDialog'
 import { ConfirmRemoveSourceDialog } from './components/ConfirmRemoveSourceDialog'
 import { ConfirmRemoveWorkerGroupDialog } from './components/ConfirmRemoveWorkerGroupDialog'
 import { defaultSourceRow, defaultWorkerGroupRow } from './lib/defaultState'
+import { deriveStreamOrEdge } from './lib/workerGroupIds'
 import type { MainView } from './components/navTypes'
 import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
@@ -71,10 +72,11 @@ function App() {
 function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
     useResizableRail()
-  // First-load lands on the Plan tab — the resource map / dashboard
-  // is the most useful "you are here" view; the per-Source detail
-  // page is too narrow to greet a returning user.
-  const [mainView, setMainView] = useState<MainView>('overview')
+  // First-load lands on the Activation tab — that's where a CSE /
+  // customer kicks off an engagement (tier pick, base-scope checklist,
+  // use-case scoping). The Plan dashboard is one click away in the
+  // left nav for returning users who jump straight to the topology.
+  const [mainView, setMainView] = useState<MainView>('activation')
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
   const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
   const [addSourceOpen, setAddSourceOpen] = useState(false)
@@ -196,11 +198,15 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
       if ((target.workerGroupId || '') === newId) {
         return p
       }
+      // Auto-derive streamOrEdge from the new WG attachment so the v0.9.1
+      // Excel column always matches reality. v2.0 dropped the wizard step
+      // for this field — see workerGroupIds.deriveStreamOrEdge.
+      const newStreamOrEdge = deriveStreamOrEdge(newId, p.workerGroups)
       const sourceName = (target.source || '').trim()
       return {
         ...p,
         sourceSummary: p.sourceSummary.map((r) =>
-          r.id === id ? { ...r, workerGroupId: newId } : r,
+          r.id === id ? { ...r, workerGroupId: newId, streamOrEdge: newStreamOrEdge } : r,
         ),
         sourceVolume: sourceName
           ? p.sourceVolume.map((r) =>
@@ -262,7 +268,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           v.workerGroupId === id ? { ...v, workerGroupId: '', wg: v.wg } : v,
         ),
         sourceSummary: p.sourceSummary.map((r) =>
-          r.workerGroupId === id ? { ...r, workerGroupId: '' } : r,
+          // Detach + clear streamOrEdge: an unattached source has no
+          // Stream/Edge identity (auto-derived from WG.kind).
+          r.workerGroupId === id ? { ...r, workerGroupId: '', streamOrEdge: '' } : r,
         ),
       }
     })

@@ -15,11 +15,8 @@ import {
   type WorkerGroupRow,
 } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
-import { CHART_CRIBL_BLUE } from '../lib/chartColors'
-import {
-  getOnboardingStatus,
-  ONBOARDING_STATUS_COLORS,
-} from '../lib/onboardingStatus'
+import { CHART_CRIBL_BLUE, CHART_CRIBL_EDGE_BLUE } from '../lib/chartColors'
+import { getOnboardingStatus } from '../lib/onboardingStatus'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
 
@@ -176,6 +173,49 @@ function critToneClass(criticality: string): string {
     return 'bg-cribl-primary-soft text-cribl-primary-ink border-cribl-primary/30'
   }
   return ''
+}
+
+/**
+ * Small colored dot used on each source row in the resource map (and
+ * mirrored in the left-nav source list) to signal which side of the
+ * topology the source lives on:
+ *
+ *   - `'stream'` → cribl-primary teal
+ *   - `'edge'`   → cribl-edge sky-blue
+ *   - `null`     → muted grey ("not yet attached")
+ *
+ * Matches the `KindDot` exported privately from `PlanSidebar.tsx`. Kept
+ * as a local helper to avoid leaking a one-off styling primitive into
+ * the broader UI library.
+ */
+function KindDot({
+  kind,
+  className = '',
+}: {
+  kind: 'stream' | 'edge' | null
+  className?: string
+}) {
+  const tone =
+    kind === 'edge'
+      ? 'bg-cribl-edge'
+      : kind === 'stream'
+      ? 'bg-cribl-primary'
+      : 'bg-cribl-muted/60'
+  return (
+    <span
+      aria-hidden
+      className={['inline-block h-2 w-2 rounded-full', tone, className]
+        .filter(Boolean)
+        .join(' ')}
+      title={
+        kind === 'edge'
+          ? 'Attached to a Fleet (Edge)'
+          : kind === 'stream'
+          ? 'Attached to a Worker Group (Stream)'
+          : 'Not yet attached to a worker group or fleet'
+      }
+    />
+  )
 }
 
 /**
@@ -343,6 +383,21 @@ export function PlanResourceMap({
     [groups],
   )
 
+  /**
+   * O(1) lookup from `groupId` → WG kind so the SVG render loop can
+   * pick the right connector color (Stream teal vs. Edge sky-blue) per
+   * branch without re-finding the WG row each frame.
+   */
+  const groupKindById = useMemo(() => {
+    const m = new Map<string, 'stream' | 'edge'>()
+    for (const g of groups) {
+      if (g.wg) {
+        m.set(g.id, g.wg.kind)
+      }
+    }
+    return m
+  }, [groups])
+
   const measure = useCallback(() => {
     const c = containerRef.current
     if (!c) return
@@ -389,10 +444,16 @@ export function PlanResourceMap({
           if (x2 - x1 >= 24) {
             const dx = Math.max(40, (x2 - x1) * 0.55)
             const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+            // Even when a group reports no volume yet we still draw a
+            // thin dashed connector so the source ↔ WG/fleet
+            // attachment is always visually obvious. The 1.8 floor
+            // (vs. 1.4 before) keeps the line thick enough to survive
+            // anti-aliasing at 0.55 opacity when another group is
+            // hovered and this one is "faded".
             const weight =
               g.totalGb > 0
                 ? Math.max(1.8, Math.min(6, (g.totalGb / maxGroupVolGb) * 4.5 + 2))
-                : 1.4
+                : 1.8
             newPaths.push({
               kind: 'summary',
               id: g.id,
@@ -416,9 +477,13 @@ export function PlanResourceMap({
           if (x2 - x1 < 24) continue
           const dx = Math.max(40, (x2 - x1) * 0.55)
           const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+          // Sources without reported volume still get a visible (thin)
+          // connector so the attachment to the WG/fleet is never invisible.
+          // The 1.6 floor matches what summary branches use when a whole
+          // group has no volume yet.
           const weight = s.hasVolume
-            ? Math.max(1.4, Math.min(6, (s.volumeGb / maxSourceVolGb) * 4.5 + 1.4))
-            : 1.2
+            ? Math.max(1.6, Math.min(6, (s.volumeGb / maxSourceVolGb) * 4.5 + 1.4))
+            : 1.6
           newPaths.push({
             kind: 'source',
             id: s.id,
@@ -803,7 +868,7 @@ export function PlanResourceMap({
                 type="button"
                 onClick={() => onAddWorkerGroup('edge')}
                 title="Create a new fleet"
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-edge/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-edge-ink shadow-ctrl transition hover:border-cribl-edge hover:bg-cribl-edge-soft"
               >
                 <span aria-hidden className="text-[13px] leading-none">＋</span>
                 <span>New fleet</span>
@@ -920,7 +985,7 @@ export function PlanResourceMap({
               type="button"
               onClick={() => onAddWorkerGroup('edge')}
               title="Create a new fleet"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-primary-ink shadow-ctrl transition hover:border-cribl-primary hover:bg-cribl-primary-soft"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-edge/60 bg-white px-2.5 text-[11px] font-semibold text-cribl-edge-ink shadow-ctrl transition hover:border-cribl-edge hover:bg-cribl-edge-soft"
             >
               <span aria-hidden className="text-[13px] leading-none">＋</span>
               <span>New fleet</span>
@@ -959,12 +1024,17 @@ export function PlanResourceMap({
           viewBox={`0 0 ${Math.max(1, size.w)} ${Math.max(1, size.h)}`}
           aria-hidden
         >
-          <defs>
-            <linearGradient id="plan-branch-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={CHART_CRIBL_BLUE} stopOpacity="0.35" />
-              <stop offset="100%" stopColor={CHART_CRIBL_BLUE} stopOpacity="0.85" />
-            </linearGradient>
-          </defs>
+          {/*
+           * Flat-colored connectors. The previous gradient (0.35 →
+           * 0.85 along the path) was almost invisible at the source
+           * end for thin / no-volume branches — especially once the
+           * branch was also "faded by other group" — which made
+           * connectors for sources without reported GB/d look
+           * missing entirely. A solid color + explicit `opacity`
+           * makes the line thickness and dasharray the only
+           * visibility levers, so even an unmeasured source still
+           * shows a clear thin dash to its WG/fleet.
+           */}
           {paths.map((b) => {
             const lit = isHighlighted(b)
             // Only fade out branches that belong to a *different* group than
@@ -973,7 +1043,15 @@ export function PlanResourceMap({
             // expanded group's full tree never appears to vanish on hover.
             const fadedByOtherGroup =
               hoveredGroupId !== null && b.groupId !== hoveredGroupId
-            const stroke = lit ? CHART_CRIBL_BLUE : 'url(#plan-branch-gradient)'
+            // Branch color follows the destination WG/Fleet so Stream and
+            // Edge are visually distinct end-to-end: connectors ending at
+            // an Edge fleet wear the lighter sky-blue Edge accent, while
+            // Stream connectors keep the brand teal. Solid color (no
+            // gradient) — the gradient's 0.35-opacity left edge used to
+            // make thin no-volume connectors disappear when another
+            // group was hovered.
+            const isEdgeBranch = groupKindById.get(b.groupId) === 'edge'
+            const stroke = isEdgeBranch ? CHART_CRIBL_EDGE_BLUE : CHART_CRIBL_BLUE
             const isSummaryBranch = b.kind === 'summary'
             // While the draw animation is running every branch uses
             // the standard SVG dash-offset draw-on technique:
@@ -1036,7 +1114,7 @@ export function PlanResourceMap({
                   strokeDasharray={dash}
                   strokeDashoffset={animEnabled && !entryAnimated ? 1 : 0}
                   strokeLinecap="round"
-                  opacity={beingDragged ? 0 : lit ? 1 : fadedByOtherGroup ? 0.3 : 0.85}
+                  opacity={beingDragged ? 0 : lit ? 1 : fadedByOtherGroup ? 0.55 : 0.85}
                   style={{
                     pointerEvents: 'none',
                     transition: animEnabled
@@ -1111,38 +1189,46 @@ export function PlanResourceMap({
          * keep getting their own clicks while the rubber-band tracks
          * the cursor on top of them.
          */}
-        {drag ? (
-          <svg
-            className="pointer-events-none absolute inset-0 z-30"
-            width={size.w || 0}
-            height={size.h || 0}
-            viewBox={`0 0 ${Math.max(1, size.w)} ${Math.max(1, size.h)}`}
-            aria-hidden
-          >
-            <path
-              d={(() => {
-                const { x: x1, y: y1 } = drag.anchor
-                const { x: x2, y: y2 } = drag.cursor
-                const dx = Math.max(40, Math.abs(x2 - x1) * 0.55)
-                return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
-              })()}
-              fill="none"
-              stroke={CHART_CRIBL_BLUE}
-              strokeWidth={3}
-              strokeLinecap="round"
-              strokeDasharray="6 6"
-              opacity={0.95}
-            />
-            <circle
-              cx={drag.cursor.x}
-              cy={drag.cursor.y}
-              r={5.5}
-              fill="#ffffff"
-              stroke={CHART_CRIBL_BLUE}
-              strokeWidth={2}
-            />
-          </svg>
-        ) : null}
+        {drag ? (() => {
+          // Rubber-band tints to the *destination* WG/Fleet's color so
+          // the user gets a clear "you're about to drop on a Fleet"
+          // signal mid-drag. Falls back to the brand teal when the
+          // cursor isn't currently over a target.
+          const overKind = drag.overWgId ? groupKindById.get(drag.overWgId) : undefined
+          const dragColor = overKind === 'edge' ? CHART_CRIBL_EDGE_BLUE : CHART_CRIBL_BLUE
+          return (
+            <svg
+              className="pointer-events-none absolute inset-0 z-30"
+              width={size.w || 0}
+              height={size.h || 0}
+              viewBox={`0 0 ${Math.max(1, size.w)} ${Math.max(1, size.h)}`}
+              aria-hidden
+            >
+              <path
+                d={(() => {
+                  const { x: x1, y: y1 } = drag.anchor
+                  const { x: x2, y: y2 } = drag.cursor
+                  const dx = Math.max(40, Math.abs(x2 - x1) * 0.55)
+                  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+                })()}
+                fill="none"
+                stroke={dragColor}
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeDasharray="6 6"
+                opacity={0.95}
+              />
+              <circle
+                cx={drag.cursor.x}
+                cy={drag.cursor.y}
+                r={5.5}
+                fill="#ffffff"
+                stroke={dragColor}
+                strokeWidth={2}
+              />
+            </svg>
+          )
+        })() : null}
 
         <div className="grid items-center gap-x-10 gap-y-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,280px)]">
         {groups.map((g, i) => {
@@ -1164,6 +1250,11 @@ export function PlanResourceMap({
             drag.originGroupId !== g.id
           const isDropCandidate =
             !!drag && drag.originGroupId !== g.id && drag.overWgId !== g.id
+          // Edge fleets get a lighter sky-blue tone so customers can
+          // visually tell Stream WGs and Edge fleets apart at a glance
+          // in the resource map. Stream stays on the strong cribl-primary
+          // teal (the brand default).
+          const isEdgeKind = g.wg?.kind === 'edge'
           return (
             <Fragment key={g.id}>
               <div
@@ -1207,9 +1298,15 @@ export function PlanResourceMap({
                       className={[
                         'group flex min-w-0 items-center gap-3 rounded-xl border bg-white px-3 py-2.5 text-left shadow-ctrl transition',
                         isWgHovered
-                          ? 'border-cribl-primary/60 ring-2 ring-cribl-primary/30 -translate-y-0.5'
+                          ? isEdgeKind
+                            ? 'border-cribl-edge/60 ring-2 ring-cribl-edge/30 -translate-y-0.5'
+                            : 'border-cribl-primary/60 ring-2 ring-cribl-primary/30 -translate-y-0.5'
                           : isExpanded
-                          ? 'border-cribl-primary/30'
+                          ? isEdgeKind
+                            ? 'border-cribl-edge/30'
+                            : 'border-cribl-primary/30'
+                          : isEdgeKind
+                          ? 'border-cribl-border/80 hover:border-cribl-edge/40'
                           : 'border-cribl-border/80 hover:border-cribl-primary/40',
                       ].join(' ')}
                       aria-expanded={isExpanded}
@@ -1220,7 +1317,11 @@ export function PlanResourceMap({
                         className={[
                           'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
                           isWgHovered || isExpanded
-                            ? 'bg-cribl-primary text-white'
+                            ? isEdgeKind
+                              ? 'bg-cribl-edge text-white'
+                              : 'bg-cribl-primary text-white'
+                            : isEdgeKind
+                            ? 'bg-cribl-edge-soft text-cribl-edge-ink'
                             : 'bg-cribl-primary-soft text-cribl-primary-ink',
                         ].join(' ')}
                       >
@@ -1341,11 +1442,9 @@ export function PlanResourceMap({
                                 : 'border-cribl-border/80',
                             ].join(' ')}
                           >
-                            <span
-                              aria-hidden
-                              className="inline-block h-2 w-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: ONBOARDING_STATUS_COLORS[s.status] }}
-                              title={`Status: ${s.status}`}
+                            <KindDot
+                              kind={isEdgeKind ? 'edge' : 'stream'}
+                              className="shrink-0"
                             />
                             <div className="flex min-w-0 flex-1 flex-col items-start gap-0">
                               <span className="block max-w-full truncate text-[13px] font-semibold text-cribl-ink">
@@ -1436,13 +1535,21 @@ export function PlanResourceMap({
                   !isUnassigned && g.wg ? 'cursor-pointer' : '',
                   isUnassigned
                     ? 'border-dashed border-cribl-border/80 bg-cribl-card-body'
+                    : isEdgeKind
+                    ? 'border-cribl-edge/40 bg-cribl-edge-soft'
                     : 'border-cribl-primary/40 bg-cribl-primary-soft',
                   isDropTarget
-                    ? 'ring-4 ring-cribl-primary/70 ring-offset-2 ring-offset-white scale-[1.015]'
+                    ? isEdgeKind
+                      ? 'ring-4 ring-cribl-edge/70 ring-offset-2 ring-offset-white scale-[1.015]'
+                      : 'ring-4 ring-cribl-primary/70 ring-offset-2 ring-offset-white scale-[1.015]'
                     : isDropCandidate
-                    ? 'ring-2 ring-cribl-primary/20'
+                    ? isEdgeKind
+                      ? 'ring-2 ring-cribl-edge/20'
+                      : 'ring-2 ring-cribl-primary/20'
                     : isWgHovered
-                    ? 'ring-2 ring-cribl-primary/40'
+                    ? isEdgeKind
+                      ? 'ring-2 ring-cribl-edge/40'
+                      : 'ring-2 ring-cribl-primary/40'
                     : '',
                 ]
                   .filter(Boolean)
@@ -1464,7 +1571,11 @@ export function PlanResourceMap({
                       'pointer-events-none absolute left-0 top-1/2 z-20',
                       '-translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150 ease-out',
                       isDropTarget
-                        ? 'h-4 w-4 bg-cribl-primary ring-4 ring-cribl-primary/35'
+                        ? isEdgeKind
+                          ? 'h-4 w-4 bg-cribl-edge ring-4 ring-cribl-edge/35'
+                          : 'h-4 w-4 bg-cribl-primary ring-4 ring-cribl-primary/35'
+                        : isEdgeKind
+                        ? 'h-3 w-3 bg-cribl-edge/70 ring-4 ring-cribl-edge/15'
                         : 'h-3 w-3 bg-cribl-primary/70 ring-4 ring-cribl-primary/15',
                     ].join(' ')}
                     title="Drop here to attach"
@@ -1477,6 +1588,8 @@ export function PlanResourceMap({
                       'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-ctrl',
                       isUnassigned
                         ? 'bg-white text-cribl-muted'
+                        : isEdgeKind
+                        ? 'bg-cribl-edge text-white'
                         : 'bg-cribl-primary text-white',
                     ].join(' ')}
                   >
@@ -1488,12 +1601,16 @@ export function PlanResourceMap({
                     <p
                       className={[
                         'm-0 text-[10px] font-semibold uppercase tracking-wider',
-                        isUnassigned ? 'text-cribl-muted' : 'text-cribl-primary-ink',
+                        isUnassigned
+                          ? 'text-cribl-muted'
+                          : isEdgeKind
+                          ? 'text-cribl-edge-ink'
+                          : 'text-cribl-primary-ink',
                       ].join(' ')}
                     >
                       {isUnassigned
                         ? 'Unassigned'
-                        : g.wg?.kind === 'edge'
+                        : isEdgeKind
                         ? 'Fleet'
                         : 'Worker group'}
                     </p>
@@ -1551,7 +1668,12 @@ export function PlanResourceMap({
                             'cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
                       >
-                        <p className="m-0 truncate rounded-md bg-white/70 px-2 py-1 text-[11px] text-cribl-primary-ink">
+                        <p
+                          className={[
+                            'm-0 truncate rounded-md bg-white/70 px-2 py-1 text-[11px]',
+                            isEdgeKind ? 'text-cribl-edge-ink' : 'text-cribl-primary-ink',
+                          ].join(' ')}
+                        >
                           ↦ {stickySourceByGroup[g.id]}
                         </p>
                       </div>
@@ -1735,12 +1857,7 @@ function UnassignedSection({
                 isDragSubject ? 'opacity-50' : '',
               ].join(' ')}
             >
-              <span
-                aria-hidden
-                className="inline-block h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: ONBOARDING_STATUS_COLORS[s.status] }}
-                title={`Status: ${s.status}`}
-              />
+              <KindDot kind={null} className="shrink-0" />
               <div className="flex min-w-0 flex-1 flex-col items-start gap-0">
                 <span className="block max-w-full truncate text-[13px] font-semibold text-cribl-ink">
                   {s.name}

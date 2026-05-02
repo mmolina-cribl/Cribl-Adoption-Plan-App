@@ -254,7 +254,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stre
     setPlan((p) => ({
       ...p,
       sourceSummary: p.sourceSummary.map((r) =>
-        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '' } : r,
+        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '', streamOrEdge: '' } : r,
       ),
       sourceVolume: p.sourceVolume.map((v) =>
         selected.has(v.workerGroupId) ? { ...v, workerGroupId: '', wg: '' } : v,
@@ -306,7 +306,7 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stre
       ...p,
       workerGroups: p.workerGroups.filter((g) => !selected.has(g.id)),
       sourceSummary: p.sourceSummary.map((r) =>
-        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '' } : r,
+        selected.has(r.workerGroupId) ? { ...r, workerGroupId: '', streamOrEdge: '' } : r,
       ),
       sourceVolume: p.sourceVolume.map((v) =>
         selected.has(v.workerGroupId) ? { ...v, workerGroupId: '', wg: '' } : v,

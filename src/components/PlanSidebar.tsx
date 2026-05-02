@@ -11,6 +11,7 @@ import type { MainView } from './navTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
 import { AnimatedCollapse } from './AnimatedCollapse'
+import { tierPalette } from '../lib/psUseCaseLayout'
 
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
@@ -76,6 +77,48 @@ type Props = {
   className?: string
 }
 
+/**
+ * Small colored dot used on each source row in the left nav (and
+ * mirrored as the source-icon dot on the Plan resource map) to signal
+ * which side of the topology a source lives on:
+ *
+ *   - `'stream'` → cribl-primary teal
+ *   - `'edge'`   → cribl-edge sky-blue
+ *   - `null`     → muted grey ("not yet attached")
+ */
+function KindDot({
+  kind,
+  className = '',
+  size = 'sm',
+}: {
+  kind: 'stream' | 'edge' | null
+  className?: string
+  size?: 'sm' | 'md'
+}) {
+  const tone =
+    kind === 'edge'
+      ? 'bg-cribl-edge'
+      : kind === 'stream'
+      ? 'bg-cribl-primary'
+      : 'bg-cribl-muted/60'
+  const dim = size === 'md' ? 'h-2.5 w-2.5' : 'h-2 w-2'
+  return (
+    <span
+      aria-hidden
+      className={['inline-block rounded-full', dim, tone, className]
+        .filter(Boolean)
+        .join(' ')}
+      title={
+        kind === 'edge'
+          ? 'Attached to a Fleet (Edge)'
+          : kind === 'stream'
+          ? 'Attached to a Worker Group (Stream)'
+          : 'Not yet attached to a worker group or fleet'
+      }
+    />
+  )
+}
+
 function NavButton({
   active,
   onClick,
@@ -114,6 +157,7 @@ function SourceRowRail({
   isActive,
   canRemove,
   workerGroupName,
+  workerGroupKind,
   onSelect,
   onRemove,
   onRename,
@@ -123,6 +167,17 @@ function SourceRowRail({
   isActive: boolean
   canRemove: boolean
   workerGroupName?: string
+  /**
+   * Kind of the WG/Fleet this source is attached to, or `null` when
+   * the source is unassigned. Drives the colored dot on the left edge
+   * of the row so a glance at the nav tells a CSE which side of the
+   * topology each source lives on.
+   *
+   *   - `'stream'` → cribl-primary teal
+   *   - `'edge'`   → cribl-edge sky-blue
+   *   - `null`     → muted grey ("not yet attached")
+   */
+  workerGroupKind: 'stream' | 'edge' | null
   onSelect: () => void
   onRemove: () => void
   onRename: (name: string) => void
@@ -188,21 +243,35 @@ function SourceRowRail({
         <button
           type="button"
           onClick={onSelect}
-          className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-cribl-ink"
+          className="flex min-w-0 flex-1 items-start gap-2 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-cribl-ink"
         >
-          <span className="block truncate">
-            {label}
-            {workerGroupName ? (
-              <span className="ml-1.5 text-xs font-normal text-cribl-muted">
-                · {workerGroupName}
+          <KindDot kind={workerGroupKind} className="mt-1.5 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">
+              {label}
+              {workerGroupName ? (
+                <span className="ml-1.5 text-xs font-normal text-cribl-muted">
+                  · {workerGroupName}
+                </span>
+              ) : (
+                /*
+                 * Make the un-attached state explicit in the nav so a
+                 * customer skimming the sources list can spot the rows
+                 * that still need to be wired to a Worker Group or
+                 * Fleet. Italicized + muted to read as a status hint
+                 * rather than a real worker-group name.
+                 */
+                <span className="ml-1.5 text-xs font-normal italic text-cribl-muted/80">
+                  · Unassigned
+                </span>
+              )}
+            </span>
+            {showSubtitle ? (
+              <span className="mt-0.5 block max-w-full truncate text-xs font-normal text-cribl-muted">
+                {subtitle}
               </span>
             ) : null}
           </span>
-          {showSubtitle ? (
-            <span className="mt-0.5 block max-w-full truncate text-xs font-normal text-cribl-muted">
-              {subtitle}
-            </span>
-          ) : null}
         </button>
       )}
       {!editing && (
@@ -504,9 +573,21 @@ export function PlanSidebarRail({
         <span className="flex items-center gap-2">
           <span>Activation</span>
           {plan.activation.tier ? (
-            <span className="rounded-md bg-cribl-primary-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary-ink">
-              {plan.activation.tier}
-            </span>
+            (() => {
+              const palette = tierPalette(plan.activation.tier)!
+              return (
+                <span
+                  className={[
+                    'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                    palette.chip,
+                  ].join(' ')}
+                  title={`Cribl PS ${plan.activation.tier} tier`}
+                >
+                  <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
+                  {plan.activation.tier}
+                </span>
+              )
+            })()
           ) : null}
         </span>
       </NavButton>
@@ -576,9 +657,11 @@ export function PlanSidebarRail({
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
           {sources.map((r, i) => {
             const isSrc = mainView === 'source' && activeSourceId === r.id
-            const wgName = r.workerGroupId
-              ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || undefined
-              : undefined
+            const wg = r.workerGroupId
+              ? plan.workerGroups.find((w) => w.id === r.workerGroupId)
+              : null
+            const wgName = wg ? wg.wg.trim() || undefined : undefined
+            const wgKind: 'stream' | 'edge' | null = wg ? wg.kind : null
             return (
               <SourceRowRail
                 key={r.id}
@@ -587,6 +670,7 @@ export function PlanSidebarRail({
                 isActive={isSrc}
                 canRemove={canRemove}
                 workerGroupName={wgName}
+                workerGroupKind={wgKind}
                 onSelect={() => onSelectSource(r.id)}
                 onRemove={() => onRemoveSource(r.id)}
                 onRename={(name) => onRenameSource(r.id, name)}
@@ -897,11 +981,23 @@ export function PlanNavMobile({
     >
       <button type="button" className={chip(mainView === 'activation')} onClick={_onSelectActivation}>
         Activation
-        {plan.activation.tier ? (
-          <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
-            · {plan.activation.tier}
-          </span>
-        ) : null}
+        {plan.activation.tier
+          ? (() => {
+              const palette = tierPalette(plan.activation.tier)!
+              return (
+                <span
+                  className={[
+                    'ml-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                    palette.chip,
+                  ].join(' ')}
+                  title={`Cribl PS ${plan.activation.tier} tier`}
+                >
+                  <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
+                  {plan.activation.tier}
+                </span>
+              )
+            })()
+          : null}
       </button>
       <button
         type="button"

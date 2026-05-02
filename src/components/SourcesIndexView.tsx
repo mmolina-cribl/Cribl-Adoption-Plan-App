@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sourceRowProgress } from '../lib/planDashboardStats'
+import { deriveStreamOrEdge } from '../lib/workerGroupIds'
 import { PopoverButton } from './PopoverButton'
 import { AnimatedBar } from './AnimatedBar'
 import { SearchInput } from './SearchInput'
@@ -258,7 +259,11 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
   }
 
   const bulkAssignWg = (workerGroupId: string) => {
-    bulkPatch((r) => ({ ...r, workerGroupId }))
+    // Stamp streamOrEdge to match the new WG's kind ("Stream" / "Edge"),
+    // or clear it when the bulk action detaches sources. v2.0 dropped the
+    // wizard step for this field — see workerGroupIds.deriveStreamOrEdge.
+    const streamOrEdge = deriveStreamOrEdge(workerGroupId, plan.workerGroups)
+    bulkPatch((r) => ({ ...r, workerGroupId, streamOrEdge }))
   }
 
   const bulkSetCriticality = (value: string) => {

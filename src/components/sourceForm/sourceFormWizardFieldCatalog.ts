@@ -7,12 +7,17 @@
  * dropped). The value-lever fields (operational / riskReduction / strategic
  * / onboardingEffort / politics) remain — they're still on every per-WG
  * and per-Fleet sheet of the gold template.
+ *
+ * v2.0 also dropped the `streamOrEdge` wizard step — that field is now
+ * auto-derived from the worker-group / fleet a source is attached to
+ * (see `lib/workerGroupIds.deriveStreamOrEdge`). It still round-trips on
+ * the v0.9.1 Excel "Stream or Edge?" column, but the customer no longer
+ * picks it directly.
  */
 export type SourceWizardFieldKind =
   | 'intro'
   | 'wrap'
   | 'securityOrObs'
-  | 'streamOrEdge'
   | 'physicalLocations'
   | 'sourceTile'
   | 'pipelineUsecase'
@@ -66,14 +71,6 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'Clarify whether this stream is mainly for security (threat, fraud, GRC) or for observability / ITOps (AIOps, APM, infra logs), or both. That drives content packs, routing, and who cares about the data.',
     kind: 'securityOrObs',
-  },
-  {
-    id: 'streamOrEdge',
-    section: 'Primary data',
-    headline: 'Stream or Edge',
-    lede:
-      'How this data is ingested in Cribl when that matters for design (Stream in the data center, Edge on the source, and so on). Leave it blank if it is still being decided.',
-    kind: 'streamOrEdge',
   },
   {
     id: 'physicalLocations',

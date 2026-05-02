@@ -1,6 +1,6 @@
 import { useEffect, useId } from 'react'
 import type { ActivationTier } from '../types/planTypes'
-import { PS_TIER_OPTIONS } from '../lib/psUseCaseLayout'
+import { PS_TIER_OPTIONS, TIER_PALETTE } from '../lib/psUseCaseLayout'
 
 type Props = {
   /**
@@ -99,6 +99,7 @@ export function TierPickerDialog({ current, onSelect, onSkip }: Props) {
           {PS_TIER_OPTIONS.map((tier) => {
             const copy = TIER_COPY[tier]
             const isCurrent = current === tier
+            const palette = TIER_PALETTE[tier]
             return (
               <button
                 key={tier}
@@ -107,20 +108,39 @@ export function TierPickerDialog({ current, onSelect, onSkip }: Props) {
                 className={[
                   'group flex min-w-0 flex-col items-stretch gap-1.5 rounded-xl border bg-white p-3.5 text-left shadow-ctrl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/50 sm:p-4',
                   isCurrent
-                    ? 'border-cribl-primary ring-2 ring-cribl-primary/30'
-                    : 'border-cribl-border hover:border-cribl-primary/60 hover:ring-2 hover:ring-cribl-primary/20',
+                    ? palette.cardActive
+                    : ['border-cribl-border', palette.cardHover].join(' '),
                 ].join(' ')}
                 aria-pressed={isCurrent}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm font-semibold text-cribl-ink">{copy.headline}</span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-cribl-ink">
+                    <span
+                      aria-hidden
+                      className={[
+                        'inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white',
+                        palette.dot,
+                      ].join(' ')}
+                    />
+                    {copy.headline}
+                  </span>
                   {isCurrent ? (
-                    <span className="rounded-md bg-cribl-primary-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary-ink">
+                    <span
+                      className={[
+                        'rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                        palette.badge,
+                      ].join(' ')}
+                    >
                       Current
                     </span>
                   ) : null}
                 </div>
-                <span className="text-[11px] font-medium uppercase tracking-wider text-cribl-primary">
+                <span
+                  className={[
+                    'text-[11px] font-medium uppercase tracking-wider',
+                    palette.accentText,
+                  ].join(' ')}
+                >
                   {copy.useCaseCount}
                 </span>
                 <p className="m-0 text-xs leading-relaxed text-cribl-muted">{copy.blurb}</p>

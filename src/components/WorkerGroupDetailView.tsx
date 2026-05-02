@@ -341,7 +341,11 @@ export function WorkerGroupDetailView({
   const unassignSource = (sourceId: string) => {
     setPlan((p) => ({
       ...p,
-      sourceSummary: p.sourceSummary.map((r) => (r.id === sourceId ? { ...r, workerGroupId: '' } : r)),
+      sourceSummary: p.sourceSummary.map((r) =>
+        // Clear streamOrEdge along with the WG id — an unattached source
+        // has no Stream/Edge identity (auto-derived from WG.kind in v2.0).
+        r.id === sourceId ? { ...r, workerGroupId: '', streamOrEdge: '' } : r,
+      ),
       sourceVolume: p.sourceVolume.map((r) => {
         if (r.source?.trim() && r.source.trim() === (p.sourceSummary.find((x) => x.id === sourceId)?.source || '').trim()) {
           return { ...r, workerGroupId: '' }
@@ -358,10 +362,12 @@ export function WorkerGroupDetailView({
         return p
       }
       const sourceName = (target.source || '').trim()
+      // Stamp streamOrEdge from this WG's kind ("Stream" / "Edge").
+      const newStreamOrEdge = g.kind === 'edge' ? 'Edge' : 'Stream'
       return {
         ...p,
         sourceSummary: p.sourceSummary.map((r) =>
-          r.id === sourceId ? { ...r, workerGroupId: g.id } : r,
+          r.id === sourceId ? { ...r, workerGroupId: g.id, streamOrEdge: newStreamOrEdge } : r,
         ),
         sourceVolume: p.sourceVolume.map((r) => {
           if (sourceName && (r.source || '').trim() === sourceName) {

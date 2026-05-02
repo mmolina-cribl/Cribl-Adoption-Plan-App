@@ -726,9 +726,12 @@ export function PlanDataOverview({
                       ? 'Same as Fleet → Capacity: ingest and egress (auto or override)'
                       : 'Same as Worker group → Capacity: ingest and egress (auto or override)'
                     return (
-                      <div
+                      <button
                         key={w.id}
-                        className="min-w-0 overflow-hidden rounded-xl border border-cribl-border/90 bg-white p-3.5 text-left shadow-ctrl"
+                        type="button"
+                        onClick={() => onOpenWorkerGroup(w.id)}
+                        aria-label={`Open ${isEdge ? 'fleet' : 'worker group'} ${w.name}`}
+                        className="group min-w-0 overflow-hidden rounded-xl border border-cribl-border/90 bg-white p-3.5 text-left shadow-ctrl transition hover:border-cribl-primary/50 hover:bg-cribl-elevate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/40"
                       >
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                           <h4 className="m-0 text-base font-semibold leading-snug text-cribl-ink" title={w.name}>
@@ -757,16 +760,7 @@ export function PlanDataOverview({
                             in/out {inOutStr}
                           </span>
                         </p>
-                        <div className="mt-2.5">
-                          <button
-                            type="button"
-                            onClick={() => onOpenWorkerGroup(w.id)}
-                            className="h-8 w-full whitespace-nowrap rounded-md border border-cribl-border bg-cribl-canvas px-3 text-sm font-medium text-cribl-ink hover:bg-cribl-elevate"
-                          >
-                            Open
-                          </button>
-                        </div>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>

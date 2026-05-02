@@ -35,6 +35,18 @@
   --color-cribl-blue-soft: #d9f5f5;
   --color-cribl-blue-ink: #006b6b;
   --color-cribl-accent: #ff5a1f;
+
+  /*
+   * Edge fleet accent — a lighter, cooler sky-blue family used to
+   * visually separate Edge fleets from Stream worker groups in the
+   * resource maps and any other place the two need to read as
+   * distinct at a glance. The brand teal stays as Stream's strong
+   * default tone; Edge gets this softer cool-blue echo.
+   */
+  --color-cribl-edge: #5fa8d3;
+  --color-cribl-edge-hover: #4f98c3;
+  --color-cribl-edge-soft: #e9f2fa;
+  --color-cribl-edge-ink: #1f4d72;
 }
 
 @layer base {

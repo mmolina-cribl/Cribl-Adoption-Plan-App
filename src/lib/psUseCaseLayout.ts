@@ -57,6 +57,51 @@ export const PS_BASE_SCOPE_ITEMS: ReadonlyArray<{
   { item: 'Health Check', deliverable: 'As-Built Architecture Document' },
 ]
 
+/**
+ * Customer-friendly description per base-scope deliverable, surfaced
+ * under each row on the Activation → Base Scope tab so a CSE / customer
+ * immediately sees what the deliverable actually involves rather than
+ * having to infer it from a 2-3 word label.
+ *
+ * These deliverables are *not* described in the gold `PS Use Case
+ * Worksheet` reference table (only the use-case kinds are), so this
+ * blurb is app-only context. Keep the lead sentence short and
+ * outcome-oriented; the follow-on sentence(s) call out the concrete
+ * artifact the customer walks away with.
+ *
+ * Keys MUST match `PS_BASE_SCOPE_ITEMS[i].item` exactly so lookup is
+ * O(1) by item name.
+ */
+export const PS_BASE_SCOPE_DELIVERABLE_DESCRIPTIONS: Record<string, string> = {
+  Architecture:
+    "Working sessions to design the customer's Cribl deployment — leader/worker topology, data flow, network and security boundaries, and high-availability decisions. Output is a set of architecture diagrams plus a decisions log that anchors every later phase of the engagement and gives the customer a defensible artifact for their own change-management process.",
+  'Use Case Planning':
+    "Collaborative scoping of the data use cases this engagement will deliver — picking from the canned kinds (Data Onboarding, Reduction, Routing, etc.) or defining custom ones. The completed worksheet (this very page) becomes the shared record of what's in and out of scope, plus the per-use-case parameters and acceptance criteria.",
+  Deployment:
+    "Stand-up of Cribl Stream leader / worker nodes (or Edge fleets) per the agreed architecture — installation, version pinning, leader-worker join, license activation, RBAC, and a basic health check before any production traffic flows. Sets the foundation every downstream use case is built on.",
+  'Source/Destination Configuration':
+    "Implement each scoped use case end-to-end — configure the source, build the pipeline, wire the destination, validate event flow with sample data, and tune routing rules so events land where they should in the right shape. This is where the Use Case Worksheet rows become real, running config in the customer's environment.",
+  'Health Check':
+    "Final review of the deployment as it actually exists — captured as an 'as-built' architecture document with validated data flows, performance baseline, capacity headroom, and an operations hand-off appendix the customer's team can run with after PS rolls off.",
+}
+
+/**
+ * Look up the elaborated description for a base-scope item label.
+ * Returns `null` for unknown labels so callers can hide the description
+ * block rather than rendering a "no description" placeholder.
+ *
+ * Named with a `get*` prefix so `react-hooks/rules-of-hooks` doesn't
+ * mistake it for a hook when called inside `.map()` callbacks during
+ * render.
+ */
+export function getBaseScopeDeliverableDescription(item: string): string | null {
+  if (!item) return null
+  if (item in PS_BASE_SCOPE_DELIVERABLE_DESCRIPTIONS) {
+    return PS_BASE_SCOPE_DELIVERABLE_DESCRIPTIONS[item]
+  }
+  return null
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Block 2 — Activation Use Case Overview (rows 9–15)
 // ────────────────────────────────────────────────────────────────────
@@ -103,41 +148,49 @@ export const PS_USE_CASE_KIND_OPTIONS = [
 export type UseCaseKind = (typeof PS_USE_CASE_KIND_OPTIONS)[number]
 
 /**
- * Short customer-friendly description per use-case kind, surfaced
- * under the Use Case Overview picker so a CSE / customer immediately
- * sees what they're committing to. Wording aims at "what does this
- * solve" rather than "how does Cribl implement it" — the implementation
- * details belong on the Use Case Worksheet tab parameter rows.
+ * Customer-friendly description per use-case kind, surfaced under the
+ * Use Case Overview picker so a CSE / customer immediately sees what
+ * they're committing to.
+ *
+ * Source of truth: the "Custom Use Case → Description" reference table
+ * embedded in the gold `PS Use Case Worksheet` of the Adoption Plan
+ * Excel template (v0.9.1). The lead sentence(s) of each entry are
+ * preserved verbatim from that table — any wording drift here should
+ * be mirrored back into the gold sheet — and the follow-on sentence
+ * adds practical context (typical scope, what's involved, the outcome
+ * the customer is buying) so the in-app blurb is more useful than the
+ * raw spreadsheet cell.
  *
  * Keys MUST match `PS_USE_CASE_KIND_OPTIONS` exactly (case + whitespace).
- * The 'Other' entry intentionally points the user at the Notes column
- * because the canned blurb can't cover an unknown bespoke ask.
+ * The 'Format Conversion' and 'Other' entries are *not* in the gold
+ * reference table; we keep them so the picker still surfaces something
+ * if a CSE hand-picks those values.
  */
 export const PS_USE_CASE_KIND_DESCRIPTIONS: Record<UseCaseKind, string> = {
   'Data Onboarding':
-    'Onboard new data sources into Cribl Stream so they can be normalized, enriched, and routed to one or more destinations. The bread-and-butter use case for getting first-party logs and metrics into your observability stack.',
+    'Onboarding data and routing to one destination and Cribl Lake. Convert data formats to match destination system requirements. Covers source configuration, format normalization (JSON, syslog, CSV), and the routing rules that land the data in your SIEM, observability tool, or Cribl Lake in the shape downstream consumers expect.',
   'Advanced Data Onboarding':
-    'Complex onboarding scenarios — custom protocols, encrypted feeds, multiple destinations per source, dynamic transformations. Built on top of standard Data Onboarding with extra pipeline logic.',
+    'Onboarding data sources that require custom rest collectors or advanced configurations. Use this when the source needs bespoke REST polling, OAuth or token-refresh flows, multi-page pagination, or non-standard transport — anything beyond a stock TCP / HTTP / file collector.',
   'Data Archiving':
-    'Tier cold or rarely-queried data into low-cost object storage (S3, GCS, Azure Blob) while keeping the option to replay archived data back into your tooling on demand.',
+    'Configuration and testing of non-Cribl Lake data archive settings, including S3 partitioning strategy, Log Replay configuration, and validation. Includes sizing the archive bucket, defining partition keys (date / source / sourcetype), wiring Replay collectors, and validating round-trip integrity so archived data can be rehydrated for investigations or compliance.',
   'Data Reduction':
-    'Drop noisy fields, deduplicate events, sample low-value traffic, or aggregate metrics before they hit downstream tools — typically the fastest path to reducing SIEM and observability ingest cost.',
+    'Building pipelines to reduce data volume or event size going to a destination system. Requires the customer to onboard the data source or a Data Onboarding Use Case. Typical tactics include dropping low-value fields, deduplicating events, sampling chatty sources, and aggregating into rollups — usually the fastest path to cutting SIEM and observability ingest cost.',
   'Logs to Metrics':
-    'Extract numerical values from log events and emit them as time-series metrics. Trims high-volume logs while preserving the signal needed for dashboards and alerts.',
+    'Building pipelines to convert event log data to metrics. Extracts numerical signals (counts, latencies, error rates) from high-volume logs and emits them as time-series so dashboards and alerts keep working without paying to ingest the underlying log line.',
   'Edge Deployment':
-    'Deploy Cribl Edge agents on host nodes, containers, or Kubernetes to collect data closer to its source — reduces the leader-side ingestion footprint and enables host-level enrichment.',
+    'Plan and configure the deployment of Edge nodes for data collection. Covers fleet design, host / container / Kubernetes rollout, leader-worker connectivity, and the host-level enrichment that becomes available once collection moves closer to the data source.',
   'Data Enrichment':
-    'Add context to events before routing — lookup tables, GeoIP, threat intel feeds, asset metadata — so downstream tools can correlate and search against richer fields.',
+    'Building pipelines for the enrichment of data sources. Adds context to events before routing — lookup tables, GeoIP, threat-intel feeds, asset / CMDB metadata — so downstream tools can correlate, search, and alert against richer fields instead of opaque IDs.',
   'Format Conversion':
-    'Translate events between formats (JSON ↔ XML ↔ syslog ↔ CSV) so you can route the same data to multiple destinations that each expect a different shape, without duplicating collection.',
+    'Translate events between formats (JSON, XML, syslog, CSV, Parquet) so a single source can fan out to destinations that each expect a different shape. Avoids duplicate collection when downstream tools disagree on schema.',
   'Data Routing':
-    'Send a single source to multiple destinations with different filters / transformations per route — e.g. full fidelity to cold storage, sampled to the SIEM, only error events to a paging tool.',
+    'Delivery of raw or unformatted data or a subset of data to two or more destinations. Fans one source out to multiple destinations with different filters, transformations, or fidelity per route — e.g. full data to cold storage, sampled to the SIEM, only error events to a paging tool.',
   'Cribl Search':
-    'Federated search across in-flight Stream data, archived data in object storage, and external systems — investigate without rehydrating data into a SIEM and paying ingest twice.',
+    'Implementing and adopting use cases with Cribl Search, featuring practical training sessions using your data sets. Covers DataSet Provider / DataSet setup, dashboard and saved-search authoring, and hands-on enablement so analysts can investigate in-flight Stream data and archived data in object storage without rehydrating it into a SIEM.',
   'Container Deployment':
-    'Run Cribl Stream or Edge in a containerized environment (Docker, Kubernetes, OpenShift) — Helm charts, persistent volumes, autoscaling, and HA leader patterns.',
+    'Assist in deploying Stream within a containerized environment. This will extend support to include previously excluded container deployments. Covers Docker / Kubernetes / OpenShift rollouts, Helm chart configuration, persistent volume strategy, leader HA, and worker autoscaling for production-grade containerized Stream.',
   Other:
-    'Custom or non-standard use case not covered by the canned list. Use the Notes column on each parameter row to describe what the customer is solving.',
+    'Custom or non-standard use case not covered by the canned list. Use the Notes column on each parameter row to describe what the customer is solving, the expected outcomes, and any non-standard collectors, pipelines, or destinations involved so the engagement still has a paper trail.',
 }
 
 /**
@@ -300,6 +353,85 @@ export const PS_TIER_OPTIONS: ReadonlyArray<ActivationTier> = [
   'Gold',
   'Platinum',
 ]
+
+// ────────────────────────────────────────────────────────────────────
+// Tier color palette
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-tier Tailwind palette. Single source of truth for any UI surface
+ * that needs to read the tier at a glance — sticky tier chip in the
+ * Activation page header, "Activation · Silver" pill in the left nav,
+ * tier picker cards, per-use-case tier badges. Mapping:
+ *
+ *   - Silver   → slate (cool neutral, evokes silver/steel)
+ *   - Gold     → amber (warm gold)
+ *   - Platinum → violet (premium, distinct from Silver's neutral grey)
+ *
+ * IMPORTANT: every class string must appear verbatim in source so
+ * Tailwind's content scanner picks them up — never build them by
+ * concatenation. If you add a new key here, add it to all three tiers
+ * so consumers don't need to handle missing entries.
+ */
+export const TIER_PALETTE: Record<
+  ActivationTier,
+  {
+    /** Border + bg + text. Used by the small TierBadge pill on each use-case card. */
+    badge: string
+    /** Border + bg + text. Used by the larger sticky chip + nav pill. */
+    chip: string
+    /**
+     * Border + ring used to highlight the picker card matching the
+     * currently-selected tier. Replaces the generic cribl-primary
+     * ring so the picker visually echoes the tier's own color.
+     */
+    cardActive: string
+    /**
+     * Border + ring on hover for non-current picker cards. Subtle,
+     * just enough to hint at the tier without screaming.
+     */
+    cardHover: string
+    /** Solid bg utility for a small colored swatch / dot. */
+    dot: string
+    /** Accent text color for eyebrows / "·" separators. */
+    accentText: string
+  }
+> = {
+  Silver: {
+    badge: 'border-slate-200 bg-slate-50 text-slate-700',
+    chip: 'border-slate-300 bg-slate-50 text-slate-700',
+    cardActive: 'border-slate-500 ring-2 ring-slate-300/60',
+    cardHover: 'hover:border-slate-400 hover:ring-2 hover:ring-slate-200/60',
+    dot: 'bg-slate-400',
+    accentText: 'text-slate-600',
+  },
+  Gold: {
+    badge: 'border-amber-200 bg-amber-50 text-amber-800',
+    chip: 'border-amber-300 bg-amber-50 text-amber-800',
+    cardActive: 'border-amber-500 ring-2 ring-amber-300/60',
+    cardHover: 'hover:border-amber-400 hover:ring-2 hover:ring-amber-200/60',
+    dot: 'bg-amber-400',
+    accentText: 'text-amber-700',
+  },
+  Platinum: {
+    badge: 'border-violet-200 bg-violet-50 text-violet-700',
+    chip: 'border-violet-300 bg-violet-50 text-violet-700',
+    cardActive: 'border-violet-500 ring-2 ring-violet-300/60',
+    cardHover: 'hover:border-violet-400 hover:ring-2 hover:ring-violet-200/60',
+    dot: 'bg-violet-400',
+    accentText: 'text-violet-700',
+  },
+}
+
+/**
+ * Lookup helper that returns `null` for an unset tier. Lets callers
+ * guard with `if (palette) { ... }` and fall back to neutral cribl
+ * styling when the customer hasn't picked yet.
+ */
+export function tierPalette(tier: ActivationTier | null) {
+  if (!tier) return null
+  return TIER_PALETTE[tier]
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Column letters (1-based) for cell addressing

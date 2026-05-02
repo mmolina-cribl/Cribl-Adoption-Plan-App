@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { inputData, securityDataTypes, sourceTypes, streamOrEdge } from '../../data/referenceData'
+import { inputData, securityDataTypes, sourceTypes } from '../../data/referenceData'
 import { PencilIcon } from '../PencilIcon'
 import { sourceLabel, type PlanState, type SourceSummaryRow } from '../../types/planTypes'
 import {
@@ -19,6 +19,51 @@ export type SourceSummaryFieldPatch = (k: keyof SourceSummaryRow, v: string | bo
 type Base = {
   row: SourceSummaryRow
   s: SourceSummaryFieldPatch
+}
+
+/**
+ * Read-only "Stream" / "Edge" / "Unassigned" badge. v2.0 dropped the
+ * editable Stream-or-Edge select on every source — the field is now
+ * auto-derived from the WG / Fleet this source is attached to (see
+ * `lib/workerGroupIds.deriveStreamOrEdge`). The badge keeps the value
+ * visible in both the wizard's full-form view and on the data-source
+ * detail card so customers can confirm at a glance which side of the
+ * topology a source lives on.
+ */
+function StreamOrEdgeBadge({ value }: { value: string }) {
+  const v = (value || '').trim()
+  const isEdge = /^edge$/i.test(v)
+  const isStream = /^stream$/i.test(v)
+  const label = isEdge ? 'Edge' : isStream ? 'Stream' : 'Unassigned'
+  const tone = isEdge
+    ? 'border-cribl-primary/30 bg-cribl-primary-soft text-cribl-primary-ink'
+    : isStream
+    ? 'border-cribl-border bg-cribl-card-body text-cribl-ink'
+    : 'border-dashed border-cribl-border/80 bg-cribl-canvas text-cribl-muted'
+  return (
+    <span
+      className={[
+        'inline-flex h-9 items-center gap-1.5 self-start rounded-md border px-2.5 text-sm font-medium',
+        tone,
+      ].join(' ')}
+      title={
+        isEdge
+          ? 'This source is attached to a Fleet (Edge).'
+          : isStream
+          ? 'This source is attached to a Worker Group (Stream).'
+          : 'Not yet attached to a worker group or fleet.'
+      }
+    >
+      <span
+        aria-hidden
+        className={[
+          'inline-block h-2 w-2 rounded-full',
+          isEdge ? 'bg-cribl-primary' : isStream ? 'bg-cribl-ink' : 'bg-cribl-muted/60',
+        ].join(' ')}
+      />
+      {label}
+    </span>
+  )
 }
 
 /** PRIMARY DATA POINTS */
@@ -49,15 +94,12 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
           placeholder="Choose…"
         />
       </LabeledField>
-      <LabeledField id={`s-${row.id}-se`} label="Stream or Edge?">
-        <SelectWithEmpty
-          id={`s-${row.id}-se`}
-          value={row.streamOrEdge}
-          onChange={(v) => s('streamOrEdge', v)}
-          options={[...streamOrEdge]}
-          allowEmpty
-          placeholder="Optional"
-        />
+      <LabeledField
+        id={`s-${row.id}-se`}
+        label="Stream or Edge?"
+        hint="Auto-derived from the worker group / fleet this source is attached to."
+      >
+        <StreamOrEdgeBadge value={row.streamOrEdge} />
       </LabeledField>
       <LabeledField id={`s-${row.id}-type`} label="Type">
         <SelectWithEmpty

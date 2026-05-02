@@ -8,7 +8,7 @@ import {
 } from 'react'
 import type { SourceSummaryRow, WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
-import { CHART_CRIBL_BLUE } from '../lib/chartColors'
+import { CHART_CRIBL_BLUE, CHART_CRIBL_EDGE_BLUE } from '../lib/chartColors'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
 
@@ -102,6 +102,16 @@ export function WorkerGroupResourceMap({
   className,
 }: Props) {
   const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
+  /**
+   * Edge fleets get a lighter sky-blue palette across the entire
+   * resource map (hub box, connector strokes, source-row icon accents,
+   * drag rubber-band, and drop indicator) so customers can visually
+   * tell Stream worker groups and Edge fleets apart at a glance — same
+   * logic mirrored in PlanResourceMap.
+   */
+  const isEdgeKind = workerGroup.kind === 'edge'
+  /** Resolved connector / accent color for this map. */
+  const accentColor = isEdgeKind ? CHART_CRIBL_EDGE_BLUE : CHART_CRIBL_BLUE
   /**
    * One-shot fade-in for the connector tree when the resource map
    * first renders (e.g. when the user lands on the worker group
@@ -249,9 +259,12 @@ export function WorkerGroupResourceMap({
       if (!el) {
         continue
       }
+      // No-volume sources still get a thin (but always-visible) dashed
+      // connector — the attachment to this WG/fleet should never look
+      // "floating" just because the customer hasn't filled in GB/d yet.
       const weight = s.hasVolume
-        ? Math.max(1.5, Math.min(7, (s.volumeGb / maxVol) * 5.5 + 1.6))
-        : 1.4
+        ? Math.max(1.6, Math.min(7, (s.volumeGb / maxVol) * 5.5 + 1.6))
+        : 1.6
       const br = buildBranch(s.id, el, weight)
       if (br) {
         newBranches.push(br)
@@ -441,7 +454,12 @@ export function WorkerGroupResourceMap({
               type="button"
               onClick={onAddSource}
               title="Create a new data source"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-cribl-primary/50 bg-cribl-primary px-2.5 text-[11px] font-semibold text-white shadow-ctrl transition hover:bg-cribl-primary-hover"
+              className={[
+                'inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[11px] font-semibold text-white shadow-ctrl transition',
+                isEdgeKind
+                  ? 'border-cribl-edge/50 bg-cribl-edge hover:bg-cribl-edge-hover'
+                  : 'border-cribl-primary/50 bg-cribl-primary hover:bg-cribl-primary-hover',
+              ].join(' ')}
             >
               <span aria-hidden className="text-[13px] leading-none">＋</span>
               <span>New source</span>
@@ -464,12 +482,14 @@ export function WorkerGroupResourceMap({
           viewBox={`0 0 ${Math.max(1, size.w)} ${Math.max(1, size.h)}`}
           aria-hidden
         >
-          <defs>
-            <linearGradient id="wg-branch-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={CHART_CRIBL_BLUE} stopOpacity="0.35" />
-              <stop offset="100%" stopColor={CHART_CRIBL_BLUE} stopOpacity="0.85" />
-            </linearGradient>
-          </defs>
+          {/*
+           * Flat-colored connectors. The previous gradient (0.35 →
+           * 0.85 along the path) made thin no-volume connectors fade
+           * to invisibility on the source-side end, especially when
+           * another source was hovered and this branch was dimmed
+           * further. A solid color + explicit `opacity` keeps weight
+           * and dasharray as the only visibility levers.
+           */}
           {branches.map((b) => {
             const isHovered = hovered === b.id
             // Wide invisible "hit-stroke" sits on top of each visible
@@ -493,10 +513,10 @@ export function WorkerGroupResourceMap({
                 <path
                   d={b.d}
                   fill="none"
-                  stroke={isHovered ? CHART_CRIBL_BLUE : 'url(#wg-branch-gradient)'}
+                  stroke={accentColor}
                   strokeWidth={isHovered ? b.weight + 1.4 : b.weight}
                   strokeLinecap="round"
-                  opacity={isHovered ? 1 : hovered ? 0.35 : 0.85}
+                  opacity={isHovered ? 1 : hovered ? 0.55 : 0.85}
                   // Source → worker-group draw animation, standard SVG
                   // dash-offset technique:
                   //   - `pathLength={1}` normalizes the curve to a
@@ -596,7 +616,7 @@ export function WorkerGroupResourceMap({
                 return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
               })()}
               fill="none"
-              stroke={CHART_CRIBL_BLUE}
+              stroke={accentColor}
               strokeWidth={3}
               strokeLinecap="round"
               strokeDasharray="6 6"
@@ -607,7 +627,7 @@ export function WorkerGroupResourceMap({
               cy={drag.cursor.y}
               r={5.5}
               fill="#ffffff"
-              stroke={CHART_CRIBL_BLUE}
+              stroke={accentColor}
               strokeWidth={2}
             />
           </svg>
@@ -661,9 +681,14 @@ export function WorkerGroupResourceMap({
                     // and (in the unassigned section) drag-handle are
                     // real <button>s; nested <button>s would be
                     // invalid HTML.
-                    'card-axiom relative flex min-w-0 cursor-pointer items-center gap-3 border-cribl-border/80 bg-white px-3 py-2.5 text-left shadow-ctrl transition focus-visible:ring-2 focus-visible:ring-cribl-primary/50 focus-visible:outline-none',
+                    'card-axiom relative flex min-w-0 cursor-pointer items-center gap-3 border-cribl-border/80 bg-white px-3 py-2.5 text-left shadow-ctrl transition focus-visible:outline-none',
+                    isEdgeKind
+                      ? 'focus-visible:ring-2 focus-visible:ring-cribl-edge/50'
+                      : 'focus-visible:ring-2 focus-visible:ring-cribl-primary/50',
                     isHovered
-                      ? 'ring-2 ring-cribl-primary/40 border-cribl-primary/60'
+                      ? isEdgeKind
+                        ? 'ring-2 ring-cribl-edge/40 border-cribl-edge/60'
+                        : 'ring-2 ring-cribl-primary/40 border-cribl-primary/60'
                       : '',
                   ]
                     .filter(Boolean)
@@ -674,7 +699,11 @@ export function WorkerGroupResourceMap({
                     className={[
                       'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
                       isHovered
-                        ? 'bg-cribl-primary text-white'
+                        ? isEdgeKind
+                          ? 'bg-cribl-edge text-white'
+                          : 'bg-cribl-primary text-white'
+                        : isEdgeKind
+                        ? 'bg-cribl-edge-soft text-cribl-edge-ink'
                         : 'bg-cribl-primary-soft text-cribl-primary-ink',
                     ].join(' ')}
                   >
@@ -728,7 +757,11 @@ export function WorkerGroupResourceMap({
                   'pointer-events-none absolute left-0 top-1/2 z-20',
                   '-translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150 ease-out',
                   drag.overHub
-                    ? 'h-4 w-4 bg-cribl-primary ring-4 ring-cribl-primary/35'
+                    ? isEdgeKind
+                      ? 'h-4 w-4 bg-cribl-edge ring-4 ring-cribl-edge/35'
+                      : 'h-4 w-4 bg-cribl-primary ring-4 ring-cribl-primary/35'
+                    : isEdgeKind
+                    ? 'h-3 w-3 bg-cribl-edge/70 ring-4 ring-cribl-edge/15'
                     : 'h-3 w-3 bg-cribl-primary/70 ring-4 ring-cribl-primary/15',
                 ].join(' ')}
                 title="Drop here to attach"
@@ -737,15 +770,24 @@ export function WorkerGroupResourceMap({
           <div
             ref={hubRef}
             className={[
-              'card-axiom flex min-w-0 max-w-full flex-col gap-2 border-cribl-primary/40 bg-cribl-primary-soft p-4 shadow-ctrl transition',
+              'card-axiom flex min-w-0 max-w-full flex-col gap-2 p-4 shadow-ctrl transition',
+              isEdgeKind
+                ? 'border-cribl-edge/40 bg-cribl-edge-soft'
+                : 'border-cribl-primary/40 bg-cribl-primary-soft',
               // Active drop target — cursor is currently over the hub
               // during a drag from the Unassigned section.
               drag && drag.overHub
-                ? 'ring-4 ring-cribl-primary/70 ring-offset-2 ring-offset-white scale-[1.015]'
+                ? isEdgeKind
+                  ? 'ring-4 ring-cribl-edge/70 ring-offset-2 ring-offset-white scale-[1.015]'
+                  : 'ring-4 ring-cribl-primary/70 ring-offset-2 ring-offset-white scale-[1.015]'
                 : drag
-                ? 'ring-2 ring-cribl-primary/30'
+                ? isEdgeKind
+                  ? 'ring-2 ring-cribl-edge/30'
+                  : 'ring-2 ring-cribl-primary/30'
                 : hubBranchHover
-                ? 'ring-2 ring-cribl-primary/40'
+                ? isEdgeKind
+                  ? 'ring-2 ring-cribl-edge/40'
+                  : 'ring-2 ring-cribl-primary/40'
                 : '',
             ]
               .filter(Boolean)
@@ -754,14 +796,22 @@ export function WorkerGroupResourceMap({
             <div className="flex items-center gap-2">
               <span
                 aria-hidden
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cribl-primary text-white shadow-ctrl"
+                className={[
+                  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-ctrl',
+                  isEdgeKind ? 'bg-cribl-edge' : 'bg-cribl-primary',
+                ].join(' ')}
               >
                 <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
                   <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h11A1.5 1.5 0 0 1 17 4.5v2A1.5 1.5 0 0 1 15.5 8h-11A1.5 1.5 0 0 1 3 6.5v-2Zm0 5A1.5 1.5 0 0 1 4.5 8h11A1.5 1.5 0 0 1 17 9.5v2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 11.5v-2Zm0 5A1.5 1.5 0 0 1 4.5 13h11a1.5 1.5 0 0 1 1.5 1.5v2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-2Z" />
                 </svg>
               </span>
               <div className="min-w-0">
-                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary-ink">
+                <p
+                  className={[
+                    'm-0 text-[10px] font-semibold uppercase tracking-wider',
+                    isEdgeKind ? 'text-cribl-edge-ink' : 'text-cribl-primary-ink',
+                  ].join(' ')}
+                >
                   {copy.title}
                 </p>
                 <p className="m-0 max-w-full truncate text-base font-semibold text-cribl-ink">
@@ -813,7 +863,12 @@ export function WorkerGroupResourceMap({
                 transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
-              <p className="m-0 truncate rounded-md bg-white/70 px-2 py-1 text-[11px] text-cribl-primary-ink">
+              <p
+                className={[
+                  'm-0 truncate rounded-md bg-white/70 px-2 py-1 text-[11px]',
+                  isEdgeKind ? 'text-cribl-edge-ink' : 'text-cribl-primary-ink',
+                ].join(' ')}
+              >
                 ↦ {hoveredSourceName ?? 'Source'}
               </p>
             </div>

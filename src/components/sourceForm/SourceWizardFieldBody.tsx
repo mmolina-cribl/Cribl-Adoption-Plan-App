@@ -1,4 +1,4 @@
-import { inputData, securityDataTypes, streamOrEdge } from '../../data/referenceData'
+import { inputData, securityDataTypes } from '../../data/referenceData'
 import type { SourceSummaryRow } from '../../types/planTypes'
 import type { SourceSummaryFieldPatch } from './SourceFormPanels'
 import type { SourceWizardFieldKind } from './sourceFormWizardFieldCatalog'
@@ -34,22 +34,6 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               onChange={(v) => s('securityOrObs', v)}
               options={[...securityDataTypes]}
               placeholder="Choose…"
-            />
-          </LabeledField>
-        </div>
-      )
-
-    case 'streamOrEdge':
-      return (
-        <div className="mt-4">
-          <LabeledField id={`w-${row.id}-se`} label="Stream or Edge?">
-            <SelectWithEmpty
-              id={`w-${row.id}-se`}
-              value={row.streamOrEdge}
-              onChange={(v) => s('streamOrEdge', v)}
-              options={[...streamOrEdge]}
-              allowEmpty
-              placeholder="Optional"
             />
           </LabeledField>
         </div>

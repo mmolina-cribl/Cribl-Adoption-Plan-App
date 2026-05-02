@@ -20,7 +20,10 @@ import {
   PS_USE_CASE_KIND_OPTIONS,
   PS_USE_CASE_OVERVIEW_NUMBERS,
   PS_USE_CASE_TIERS,
+  TIER_PALETTE,
+  getBaseScopeDeliverableDescription,
   getUseCaseKindDescription,
+  tierPalette,
   unlockedUseCaseCountForTier,
   useCaseHeaderLabel,
 } from '../lib/psUseCaseLayout'
@@ -242,18 +245,39 @@ function ActivationTabBar({
 // ────────────────────────────────────────────────────────────────────
 
 function TierChip({ tier, onClick }: { tier: ActivationTier | null; onClick: () => void }) {
+  const palette = tierPalette(tier)
   return (
     <button
       type="button"
       onClick={onClick}
       title="Change PS tier"
-      className="inline-flex h-9 shrink-0 items-center gap-2 self-start rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl transition hover:border-cribl-primary/50 hover:bg-cribl-primary-soft sm:self-end"
+      className={[
+        'inline-flex h-9 shrink-0 items-center gap-2 self-start rounded-lg border bg-white px-3 text-sm font-medium shadow-ctrl transition sm:self-end',
+        palette
+          ? // Echo the tier color on the chip border / hover so the
+            // sticky header reads the tier at a glance — same palette
+            // as the picker cards and the left-nav pill.
+            [palette.chip, 'hover:brightness-95'].join(' ')
+          : 'border-cribl-border text-cribl-ink hover:border-cribl-primary/50 hover:bg-cribl-primary-soft',
+      ].join(' ')}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+      {palette ? (
+        <span aria-hidden className={['h-2 w-2 rounded-full', palette.dot].join(' ')} />
+      ) : null}
+      <span
+        className={[
+          'text-[10px] font-semibold uppercase tracking-wider',
+          palette ? palette.accentText : 'text-cribl-muted',
+        ].join(' ')}
+      >
         PS Tier
       </span>
-      <span className="text-cribl-ink">{tier ?? 'Pick…'}</span>
-      <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 text-cribl-muted" aria-hidden>
+      <span className={palette ? '' : 'text-cribl-ink'}>{tier ?? 'Pick…'}</span>
+      <svg
+        viewBox="0 0 20 20"
+        className={['h-3.5 w-3.5', palette ? palette.accentText : 'text-cribl-muted'].join(' ')}
+        aria-hidden
+      >
         <path
           fill="currentColor"
           d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
@@ -283,6 +307,7 @@ function BaseScopeChecklistCard({
     <div className="grid gap-3">
       {PS_BASE_SCOPE_ITEMS.map((meta, i) => {
         const row = activation.baseScope[i]
+        const description = getBaseScopeDeliverableDescription(meta.item)
         return (
           <div
             key={meta.item}
@@ -309,6 +334,14 @@ function BaseScopeChecklistCard({
                 />
               </FieldLabel>
             </div>
+            {description ? (
+              <div className="mt-3 rounded-lg border border-cribl-border/70 bg-white/70 p-2.5 sm:p-3">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-muted">
+                  About this deliverable
+                </p>
+                <p className="m-0 mt-1 text-sm leading-relaxed text-cribl-ink/90">{description}</p>
+              </div>
+            ) : null}
             <FieldLabel className="mt-3" label="Notes">
               <NotesTextarea
                 ariaLabel={`Notes for ${meta.item}`}
@@ -846,21 +879,17 @@ function TierScopeFooter({
 }
 
 function TierBadge({ tier, faded }: { tier: ActivationTier; faded: boolean }) {
-  const palette =
-    tier === 'Platinum'
-      ? 'border-violet-200 bg-violet-50 text-violet-700'
-      : tier === 'Gold'
-      ? 'border-amber-200 bg-amber-50 text-amber-800'
-      : 'border-slate-200 bg-slate-50 text-slate-700'
+  const palette = TIER_PALETTE[tier]
   return (
     <span
       className={[
-        'inline-flex w-fit shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition',
-        palette,
+        'inline-flex w-fit shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition',
+        palette.badge,
         faded ? 'opacity-70' : '',
       ].join(' ')}
       title={`Cribl PS ${tier} tier`}
     >
+      <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
       {tier}
     </span>
   )
