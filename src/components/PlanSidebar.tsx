@@ -496,18 +496,10 @@ export function PlanSidebarRail({
       aria-label="Plan, Worker Groups, Fleets, and Sources"
     >
       <NavButton
-        active={mainView === 'overview'}
-        onClick={onSelectOverview}
-        className="mt-2"
-      >
-        Plan
-      </NavButton>
-
-      <NavButton
         active={mainView === 'activation'}
         onClick={onSelectActivation}
         title="Cribl PS activation worksheet (tier, base scope, use cases)"
-        className="mt-1"
+        className="mt-2"
       >
         <span className="flex items-center gap-2">
           <span>Activation</span>
@@ -517,6 +509,14 @@ export function PlanSidebarRail({
             </span>
           ) : null}
         </span>
+      </NavButton>
+
+      <NavButton
+        active={mainView === 'overview'}
+        onClick={onSelectOverview}
+        className="mt-1"
+      >
+        Plan
       </NavButton>
 
       <WorkerGroupKindSection
@@ -895,13 +895,6 @@ export function PlanNavMobile({
     <div
       className={`flex items-stretch gap-1.5 overflow-x-auto border-b border-cribl-border bg-white px-2 py-1.5 ${className}`}
     >
-      <button
-        type="button"
-        className={chip(mainView === 'overview')}
-        onClick={onSelectOverview}
-      >
-        Overview
-      </button>
       <button type="button" className={chip(mainView === 'activation')} onClick={_onSelectActivation}>
         Activation
         {plan.activation.tier ? (
@@ -909,6 +902,13 @@ export function PlanNavMobile({
             · {plan.activation.tier}
           </span>
         ) : null}
+      </button>
+      <button
+        type="button"
+        className={chip(mainView === 'overview')}
+        onClick={onSelectOverview}
+      >
+        Overview
       </button>
       <button type="button" className={chip(mainView === 'workerGroups')} onClick={_onSelectWorkerGroups}>
         Worker Groups
