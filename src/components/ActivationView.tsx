@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react'
+import { AnimatedCollapse } from './AnimatedCollapse'
 import { TierPickerDialog } from './TierPickerDialog'
 import {
   PS_BASE_SCOPE_ITEMS,
@@ -662,11 +663,9 @@ function CollapsibleCard({
         </button>
         {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
       </div>
-      {open ? (
-        <div id={bodyId} role="region" aria-labelledby={headerId} className="px-3 pb-3 sm:px-4 sm:pb-4">
-          {children}
-        </div>
-      ) : null}
+      <AnimatedCollapse open={open} id={bodyId} role="region" aria-labelledby={headerId}>
+        <div className="px-3 pb-3 sm:px-4 sm:pb-4">{children}</div>
+      </AnimatedCollapse>
     </div>
   )
 }

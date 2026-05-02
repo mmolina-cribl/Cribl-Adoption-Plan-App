@@ -10,6 +10,7 @@ import { PencilIcon } from './PencilIcon'
 import type { MainView } from './navTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
+import { AnimatedCollapse } from './AnimatedCollapse'
 
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
@@ -413,7 +414,7 @@ function WorkerGroupKindSection({
           />
         ) : null}
       </div>
-      {listOpen ? (
+      <AnimatedCollapse open={listOpen}>
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
           {rows.map((r, i) => {
             const isWg = mainView === 'workerGroup' && activeWorkerGroupId === r.id
@@ -446,7 +447,7 @@ function WorkerGroupKindSection({
             </button>
           </div>
         </div>
-      ) : null}
+      </AnimatedCollapse>
     </>
   )
 }
@@ -571,7 +572,7 @@ export function PlanSidebarRail({
           />
         ) : null}
       </div>
-      {sourcesListOpen ? (
+      <AnimatedCollapse open={sourcesListOpen}>
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
           {sources.map((r, i) => {
             const isSrc = mainView === 'source' && activeSourceId === r.id
@@ -605,7 +606,7 @@ export function PlanSidebarRail({
             </button>
           </div>
         </div>
-      ) : null}
+      </AnimatedCollapse>
 
       <NavButton
         active={mainView === 'import'}

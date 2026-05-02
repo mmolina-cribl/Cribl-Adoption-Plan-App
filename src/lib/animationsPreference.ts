@@ -121,8 +121,12 @@ export function useEntryAnimation(): { animated: boolean; enabled: boolean } {
 /**
  * Mirrors the OS `prefers-reduced-motion` media query so we can
  * automatically suppress entry animations for users who've set it.
+ *
+ * Exported so other components (e.g. `AnimatedCollapse`) can also
+ * gate transitions on the same combined "should animate" check
+ * — `useAnimationsEnabled() && !usePrefersReducedMotion()`.
  */
-function usePrefersReducedMotion(): boolean {
+export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return false
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches
