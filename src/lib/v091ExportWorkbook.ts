@@ -79,6 +79,12 @@ import {
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
 import { resolveAllSheetNames } from './v091SheetNames'
 import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
+import { restoreSheetsFromGold } from './v091ExportSheetRestore'
+import {
+  buildSheetNamePathMap as buildSheetNamePathMapShared,
+  parseSheetEntries,
+  type SheetEntry,
+} from './v091ZipUtils'
 import type {
   Activation,
   PlanState,
@@ -142,45 +148,6 @@ export async function bufferIsV091Shell(buffer: ArrayBuffer | Uint8Array): Promi
 }
 
 // ─── Phase 1: JSZip clone pre-pass ───────────────────────────────────────────
-
-interface SheetEntry {
-  /** Display name as it appears in `workbook.xml`. */
-  name: string
-  /** Excel `sheetId` (1-based, internal id, distinct from r:id). */
-  sheetId: number
-  /** Relationship id (`r:id` in the `<sheet>` tag). */
-  rId: string
-  /** 1-based index of `xl/worksheets/sheet{N}.xml` for this sheet. */
-  sheetFileIdx: number
-}
-
-function parseSheetEntries(wbXml: string, wbRelsXml: string): SheetEntry[] {
-  const entries: SheetEntry[] = []
-  const relTargetByRid = new Map<string, string>()
-  const relRe = /<Relationship\s+Id="([^"]+)"\s+Type="[^"]*officeDocument\/2006\/relationships\/worksheet"\s+Target="([^"]+)"\s*\/>/g
-  for (const rm of wbRelsXml.matchAll(relRe)) {
-    relTargetByRid.set(rm[1]!, rm[2]!)
-  }
-  const sheetRe = /<sheet\b([^/]*)\/>/g
-  for (const sm of wbXml.matchAll(sheetRe)) {
-    const attrs = sm[1]!
-    const name = /name="([^"]+)"/.exec(attrs)?.[1]
-    const sheetIdStr = /sheetId="([^"]+)"/.exec(attrs)?.[1]
-    const rId = /r:id="([^"]+)"/.exec(attrs)?.[1]
-    if (name == null || sheetIdStr == null || rId == null) {
-      continue
-    }
-    const target = relTargetByRid.get(rId)
-    const sheetFileIdx = target ? Number((/sheet(\d+)\.xml$/.exec(target) ?? [])[1] ?? '0') : 0
-    entries.push({
-      name,
-      sheetId: Number(sheetIdStr),
-      rId,
-      sheetFileIdx,
-    })
-  }
-  return entries
-}
 
 function nextRId(wbRelsXml: string): number {
   const ids: number[] = []
@@ -782,22 +749,12 @@ async function fixOverviewTableRefs(zOut: JSZip, plan: PlanState): Promise<void>
 }
 
 /**
- * Build a name → `xl/worksheets/sheetN.xml` path map for the workbook in
- * `z`. Used by post-pass fixers that operate on sheets by name (the
- * sheet-file index is unreliable after ExcelJS reshuffles).
+ * Local alias keeps existing internal call sites pointing at the same
+ * helper without forcing a giant rename diff. The implementation
+ * lives in {@link ./v091ZipUtils} so the post-pass restorers can
+ * share it without re-importing this module (and forming a cycle).
  */
-async function buildSheetNamePathMap(z: JSZip): Promise<Map<string, string>> {
-  const wbXml = (await z.file('xl/workbook.xml')?.async('string')) ?? ''
-  const wbRels = (await z.file('xl/_rels/workbook.xml.rels')?.async('string')) ?? ''
-  const entries = parseSheetEntries(wbXml, wbRels)
-  const out = new Map<string, string>()
-  for (const e of entries) {
-    if (e.sheetFileIdx > 0) {
-      out.set(e.name, `xl/worksheets/sheet${e.sheetFileIdx}.xml`)
-    }
-  }
-  return out
-}
+const buildSheetNamePathMap = buildSheetNamePathMapShared
 
 /**
  * Extract every `<conditionalFormatting>` block from one canonical
@@ -916,6 +873,13 @@ async function restoreV091Styles(
   await fixOverviewTableRefs(zOut, plan)
   await restoreGoldPerWgConditionalFormatting(zIn, zOut)
   await fixCfRuleOperatorEcho(zOut)
+  // Per-sheet style fidelity restore: rewrites whichever sheets have
+  // a per-sheet restorer implemented in v091ExportSheetRestore.ts so
+  // their cells reference gold's `s=` indices (and therefore the gold
+  // styles.xml entries we just put back). One sheet at a time — the
+  // remaining sheets keep the pre-existing drift until they get a
+  // restorer.
+  await restoreSheetsFromGold(zIn, zOut, plan)
   const out = await zOut.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })
   return out as ArrayBuffer
 }
