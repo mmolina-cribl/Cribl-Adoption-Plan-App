@@ -419,12 +419,19 @@ function rewriteTableParts(sheetXml: string, rIds: readonly string[]): string {
   }
   const inner = rIds.map((id) => `<tablePart r:id="${id}"/>`).join('')
   const block = `<tableParts count="${rIds.length}">${inner}</tableParts>`
-  // Replace the existing `<tableParts>` element (self-closing or
-  // full-form). Match leniently so tag-attribute order doesn't matter.
-  if (/<tableParts\b[^/]*\/>/.test(sheetXml)) {
-    return sheetXml.replace(/<tableParts\b[^/]*\/>/, block)
+  // Order matters: try the full-form (open + close tags, possibly with
+  // child <tablePart/> entries) first. Only fall back to the truly
+  // self-closing form (`<tableParts ... />` with no children at all)
+  // when no closing tag exists. Putting the self-closing branch first
+  // would let `[^…]*\/>` greedily match the `/>` of the first nested
+  // `<tablePart …/>` child, leaving the rest of the block orphaned and
+  // producing malformed XML that Excel will tolerate but Google Sheets
+  // refuses to open.
+  if (/<\/tableParts>/.test(sheetXml)) {
+    return sheetXml.replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/, block)
   }
-  return sheetXml.replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/, block)
+  // True self-closing form: no `<` or `>` between `<tableParts` and `/>`.
+  return sheetXml.replace(/<tableParts\b[^<>]*\/>/, block)
 }
 
 /**
