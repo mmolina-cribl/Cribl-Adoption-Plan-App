@@ -517,6 +517,59 @@ async function restorePsUseCaseWorksheetSheet(
   }
 }
 
+// ─── Cross-sheet styles.xml fixups ─────────────────────────────────────────
+
+/**
+ * Pin every ListObject table's header-row text to white.
+ *
+ * Gold ships `xl/styles.xml` with `dxf 1` carrying a dark-green solid
+ * fill (`FF356854`) and an empty `<font/>`. Every table style on the
+ * workbook references that dxf as its `headerRow` — Stream Overview,
+ * Edge Overview, all three PS Use Case Worksheet tables, etc. With an
+ * empty font, the rendered text color is left to the cell's underlying
+ * `fontXf`; Excel and (some Google Sheets paths) auto-flip to white
+ * for contrast against the dark fill, but Google Sheets does NOT
+ * auto-flip when the fill arrives via the table-style override (i.e.
+ * the cell's own `fillId="0"` plus a `headerRow` dxf paint), only when
+ * the fill is on the cell directly. The result: row 10's
+ * "Use Case # / Use Case" headers (cells with `fillId=2` baked in via
+ * `s=17/18`) render white on green, but rows 2 and 18 — whose green
+ * comes from the table style — render dark text on green.
+ *
+ * Adding `<color rgb="FFFFFFFF"/>` inside the dxf 1 font is the
+ * OOXML-canonical way to pin every table's headerRow text to white,
+ * removes the heuristic dependency, and renders identically in Excel.
+ *
+ * Idempotent: only fires when the font element is still in its empty
+ * gold form. Bails out cleanly if the dxf collection's shape isn't
+ * what we expect (different schema would warrant a deliberate fix
+ * rather than a silent corruption).
+ */
+async function patchHeaderRowFontWhite(zOut: JSZip): Promise<void> {
+  const stylesXml = await zOut.file('xl/styles.xml')?.async('string')
+  if (!stylesXml) return
+  const dxfsMatch = stylesXml.match(/<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/)
+  if (!dxfsMatch) return
+  const dxfsBlock = dxfsMatch[0]
+  const dxfsInner = dxfsMatch[1] ?? ''
+  const dxfMatches = [...dxfsInner.matchAll(/<dxf>[\s\S]*?<\/dxf>/g)]
+  if (dxfMatches.length < 2) return
+  const target = dxfMatches[1]![0]
+  // Sanity-pin: gold dxf 1 is the green-fill headerRow dxf. If the
+  // workbook's dxf 1 has a different fill, we're not looking at the
+  // expected dxf collection — bail rather than guess.
+  if (!/FF356854/i.test(target)) return
+  if (!/<font\s*\/>/.test(target)) return
+  const patchedDxf = target.replace(
+    /<font\s*\/>/,
+    '<font><color rgb="FFFFFFFF"/></font>',
+  )
+  const patchedInner = dxfsInner.replace(target, patchedDxf)
+  const patchedBlock = dxfsBlock.replace(dxfsInner, patchedInner)
+  const patchedXml = stylesXml.replace(dxfsBlock, patchedBlock)
+  zOut.file('xl/styles.xml', patchedXml)
+}
+
 // ─── Orchestrator ──────────────────────────────────────────────────────────
 
 /**
@@ -526,11 +579,18 @@ async function restorePsUseCaseWorksheetSheet(
  * drift until a restorer is added (one sheet per commit, by design,
  * so each restoration can be visually verified before the next is
  * tackled).
+ *
+ * Cross-sheet styles.xml patches that benefit every table on the
+ * workbook (e.g. white headerRow text) run alongside the per-sheet
+ * passes — they do not require a sheet to be restored to take effect,
+ * but they do depend on `xl/styles.xml` having been swapped to gold
+ * by `restoreV091Styles` first.
  */
 export async function restoreSheetsFromGold(
   zIn: JSZip,
   zOut: JSZip,
   plan: PlanState,
 ): Promise<void> {
+  await patchHeaderRowFontWhite(zOut)
   await restorePsUseCaseWorksheetSheet(zIn, zOut, plan)
 }
