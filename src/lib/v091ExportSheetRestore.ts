@@ -273,10 +273,45 @@ function insertMissingCells(
  * attribute order — ExcelJS and Google Sheets each emit attributes in
  * different orders and both must round-trip cleanly.
  */
+/**
+ * Wrap an XML-escaped value in an inline-string body, optionally with
+ * a single text run that pins the run's font color to white.
+ *
+ * Why white-text via `<rPr>` instead of touching `cellXfs`?
+ * ───────────────────────────────────────────────────────────
+ * Gold's table-header cells on rows 2 and 18 (PS Use Case Worksheet)
+ * use cellXfs `s=11` / `s=12`, which carry `fillId="0"` (no direct
+ * fill) and `fontId="2"` (`<color theme="1"/>` — black). Their green
+ * background is painted by the `headerRow` differential format on the
+ * surrounding `<table>`. Excel auto-flips text to white for contrast
+ * when a cell lives in a dark-fill region; Google Sheets only applies
+ * that auto-flip when the dark fill is on the cell ITSELF (`fillId !=
+ * 0`). Row 10's "Use Case # / Use Case" cells use `s=17 / 18` with
+ * `fillId="2"` (green) baked in, so Google flips them to white. Rows
+ * 2 and 18 are left looking dark on green.
+ *
+ * Wrapping the inline string in `<r><rPr><color rgb="FFFFFFFF"/></rPr>
+ * <t>…</t></r>` pins the rendered text to white at the run level,
+ * unconditionally, without altering `cellXfs` (which is shared with
+ * many other workbook regions and would be risky to mutate). All other
+ * font properties — name, size, weight, family — are left to inherit
+ * from the cell's underlying `fontId`, so typography continues to
+ * match gold exactly. Excel applies the same run-level color override
+ * (it just renders white either way), so this is a no-op in Excel and
+ * a fix in Google Sheets.
+ */
+function inlineStrBody(escapedValue: string, white: boolean): string {
+  if (white) {
+    return `<is><r><rPr><color rgb="FFFFFFFF"/></rPr><t xml:space="preserve">${escapedValue}</t></r></is>`
+  }
+  return `<is><t xml:space="preserve">${escapedValue}</t></is>`
+}
+
 function overlayCellsInSheet(
   sheetXml: string,
   goldSharedStrings: string[],
   overlay: OverlayMap,
+  whiteTextAddresses: ReadonlySet<string> = new Set(),
 ): string {
   const visited = new Set<string>()
   const cellRegex = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
@@ -300,7 +335,8 @@ function overlayCellsInSheet(
           const idx = Number(idxMatch[1])
           const text = goldSharedStrings[idx]
           if (text != null) {
-            return `<c r="${addr}"${sFragment} t="inlineStr"><is><t xml:space="preserve">${text}</t></is></c>`
+            const body = inlineStrBody(text, whiteTextAddresses.has(addr))
+            return `<c r="${addr}"${sFragment} t="inlineStr">${body}</c>`
           }
         }
       }
@@ -480,7 +516,24 @@ async function restorePsUseCaseWorksheetSheet(
     (await zIn.file('xl/sharedStrings.xml')?.async('string')) ?? ''
   const goldSharedStrings = parseSharedStrings(goldSharedStringsXml)
   const overlay = psUseCaseWorksheetOverlay(plan.activation)
-  let patched = overlayCellsInSheet(goldSheetXml, goldSharedStrings, overlay)
+  // Header-row text pin: rows 2 and 18 are the header rows of the
+  // outer two `<table>` elements (Activation Base Scope; Use Case
+  // Worksheet). Their cells have `fillId="0"` and rely on the
+  // `headerRow` dxf for their green background — Google Sheets does
+  // not auto-flip text to white in that case (vs. row 10, whose cells
+  // carry `fillId="2"` directly via `s=17/18` and DO auto-flip). We
+  // emit those text runs with an inline `<rPr><color rgb="FFFFFFFF"/>`
+  // so the headers render white-on-green in both Excel and Google.
+  const whiteTextAddresses = new Set<string>([
+    'A2', 'B2', 'C2', 'D2', 'E2',
+    'A18', 'B18', 'C18', 'D18', 'E18',
+  ])
+  let patched = overlayCellsInSheet(
+    goldSheetXml,
+    goldSharedStrings,
+    overlay,
+    whiteTextAddresses,
+  )
 
   // Rewrite <tableParts> to match the rIds ExcelJS allocated in the
   // output's rels file. The 3 PS Use Case Worksheet tables live at
