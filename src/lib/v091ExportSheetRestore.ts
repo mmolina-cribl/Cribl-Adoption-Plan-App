@@ -535,38 +535,47 @@ async function restorePsUseCaseWorksheetSheet(
     whiteTextAddresses,
   )
 
-  // Cell-level perimeter borders for tables 1 and 3 (rows 2..7 and
-  // 18..46). Gold puts the green grid on the table-style `wholeTable`
-  // dxf, which Excel applies but Google Sheets ignores. The styles
-  // patch appends a 4-sided green border + border-aware clones of the
-  // 6 cellXfs that body cells use; we then remap each cell's `s=` in
-  // those ranges so it picks up the new borderId. The headerRow
-  // cells (2 and 18) are included — their inline `<rPr>` text colour
-  // override is preserved because we only swap the `s=` attribute.
-  const xfRemap = await patchActivationTableBorderCellXfs(zOut)
-  if (xfRemap.size > 0) {
-    const tableRowRanges: ReadonlyArray<readonly [number, number]> = [
-      [2, 7],
-      [18, 46],
-    ]
-    patched = remapCellStylesInRanges(patched, tableRowRanges, xfRemap)
-    // Fill empty grid positions: gold drops `<c>` elements for cells
-    // it ships blank (e.g. E3..E7 Notes column on table 1, much of
-    // the C/D/E columns on table 3). Without an explicit cell tag,
-    // there's nothing for OOXML to attach a border to, leaving holes
-    // in the grid. We insert `<c r="ADDR" s="…"/>` for every missing
-    // position, using the bordered clone of the source `s=15` cellXf
-    // (the most common "default body" style in these ranges per the
-    // gold audit) so the inserted cell visually matches.
-    const fillerS = xfRemap.get(15)
-    if (fillerS != null) {
-      patched = ensureCellsInRanges(
-        patched,
-        tableRowRanges,
-        ['A', 'B', 'C', 'D', 'E'],
-        fillerS,
-      )
-    }
+  // Cell-level perimeter borders for tables 1 (Activation Base Scope
+  // A2:E7) and 3 (Activation Use Case Worksheet A18:E46). Gold paints
+  // its single outer rectangle via the `wholeTable` table-style dxf,
+  // which Excel applies but Google Sheets ignores. To produce just
+  // the outer perimeter — top edge across A2..E2, right edge down
+  // E2..E7, bottom edge across A7..E7, left edge down A2..A7, plus
+  // the same for table 3 — we:
+  //
+  //   1. Snapshot every existing `<c r="…" s="N">` so we know each
+  //      cell's gold style index.
+  //   2. Append 8 borders (T/B/L/R + 4 corners) and per-(baseS, edge)
+  //      cellXf clones to `xl/styles.xml`.
+  //   3. Rewrite every existing perimeter cell's `s=` to the matching
+  //      border-aware clone — leaving inner content (including header
+  //      cells' inline `<rPr>` white-text wrapping) untouched.
+  //   4. Splice in `<c r="ADDR" s="…"/>` for every perimeter address
+  //      gold dropped (E3..E7 Notes column, B7..D7 bottom row, much
+  //      of table 3's C/D/E columns, etc.). Without an explicit
+  //      `<c>` element there's nothing for OOXML to attach a border
+  //      to, leaving the perimeter incomplete.
+  //
+  // Interior cells are not touched, so the body of each table keeps
+  // gold's default no-border look.
+  const PS_TABLES: readonly TableRect[] = [
+    { topRow: 2,  bottomRow: 7,  leftCol: 'A', rightCol: 'E', cols: ['A','B','C','D','E'] },
+    { topRow: 18, bottomRow: 46, leftCol: 'A', rightCol: 'E', cols: ['A','B','C','D','E'] },
+  ]
+  const existingCellStyles = readExistingCellStyles(patched)
+  const { remap, defaultByEdge } = await patchActivationTablePerimeterCellXfs(
+    zOut,
+    PS_TABLES,
+    existingCellStyles,
+  )
+  if (remap.size > 0) {
+    patched = applyPerimeterToSheet(
+      patched,
+      PS_TABLES,
+      existingCellStyles,
+      remap,
+      defaultByEdge,
+    )
   }
 
   // Rewrite <tableParts> to match the rIds ExcelJS allocated in the
@@ -736,207 +745,364 @@ async function patchHeaderRowFontWhite(zOut: JSZip): Promise<void> {
 }
 
 /**
- * The thin-green border style every Activation table cell wants on
- * all 4 sides. Mirrors gold's `dxf 4` (the `wholeTable` differential
- * format) — Excel auto-applies that dxf to every cell in the table
- * range; Google Sheets does not, so we have to bake it into the cell
- * styles directly.
+ * Position of a cell relative to its enclosing rectangle. Encodes
+ * which of the four sides (top / bottom / left / right) of the cell
+ * sit on the outer edge of the table — i.e. need a green border.
+ * Interior cells (no edge) are absent from this enum entirely; they
+ * are handled by skipping perimeter rewrites for them.
  */
-const ACTIVATION_TABLE_GRID_BORDER_XML =
-  '<border>' +
-  '<left style="thin"><color rgb="FF356854"/></left>' +
-  '<right style="thin"><color rgb="FF356854"/></right>' +
-  '<top style="thin"><color rgb="FF356854"/></top>' +
-  '<bottom style="thin"><color rgb="FF356854"/></bottom>' +
-  '</border>'
+type EdgeKind = 'T' | 'B' | 'L' | 'R' | 'TL' | 'TR' | 'BL' | 'BR'
 
 /**
- * `s=` indices used by cells inside the two perimeter-bordered tables
- * on the PS Use Case Worksheet (Activation Base Scope `A2:E7` and
- * Activation Use Case Worksheet `A18:E46`). Each one pairs `fillId=0`
- * with `borderId=0` and only differs in font / alignment, so cloning
- * each into a "with grid border" variant is the minimum-invasive way
- * to give every cell in the range its 4-sided green border without
- * homogenizing the typography that gold ships per-cell.
- *
- * If gold ever uses additional cellXfs in these ranges, they would
- * fall through with their original (border-less) `s=` and the missing
- * cells would visually pop out — keeping this list in sync with what
- * `psUseCaseWorksheetOverlay` and the cell-overlay pass actually
- * encounter is part of the per-sheet restorer's contract. Audited
- * against the gold workbook on 2026-05-04: every cell on rows 2..7
- * and 18..46 references one of these six.
+ * One thin-green border XML per `EdgeKind`. The XML matches gold's
+ * `wholeTable` dxf shape but only paints the side(s) that sit on
+ * the outer edge of the table. Excel and Google Sheets both render
+ * adjacent perimeter cells' borders as a continuous outer line, so
+ * the four corners + four edges yield a single rectangle around the
+ * table without any inner gridlines.
  */
-const PS_TABLE_BODY_BASE_XF_INDICES: readonly number[] = [11, 12, 13, 14, 15, 27]
+const PERIMETER_BORDER_XML: Readonly<Record<EdgeKind, string>> = {
+  T: '<border><top style="thin"><color rgb="FF356854"/></top></border>',
+  B: '<border><bottom style="thin"><color rgb="FF356854"/></bottom></border>',
+  L: '<border><left style="thin"><color rgb="FF356854"/></left></border>',
+  R: '<border><right style="thin"><color rgb="FF356854"/></right></border>',
+  TL:
+    '<border>' +
+    '<left style="thin"><color rgb="FF356854"/></left>' +
+    '<top style="thin"><color rgb="FF356854"/></top>' +
+    '</border>',
+  TR:
+    '<border>' +
+    '<right style="thin"><color rgb="FF356854"/></right>' +
+    '<top style="thin"><color rgb="FF356854"/></top>' +
+    '</border>',
+  BL:
+    '<border>' +
+    '<left style="thin"><color rgb="FF356854"/></left>' +
+    '<bottom style="thin"><color rgb="FF356854"/></bottom>' +
+    '</border>',
+  BR:
+    '<border>' +
+    '<right style="thin"><color rgb="FF356854"/></right>' +
+    '<bottom style="thin"><color rgb="FF356854"/></bottom>' +
+    '</border>',
+}
+
+const ALL_EDGE_KINDS: readonly EdgeKind[] = [
+  'T',
+  'B',
+  'L',
+  'R',
+  'TL',
+  'TR',
+  'BL',
+  'BR',
+]
 
 /**
- * Append a 4-sided green border (matching gold's `wholeTable` dxf)
- * plus border-aware clones of every cellXf used by cells in the
- * Activation Base Scope and Activation Use Case Worksheet ranges.
- * Returns a Map from each base `s=` to its new "with-border" `s=`,
- * which the sheet restorer threads through to remap cell references.
- *
- * No-op when the styles file or any expected cellXf is missing — we
- * silently fall through rather than corrupt the styles archive.
+ * Rectangular cell-range used to describe where a perimeter border
+ * should be drawn on a worksheet. Inclusive on every bound. `cols`
+ * is the alphabetical sequence of columns spanned (e.g.
+ * `['A', 'B', 'C', 'D', 'E']`); we pre-list it instead of expanding
+ * `leftCol`..`rightCol` at runtime so callers can stay explicit
+ * about which intermediate columns count as part of the table
+ * footprint.
  */
-async function patchActivationTableBorderCellXfs(
+interface TableRect {
+  topRow: number
+  bottomRow: number
+  leftCol: string
+  rightCol: string
+  cols: readonly string[]
+}
+
+/**
+ * Resolve the cell at (row, col) to an `EdgeKind`, or `null` for
+ * interior cells. Pure function — used during the perimeter scan to
+ * decide whether each cell needs to be remapped to a border-aware
+ * cellXf clone.
+ */
+function classifyEdge(row: number, col: string, rect: TableRect): EdgeKind | null {
+  const isTop = row === rect.topRow
+  const isBottom = row === rect.bottomRow
+  const isLeft = col === rect.leftCol
+  const isRight = col === rect.rightCol
+  if (!(isTop || isBottom || isLeft || isRight)) return null
+  if (isTop && isLeft) return 'TL'
+  if (isTop && isRight) return 'TR'
+  if (isBottom && isLeft) return 'BL'
+  if (isBottom && isRight) return 'BR'
+  if (isTop) return 'T'
+  if (isBottom) return 'B'
+  if (isLeft) return 'L'
+  return 'R'
+}
+
+/**
+ * Default `s=` to use as the cell-style "base" when a perimeter
+ * position is missing from gold (no `<c>` element to inherit a font
+ * / alignment from). Cells inserted at these positions are always
+ * empty, so the choice mainly affects whether the border line
+ * inherits any compatible alignment metadata; `s=15` is gold's most
+ * common borderless body cellXf on the PS Use Case Worksheet.
+ */
+const PERIMETER_DEFAULT_BASE_XF = 15
+
+/**
+ * Build the perimeter spec for a table: list each edge cell once,
+ * paired with its classified `EdgeKind`. Interior cells are not
+ * included, so callers can simply iterate the result and ignore
+ * everything else inside the rect.
+ */
+function perimeterCellsOf(rect: TableRect): Array<{ addr: string; edge: EdgeKind }> {
+  const out: Array<{ addr: string; edge: EdgeKind }> = []
+  for (let r = rect.topRow; r <= rect.bottomRow; r += 1) {
+    for (const c of rect.cols) {
+      const edge = classifyEdge(r, c, rect)
+      if (edge != null) {
+        out.push({ addr: `${c}${r}`, edge })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Read every `<c r="ADDR" … s="N">` already present on `sheetXml`
+ * into an `addr -> s` map. Cells without an `s=` attribute (rare on
+ * this sheet but legal in OOXML) are absent from the map; callers
+ * fall back to {@link PERIMETER_DEFAULT_BASE_XF} for those.
+ */
+function readExistingCellStyles(sheetXml: string): Map<string, number> {
+  const out = new Map<string, number>()
+  const re = /<c\s+([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(sheetXml)) !== null) {
+    const addrRaw = attr(m[1]!, 'r')
+    const sRaw = attr(m[1]!, 's')
+    if (addrRaw == null) continue
+    if (sRaw != null) {
+      out.set(addrRaw, Number(sRaw))
+    }
+  }
+  return out
+}
+
+/**
+ * Append the eight perimeter borders + every required cellXf clone
+ * to `xl/styles.xml`, returning the maps the sheet rewriter needs:
+ *
+ *   - `remap`:         keyed by `${baseS}:${edge}`, gives the new
+ *                      `s=` for any cell whose original cellXf is
+ *                      `baseS` and whose perimeter classification is
+ *                      `edge`.
+ *   - `defaultByEdge`: gives the new `s=` for inserted (empty) cells
+ *                      at each `EdgeKind`, sourced from cloning
+ *                      `PERIMETER_DEFAULT_BASE_XF`.
+ *
+ * Strategy notes
+ * ──────────────
+ * - Only one cellXf clone per unique `(baseS, edge)` pair — if two
+ *   cells share the same starting `s=` and edge classification, they
+ *   end up referencing the same new `s=`. Keeps the cellXfs growth
+ *   proportional to the number of distinct (style, edge) combos
+ *   present (typically ≤ 20 for the two Activation tables) instead
+ *   of one clone per cell.
+ *
+ * - The 8 border definitions are ALWAYS appended even if some happen
+ *   to be unused, so the resulting `borderId` indices are stable
+ *   (predictable for tests / debugging). Callers shouldn't depend on
+ *   the specific indices, but the borders count bumps by exactly 8.
+ *
+ * - When a cell address from `tables` is missing in the sheet (gold
+ *   drops empty cells), we fall back to {@link PERIMETER_DEFAULT_BASE_XF}
+ *   as its base. We also seed `(default, edge)` for every edge so
+ *   `defaultByEdge` is fully populated even if no existing gold cell
+ *   happens to combine that edge with that base.
+ */
+async function patchActivationTablePerimeterCellXfs(
   zOut: JSZip,
-): Promise<Map<number, number>> {
-  const stylesXml = await zOut.file('xl/styles.xml')?.async('string')
-  if (!stylesXml) return new Map()
-  const baseXfs: Array<{ idx: number; xml: string }> = []
-  for (const idx of PS_TABLE_BODY_BASE_XF_INDICES) {
-    const xf = getCellXfAt(stylesXml, idx)
-    if (xf == null) {
-      // Missing source cellXf — bail rather than emit a partial map
-      // that would leave half the cells unbordered.
-      return new Map()
+  tables: readonly TableRect[],
+  existingCellStyles: ReadonlyMap<string, number>,
+): Promise<{
+  remap: Map<string, number>
+  defaultByEdge: Map<EdgeKind, number>
+}> {
+  const empty = {
+    remap: new Map<string, number>(),
+    defaultByEdge: new Map<EdgeKind, number>(),
+  }
+  const stylesXmlIn = await zOut.file('xl/styles.xml')?.async('string')
+  if (!stylesXmlIn) return empty
+
+  // Phase 1: append all 8 borders, recording each EdgeKind's
+  // resolved borderId.
+  let stylesXml = stylesXmlIn
+  const borderIdByEdge = new Map<EdgeKind, number>()
+  for (const edge of ALL_EDGE_KINDS) {
+    const r = appendBorder(stylesXml, PERIMETER_BORDER_XML[edge])
+    if (r.index < 0) return empty
+    stylesXml = r.xml
+    borderIdByEdge.set(edge, r.index)
+  }
+
+  // Phase 2: walk every perimeter cell, build the unique set of
+  // (baseS, edge) clone requests.
+  const requestKey = (baseS: number, edge: EdgeKind) => `${baseS}:${edge}`
+  type CloneRequest = { baseS: number; edge: EdgeKind }
+  const requests = new Map<string, CloneRequest>()
+  for (const rect of tables) {
+    for (const { addr, edge } of perimeterCellsOf(rect)) {
+      const baseS = existingCellStyles.get(addr) ?? PERIMETER_DEFAULT_BASE_XF
+      const k = requestKey(baseS, edge)
+      if (!requests.has(k)) requests.set(k, { baseS, edge })
     }
-    baseXfs.push({ idx, xml: xf })
   }
-  const { xml: afterBorder, index: newBorderId } = appendBorder(
-    stylesXml,
-    ACTIVATION_TABLE_GRID_BORDER_XML,
-  )
-  if (newBorderId < 0) return new Map()
-  const cloned = baseXfs.map((b) => cloneXfWithBorder(b.xml, newBorderId))
-  const { xml: afterXfs, indices: newSIndices } = appendCellXfs(afterBorder, cloned)
-  if (newSIndices.length !== baseXfs.length) return new Map()
-  zOut.file('xl/styles.xml', afterXfs)
-  const out = new Map<number, number>()
-  for (let i = 0; i < baseXfs.length; i += 1) {
-    out.set(baseXfs[i]!.idx, newSIndices[i]!)
+  // Always seed (default, edge) for every edge so inserted cells
+  // have a clone to point at, even when no existing gold cell
+  // happens to combine that edge with the default base.
+  for (const edge of ALL_EDGE_KINDS) {
+    const k = requestKey(PERIMETER_DEFAULT_BASE_XF, edge)
+    if (!requests.has(k)) {
+      requests.set(k, { baseS: PERIMETER_DEFAULT_BASE_XF, edge })
+    }
   }
-  return out
+
+  // Phase 3: build cellXf clones for each unique request.
+  const cloneXmls: string[] = []
+  const cloneKeys: string[] = []
+  for (const [k, { baseS, edge }] of requests) {
+    const baseXf = getCellXfAt(stylesXml, baseS)
+    if (baseXf == null) continue
+    cloneXmls.push(cloneXfWithBorder(baseXf, borderIdByEdge.get(edge)!))
+    cloneKeys.push(k)
+  }
+  const appendResult = appendCellXfs(stylesXml, cloneXmls)
+  if (appendResult.indices.length !== cloneXmls.length) return empty
+  zOut.file('xl/styles.xml', appendResult.xml)
+
+  // Phase 4: build caller-facing maps.
+  const remap = new Map<string, number>()
+  const defaultByEdge = new Map<EdgeKind, number>()
+  for (let i = 0; i < cloneKeys.length; i += 1) {
+    const k = cloneKeys[i]!
+    const newS = appendResult.indices[i]!
+    remap.set(k, newS)
+    const req = requests.get(k)!
+    if (req.baseS === PERIMETER_DEFAULT_BASE_XF) {
+      defaultByEdge.set(req.edge, newS)
+    }
+  }
+  return { remap, defaultByEdge }
 }
 
 /**
- * Rewrite every `<c r="…" s="OLD" …>` cell whose row falls in one of
- * the supplied row ranges so its `s=OLD` becomes `s=NEW` per
- * `xfRemap`. Cells whose row is outside every range, or whose `s=`
- * isn't in the remap, pass through unchanged. The cell's inner
- * content (text, formula, inline-string rPr override, etc.) is left
- * intact — only the `s` attribute is touched.
+ * Apply per-cell perimeter borders to `sheetXml`:
  *
- * Implementation note: we match by full `<c …>` open tag and rewrite
- * just its attribute substring, then concatenate with the cell's
- * remaining body. This avoids the temptation to use a global
- * `s="OLD"` → `s="NEW"` replace, which would mis-fire on
- * `<sheetView>` / `<row>` / etc. attributes that happen to share an
- * `s=` token spelling.
+ *   - Cells already present on the sheet whose address sits on a
+ *     perimeter get their `s=` attribute swapped to the corresponding
+ *     border-aware clone. Every other attribute (text, formula, rPr
+ *     wrapping, etc.) is preserved.
+ *
+ *   - Perimeter cells absent from the sheet are inserted with
+ *     `<c r="ADDR" s="N"/>` where `N` comes from `defaultByEdge[edge]`.
+ *     They are inserted in alphabetical column order within the
+ *     parent row, matching OOXML's required ordering.
+ *
+ *   - Interior cells are untouched — there are no inner gridlines.
  */
-/**
- * Insert empty styled cells (`<c r="ADDR" s="N"/>`) at every column /
- * row coordinate inside the supplied ranges that does NOT already have
- * an explicit `<c>` element on the sheet. Used to give the
- * Activation tables a complete grid of bordered cells — gold drops
- * empty data cells from its `<row>` blocks, so absent a fill-in pass
- * those positions would be missing their grid border (the `<row>`
- * itself has no border-rendering machinery).
- *
- * Cells inserted by the overlay pass or already shipped by gold are
- * left alone; this pass only fills the holes. Emitted cells use
- * `fillerS` as their style index — callers pass the index of one of
- * the bordered cellXfs added by {@link patchActivationTableBorderCellXfs},
- * so the inserted cell visually matches the rest of the table grid.
- *
- * Cells are inserted in alphabetical column order within each row so
- * the resulting OOXML is valid (worksheets require cells inside a
- * `<row>` to be sorted by column).
- */
-function ensureCellsInRanges(
+function applyPerimeterToSheet(
   sheetXml: string,
-  rowRanges: ReadonlyArray<readonly [number, number]>,
-  cols: readonly string[],
-  fillerS: number,
+  tables: readonly TableRect[],
+  existingCellStyles: ReadonlyMap<string, number>,
+  remap: ReadonlyMap<string, number>,
+  defaultByEdge: ReadonlyMap<EdgeKind, number>,
 ): string {
-  // Build the set of every address already present so we don't
-  // double-insert (overlay + gold contributions are both already in
-  // the sheet by this point).
-  const existing = new Set<string>()
-  const cellAddrRegex = /<c\s+r="([^"]+)"/g
-  let cm: RegExpExecArray | null
-  while ((cm = cellAddrRegex.exec(sheetXml)) !== null) {
-    existing.add(cm[1]!)
-  }
-  // Group missing addresses by row; we splice once per row.
-  const byRow = new Map<number, string[]>()
-  for (const [lo, hi] of rowRanges) {
-    for (let r = lo; r <= hi; r += 1) {
-      for (const col of cols) {
-        const addr = `${col}${r}`
-        if (!existing.has(addr)) {
-          if (!byRow.has(r)) byRow.set(r, [])
-          byRow.get(r)!.push(addr)
-        }
+  const requestKey = (baseS: number, edge: EdgeKind) => `${baseS}:${edge}`
+
+  // Decide the target s= for every perimeter cell, and queue
+  // insertions for the ones that aren't yet on the sheet.
+  const targetByAddr = new Map<string, number>()
+  const insertions: Array<{ addr: string; s: number }> = []
+  for (const rect of tables) {
+    for (const { addr, edge } of perimeterCellsOf(rect)) {
+      const baseS = existingCellStyles.get(addr) ?? PERIMETER_DEFAULT_BASE_XF
+      const newS = remap.get(requestKey(baseS, edge))
+      if (newS == null) continue
+      targetByAddr.set(addr, newS)
+      if (!existingCellStyles.has(addr)) {
+        insertions.push({ addr, s: defaultByEdge.get(edge) ?? newS })
       }
     }
   }
+
+  // Step A: rewrite existing cells' `s=` attribute in-place. Skip
+  // any address queued for insertion below — we don't want to touch
+  // a cell that doesn't actually exist yet.
   let out = sheetXml
-  for (const [rowNum, missing] of byRow) {
-    missing.sort((a, b) => {
-      const ax = splitAddr(a)!
-      const ay = splitAddr(b)!
-      return colCmp(ax.col, ay.col)
+  if (targetByAddr.size > 0) {
+    const cellRegex = /<c\s+([^>]*?)(\/>|>[\s\S]*?<\/c>)/g
+    out = out.replace(cellRegex, (full, attrs: string) => {
+      const addrRaw = attr(attrs, 'r')
+      if (!addrRaw) return full
+      const newS = targetByAddr.get(addrRaw)
+      if (newS == null) return full
+      if (!existingCellStyles.has(addrRaw)) return full
+      const rewrittenAttrs = /\bs="\d+"/.test(attrs)
+        ? attrs.replace(/\bs="\d+"/, `s="${newS}"`)
+        : `${attrs.replace(/\s*$/, '')} s="${newS}"`
+      return full.replace(attrs, rewrittenAttrs)
     })
-    const rowRe = new RegExp(`<row\\s+r="${rowNum}"([^>]*)>([\\s\\S]*?)</row>`)
-    const rowMatch = rowRe.exec(out)
-    if (!rowMatch) continue
-    const rowAttrs = rowMatch[1]!
-    const rowInner = rowMatch[2]!
-    let newInner = rowInner
-    for (const addr of missing) {
-      const sp = splitAddr(addr)!
-      const cellXml = `<c r="${addr}" s="${fillerS}"/>`
-      const liveRe = /<c\s+([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g
-      let chosen = newInner.length
-      let lcm: RegExpExecArray | null
-      while ((lcm = liveRe.exec(newInner)) !== null) {
-        const liveAddr = attr(lcm[1]!, 'r')
-        const liveSp = liveAddr ? splitAddr(liveAddr) : null
-        if (!liveSp) continue
-        if (colCmp(liveSp.col, sp.col) > 0) {
-          chosen = lcm.index
-          break
-        }
-      }
-      newInner = newInner.slice(0, chosen) + cellXml + newInner.slice(chosen)
-    }
-    out =
-      out.slice(0, rowMatch.index) +
-      `<row r="${rowNum}"${rowAttrs}>${newInner}</row>` +
-      out.slice(rowMatch.index + rowMatch[0].length)
   }
-  return out
-}
 
-function remapCellStylesInRanges(
-  sheetXml: string,
-  rowRanges: ReadonlyArray<readonly [number, number]>,
-  xfRemap: ReadonlyMap<number, number>,
-): string {
-  if (xfRemap.size === 0 || rowRanges.length === 0) return sheetXml
-  const cellRegex = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
-  return sheetXml.replace(cellRegex, (full, attrs: string, _end: string) => {
-    const addr = attr(attrs, 'r')
-    if (!addr) return full
-    const sp = splitAddr(addr)
-    if (!sp) return full
-    let inRange = false
-    for (const [lo, hi] of rowRanges) {
-      if (sp.row >= lo && sp.row <= hi) {
-        inRange = true
-        break
-      }
+  // Step B: splice missing cells into their parent rows. Group by
+  // row, sort by column for OOXML correctness, then insert at the
+  // first existing cell whose column comes strictly after.
+  if (insertions.length > 0) {
+    const byRow = new Map<number, Array<{ addr: string; s: number }>>()
+    for (const ins of insertions) {
+      const sp = splitAddr(ins.addr)
+      if (!sp) continue
+      if (!byRow.has(sp.row)) byRow.set(sp.row, [])
+      byRow.get(sp.row)!.push(ins)
     }
-    if (!inRange) return full
-    const sStr = attr(attrs, 's')
-    if (sStr == null) return full
-    const newS = xfRemap.get(Number(sStr))
-    if (newS == null) return full
-    const rewrittenAttrs = attrs.replace(/\bs="\d+"/, `s="${newS}"`)
-    return full.replace(attrs, rewrittenAttrs)
-  })
+    for (const [rowNum, list] of byRow) {
+      list.sort((x, y) => {
+        const ax = splitAddr(x.addr)!
+        const ay = splitAddr(y.addr)!
+        return colCmp(ax.col, ay.col)
+      })
+      const rowRe = new RegExp(`<row\\s+r="${rowNum}"([^>]*)>([\\s\\S]*?)</row>`)
+      const rowMatch = rowRe.exec(out)
+      if (!rowMatch) continue
+      const rowAttrs = rowMatch[1]!
+      const rowInner = rowMatch[2]!
+      let newInner = rowInner
+      for (const { addr, s } of list) {
+        const sp = splitAddr(addr)!
+        const cellXml = `<c r="${addr}" s="${s}"/>`
+        const liveRe = /<c\s+([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g
+        let chosen = newInner.length
+        let lcm: RegExpExecArray | null
+        while ((lcm = liveRe.exec(newInner)) !== null) {
+          const liveAddr = attr(lcm[1]!, 'r')
+          const liveSp = liveAddr ? splitAddr(liveAddr) : null
+          if (!liveSp) continue
+          if (colCmp(liveSp.col, sp.col) > 0) {
+            chosen = lcm.index
+            break
+          }
+        }
+        newInner = newInner.slice(0, chosen) + cellXml + newInner.slice(chosen)
+      }
+      out =
+        out.slice(0, rowMatch.index) +
+        `<row r="${rowNum}"${rowAttrs}>${newInner}</row>` +
+        out.slice(rowMatch.index + rowMatch[0].length)
+    }
+  }
+
+  return out
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────────
