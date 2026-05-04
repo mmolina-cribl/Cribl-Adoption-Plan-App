@@ -382,9 +382,74 @@ function psUseCaseWorksheetOverlay(activation: Activation): OverlayMap {
 // ─── Per-sheet restorers ───────────────────────────────────────────────────
 
 /**
+ * Convert a sheet's worksheet path (`xl/worksheets/sheetN.xml`) into
+ * its rels path (`xl/worksheets/_rels/sheetN.xml.rels`).
+ */
+function sheetRelsPathFor(sheetPath: string): string {
+  return sheetPath.replace(/^(xl\/worksheets\/)(sheet\d+\.xml)$/, '$1_rels/$2.rels')
+}
+
+/**
+ * Find the relationship id (`rId…`) in `relsXml` whose `Target`
+ * matches `expectedTarget`, or `null` if none is found. Used to map
+ * gold's tableParts (`rId5/6/7`) onto whatever rIds ExcelJS allocated
+ * for the same table targets in the output.
+ */
+function rIdForTarget(relsXml: string, expectedTarget: string): string | null {
+  const escaped = expectedTarget.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+  const re = new RegExp(`<Relationship\\s[^>]*?Id="([^"]+)"[^>]*?Target="${escaped}"[^>]*?/>`)
+  const m = relsXml.match(re)
+  if (m) return m[1]!
+  // ExcelJS sometimes emits attributes in the opposite order.
+  const re2 = new RegExp(`<Relationship\\s[^>]*?Target="${escaped}"[^>]*?Id="([^"]+)"[^>]*?/>`)
+  const m2 = relsXml.match(re2)
+  return m2 ? m2[1]! : null
+}
+
+/**
+ * Replace the `<tableParts>` block in `sheetXml` with one that
+ * references `rIds` in document order. Used after we copy gold's
+ * sheet XML verbatim — gold's tableParts say `rId5/6/7` but the
+ * matching ExcelJS-produced rels file may have allocated different
+ * ids (commonly `rId2/3/4`).
+ */
+function rewriteTableParts(sheetXml: string, rIds: readonly string[]): string {
+  if (rIds.length === 0) {
+    return sheetXml
+  }
+  const inner = rIds.map((id) => `<tablePart r:id="${id}"/>`).join('')
+  const block = `<tableParts count="${rIds.length}">${inner}</tableParts>`
+  // Replace the existing `<tableParts>` element (self-closing or
+  // full-form). Match leniently so tag-attribute order doesn't matter.
+  if (/<tableParts\b[^/]*\/>/.test(sheetXml)) {
+    return sheetXml.replace(/<tableParts\b[^/]*\/>/, block)
+  }
+  return sheetXml.replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/, block)
+}
+
+/**
  * Restore PS Use Case Worksheet (the gold's sheet 2). The full sheet
  * XML is replaced with gold's verbatim copy, then the cells the app
  * writes are overlaid in place.
+ *
+ * Beyond the cell-level overlay, this also has to repair two things
+ * ExcelJS routinely breaks on tables-bearing sheets:
+ *
+ *   1. The gold ListObject tables (`xl/tables/table{1,2,3}.xml` —
+ *      Activation Base Scope, Use Case Overview, Use Case Worksheet)
+ *      are copied byte-exact from gold. ExcelJS adds
+ *      `headerRowCount="0"` and an `<autoFilter>` block which
+ *      silently disables the green "table header" styling that gives
+ *      rows 2, 10, and 18 their banner background — even though the
+ *      cells themselves carry no fill and rely on the table to paint
+ *      the header.
+ *
+ *   2. Gold's `<tableParts>` element references `rId5/6/7`, but
+ *      ExcelJS allocates `rId2/3/4` (or similar) when it rewrites the
+ *      rels file. The relationships themselves are correct in the
+ *      output's rels file — the rIds just don't line up. We rewrite
+ *      `<tableParts>` to use whatever rIds ExcelJS allocated, sourced
+ *      by matching on the `Target` paths (`../tables/table{1,2,3}.xml`).
  *
  * No-op if either workbook is missing this sheet.
  */
@@ -408,8 +473,41 @@ async function restorePsUseCaseWorksheetSheet(
     (await zIn.file('xl/sharedStrings.xml')?.async('string')) ?? ''
   const goldSharedStrings = parseSharedStrings(goldSharedStringsXml)
   const overlay = psUseCaseWorksheetOverlay(plan.activation)
-  const patched = overlayCellsInSheet(goldSheetXml, goldSharedStrings, overlay)
+  let patched = overlayCellsInSheet(goldSheetXml, goldSharedStrings, overlay)
+
+  // Rewrite <tableParts> to match the rIds ExcelJS allocated in the
+  // output's rels file. The 3 PS Use Case Worksheet tables live at
+  // `xl/tables/table{1,2,3}.xml` in both gold and output (verified
+  // by name + ref in 2026-05-04 diffing).
+  const outRelsPath = sheetRelsPathFor(outPath)
+  const outRelsXml = (await zOut.file(outRelsPath)?.async('string')) ?? ''
+  const tableTargets: readonly string[] = [
+    '../tables/table1.xml',
+    '../tables/table2.xml',
+    '../tables/table3.xml',
+  ]
+  const outRIds: string[] = []
+  for (const target of tableTargets) {
+    const id = rIdForTarget(outRelsXml, target)
+    if (id) {
+      outRIds.push(id)
+    }
+  }
+  if (outRIds.length === tableTargets.length) {
+    patched = rewriteTableParts(patched, outRIds)
+  }
+
   zOut.file(outPath, patched)
+
+  // Copy gold's table XML files verbatim. Drops the `headerRowCount="0"`
+  // and `<autoFilter>` additions ExcelJS injects, restoring the green
+  // header-row styling on the three Activation tables.
+  for (const tableFile of ['table1.xml', 'table2.xml', 'table3.xml']) {
+    const goldTable = await zIn.file(`xl/tables/${tableFile}`)?.async('string')
+    if (goldTable) {
+      zOut.file(`xl/tables/${tableFile}`, goldTable)
+    }
+  }
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────────
