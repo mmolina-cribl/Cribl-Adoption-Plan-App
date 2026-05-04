@@ -535,6 +535,40 @@ async function restorePsUseCaseWorksheetSheet(
     whiteTextAddresses,
   )
 
+  // Cell-level perimeter borders for tables 1 and 3 (rows 2..7 and
+  // 18..46). Gold puts the green grid on the table-style `wholeTable`
+  // dxf, which Excel applies but Google Sheets ignores. The styles
+  // patch appends a 4-sided green border + border-aware clones of the
+  // 6 cellXfs that body cells use; we then remap each cell's `s=` in
+  // those ranges so it picks up the new borderId. The headerRow
+  // cells (2 and 18) are included — their inline `<rPr>` text colour
+  // override is preserved because we only swap the `s=` attribute.
+  const xfRemap = await patchActivationTableBorderCellXfs(zOut)
+  if (xfRemap.size > 0) {
+    const tableRowRanges: ReadonlyArray<readonly [number, number]> = [
+      [2, 7],
+      [18, 46],
+    ]
+    patched = remapCellStylesInRanges(patched, tableRowRanges, xfRemap)
+    // Fill empty grid positions: gold drops `<c>` elements for cells
+    // it ships blank (e.g. E3..E7 Notes column on table 1, much of
+    // the C/D/E columns on table 3). Without an explicit cell tag,
+    // there's nothing for OOXML to attach a border to, leaving holes
+    // in the grid. We insert `<c r="ADDR" s="…"/>` for every missing
+    // position, using the bordered clone of the source `s=15` cellXf
+    // (the most common "default body" style in these ranges per the
+    // gold audit) so the inserted cell visually matches.
+    const fillerS = xfRemap.get(15)
+    if (fillerS != null) {
+      patched = ensureCellsInRanges(
+        patched,
+        tableRowRanges,
+        ['A', 'B', 'C', 'D', 'E'],
+        fillerS,
+      )
+    }
+  }
+
   // Rewrite <tableParts> to match the rIds ExcelJS allocated in the
   // output's rels file. The 3 PS Use Case Worksheet tables live at
   // `xl/tables/table{1,2,3}.xml` in both gold and output (verified
@@ -568,6 +602,84 @@ async function restorePsUseCaseWorksheetSheet(
       zOut.file(`xl/tables/${tableFile}`, goldTable)
     }
   }
+}
+
+// ─── styles.xml mutation helpers ───────────────────────────────────────────
+
+/**
+ * Append a `<border>` element to `xl/styles.xml`'s `<borders>`
+ * collection, bumping its `count` attribute. Returns the index of the
+ * newly added border so callers can wire `cellXfs` to reference it.
+ *
+ * No-op on the input string when `<borders>` is missing — the styles
+ * file is malformed at that point and a deeper restore will already
+ * be flagging the workbook as broken.
+ */
+function appendBorder(stylesXml: string, borderXml: string): { xml: string; index: number } {
+  const m = stylesXml.match(/<borders\s+count="(\d+)"\s*>([\s\S]*?)<\/borders>/)
+  if (!m) return { xml: stylesXml, index: -1 }
+  const oldCount = Number(m[1])
+  const newCount = oldCount + 1
+  const newBlock = `<borders count="${newCount}">${m[2]}${borderXml}</borders>`
+  return { xml: stylesXml.replace(m[0], newBlock), index: oldCount }
+}
+
+/**
+ * Append cellXf entries to `xl/styles.xml`'s `<cellXfs>` collection,
+ * bumping its `count`. Returns the indices of the newly added entries
+ * (in the same order as `xfXmls`).
+ *
+ * Each new cellXf is expected to be a complete `<xf …/>` (or
+ * `<xf …>…</xf>`) string. Callers typically build them by cloning an
+ * existing entry and tweaking `borderId` / `applyBorder`.
+ */
+function appendCellXfs(
+  stylesXml: string,
+  xfXmls: readonly string[],
+): { xml: string; indices: number[] } {
+  const m = stylesXml.match(/<cellXfs\s+count="(\d+)"\s*>([\s\S]*?)<\/cellXfs>/)
+  if (!m) return { xml: stylesXml, indices: [] }
+  const oldCount = Number(m[1])
+  const newCount = oldCount + xfXmls.length
+  const newBlock = `<cellXfs count="${newCount}">${m[2]}${xfXmls.join('')}</cellXfs>`
+  const indices = xfXmls.map((_, i) => oldCount + i)
+  return { xml: stylesXml.replace(m[0], newBlock), indices }
+}
+
+/**
+ * Pull the `i`th `<xf>` element out of a `<cellXfs>` block. Used to
+ * clone an existing cellXf so we can modify a single attribute
+ * (typically `borderId`) on it without disturbing all the rest of its
+ * font / fill / alignment wiring.
+ *
+ * Returns null when the index is out of range.
+ */
+function getCellXfAt(stylesXml: string, idx: number): string | null {
+  const m = stylesXml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)
+  if (!m) return null
+  const inner = m[1]!
+  const xfs = [...inner.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)]
+  if (idx < 0 || idx >= xfs.length) return null
+  return xfs[idx]![0]
+}
+
+/**
+ * Clone a cellXf, swap its `borderId` attribute to `newBorderId`, and
+ * add `applyBorder="1"` if absent. Pure string manipulation; the
+ * existing attribute order is preserved so unrelated tooling (Excel,
+ * Google Sheets, openpyxl) round-trips it cleanly.
+ */
+function cloneXfWithBorder(xfXml: string, newBorderId: number): string {
+  let out = xfXml
+  if (/borderId="\d+"/.test(out)) {
+    out = out.replace(/borderId="\d+"/, `borderId="${newBorderId}"`)
+  } else {
+    out = out.replace(/<xf\b/, `<xf borderId="${newBorderId}"`)
+  }
+  if (!/applyBorder="1"/.test(out)) {
+    out = out.replace(/<xf\b/, '<xf applyBorder="1"')
+  }
+  return out
 }
 
 // ─── Cross-sheet styles.xml fixups ─────────────────────────────────────────
@@ -621,6 +733,210 @@ async function patchHeaderRowFontWhite(zOut: JSZip): Promise<void> {
   const patchedBlock = dxfsBlock.replace(dxfsInner, patchedInner)
   const patchedXml = stylesXml.replace(dxfsBlock, patchedBlock)
   zOut.file('xl/styles.xml', patchedXml)
+}
+
+/**
+ * The thin-green border style every Activation table cell wants on
+ * all 4 sides. Mirrors gold's `dxf 4` (the `wholeTable` differential
+ * format) — Excel auto-applies that dxf to every cell in the table
+ * range; Google Sheets does not, so we have to bake it into the cell
+ * styles directly.
+ */
+const ACTIVATION_TABLE_GRID_BORDER_XML =
+  '<border>' +
+  '<left style="thin"><color rgb="FF356854"/></left>' +
+  '<right style="thin"><color rgb="FF356854"/></right>' +
+  '<top style="thin"><color rgb="FF356854"/></top>' +
+  '<bottom style="thin"><color rgb="FF356854"/></bottom>' +
+  '</border>'
+
+/**
+ * `s=` indices used by cells inside the two perimeter-bordered tables
+ * on the PS Use Case Worksheet (Activation Base Scope `A2:E7` and
+ * Activation Use Case Worksheet `A18:E46`). Each one pairs `fillId=0`
+ * with `borderId=0` and only differs in font / alignment, so cloning
+ * each into a "with grid border" variant is the minimum-invasive way
+ * to give every cell in the range its 4-sided green border without
+ * homogenizing the typography that gold ships per-cell.
+ *
+ * If gold ever uses additional cellXfs in these ranges, they would
+ * fall through with their original (border-less) `s=` and the missing
+ * cells would visually pop out — keeping this list in sync with what
+ * `psUseCaseWorksheetOverlay` and the cell-overlay pass actually
+ * encounter is part of the per-sheet restorer's contract. Audited
+ * against the gold workbook on 2026-05-04: every cell on rows 2..7
+ * and 18..46 references one of these six.
+ */
+const PS_TABLE_BODY_BASE_XF_INDICES: readonly number[] = [11, 12, 13, 14, 15, 27]
+
+/**
+ * Append a 4-sided green border (matching gold's `wholeTable` dxf)
+ * plus border-aware clones of every cellXf used by cells in the
+ * Activation Base Scope and Activation Use Case Worksheet ranges.
+ * Returns a Map from each base `s=` to its new "with-border" `s=`,
+ * which the sheet restorer threads through to remap cell references.
+ *
+ * No-op when the styles file or any expected cellXf is missing — we
+ * silently fall through rather than corrupt the styles archive.
+ */
+async function patchActivationTableBorderCellXfs(
+  zOut: JSZip,
+): Promise<Map<number, number>> {
+  const stylesXml = await zOut.file('xl/styles.xml')?.async('string')
+  if (!stylesXml) return new Map()
+  const baseXfs: Array<{ idx: number; xml: string }> = []
+  for (const idx of PS_TABLE_BODY_BASE_XF_INDICES) {
+    const xf = getCellXfAt(stylesXml, idx)
+    if (xf == null) {
+      // Missing source cellXf — bail rather than emit a partial map
+      // that would leave half the cells unbordered.
+      return new Map()
+    }
+    baseXfs.push({ idx, xml: xf })
+  }
+  const { xml: afterBorder, index: newBorderId } = appendBorder(
+    stylesXml,
+    ACTIVATION_TABLE_GRID_BORDER_XML,
+  )
+  if (newBorderId < 0) return new Map()
+  const cloned = baseXfs.map((b) => cloneXfWithBorder(b.xml, newBorderId))
+  const { xml: afterXfs, indices: newSIndices } = appendCellXfs(afterBorder, cloned)
+  if (newSIndices.length !== baseXfs.length) return new Map()
+  zOut.file('xl/styles.xml', afterXfs)
+  const out = new Map<number, number>()
+  for (let i = 0; i < baseXfs.length; i += 1) {
+    out.set(baseXfs[i]!.idx, newSIndices[i]!)
+  }
+  return out
+}
+
+/**
+ * Rewrite every `<c r="…" s="OLD" …>` cell whose row falls in one of
+ * the supplied row ranges so its `s=OLD` becomes `s=NEW` per
+ * `xfRemap`. Cells whose row is outside every range, or whose `s=`
+ * isn't in the remap, pass through unchanged. The cell's inner
+ * content (text, formula, inline-string rPr override, etc.) is left
+ * intact — only the `s` attribute is touched.
+ *
+ * Implementation note: we match by full `<c …>` open tag and rewrite
+ * just its attribute substring, then concatenate with the cell's
+ * remaining body. This avoids the temptation to use a global
+ * `s="OLD"` → `s="NEW"` replace, which would mis-fire on
+ * `<sheetView>` / `<row>` / etc. attributes that happen to share an
+ * `s=` token spelling.
+ */
+/**
+ * Insert empty styled cells (`<c r="ADDR" s="N"/>`) at every column /
+ * row coordinate inside the supplied ranges that does NOT already have
+ * an explicit `<c>` element on the sheet. Used to give the
+ * Activation tables a complete grid of bordered cells — gold drops
+ * empty data cells from its `<row>` blocks, so absent a fill-in pass
+ * those positions would be missing their grid border (the `<row>`
+ * itself has no border-rendering machinery).
+ *
+ * Cells inserted by the overlay pass or already shipped by gold are
+ * left alone; this pass only fills the holes. Emitted cells use
+ * `fillerS` as their style index — callers pass the index of one of
+ * the bordered cellXfs added by {@link patchActivationTableBorderCellXfs},
+ * so the inserted cell visually matches the rest of the table grid.
+ *
+ * Cells are inserted in alphabetical column order within each row so
+ * the resulting OOXML is valid (worksheets require cells inside a
+ * `<row>` to be sorted by column).
+ */
+function ensureCellsInRanges(
+  sheetXml: string,
+  rowRanges: ReadonlyArray<readonly [number, number]>,
+  cols: readonly string[],
+  fillerS: number,
+): string {
+  // Build the set of every address already present so we don't
+  // double-insert (overlay + gold contributions are both already in
+  // the sheet by this point).
+  const existing = new Set<string>()
+  const cellAddrRegex = /<c\s+r="([^"]+)"/g
+  let cm: RegExpExecArray | null
+  while ((cm = cellAddrRegex.exec(sheetXml)) !== null) {
+    existing.add(cm[1]!)
+  }
+  // Group missing addresses by row; we splice once per row.
+  const byRow = new Map<number, string[]>()
+  for (const [lo, hi] of rowRanges) {
+    for (let r = lo; r <= hi; r += 1) {
+      for (const col of cols) {
+        const addr = `${col}${r}`
+        if (!existing.has(addr)) {
+          if (!byRow.has(r)) byRow.set(r, [])
+          byRow.get(r)!.push(addr)
+        }
+      }
+    }
+  }
+  let out = sheetXml
+  for (const [rowNum, missing] of byRow) {
+    missing.sort((a, b) => {
+      const ax = splitAddr(a)!
+      const ay = splitAddr(b)!
+      return colCmp(ax.col, ay.col)
+    })
+    const rowRe = new RegExp(`<row\\s+r="${rowNum}"([^>]*)>([\\s\\S]*?)</row>`)
+    const rowMatch = rowRe.exec(out)
+    if (!rowMatch) continue
+    const rowAttrs = rowMatch[1]!
+    const rowInner = rowMatch[2]!
+    let newInner = rowInner
+    for (const addr of missing) {
+      const sp = splitAddr(addr)!
+      const cellXml = `<c r="${addr}" s="${fillerS}"/>`
+      const liveRe = /<c\s+([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g
+      let chosen = newInner.length
+      let lcm: RegExpExecArray | null
+      while ((lcm = liveRe.exec(newInner)) !== null) {
+        const liveAddr = attr(lcm[1]!, 'r')
+        const liveSp = liveAddr ? splitAddr(liveAddr) : null
+        if (!liveSp) continue
+        if (colCmp(liveSp.col, sp.col) > 0) {
+          chosen = lcm.index
+          break
+        }
+      }
+      newInner = newInner.slice(0, chosen) + cellXml + newInner.slice(chosen)
+    }
+    out =
+      out.slice(0, rowMatch.index) +
+      `<row r="${rowNum}"${rowAttrs}>${newInner}</row>` +
+      out.slice(rowMatch.index + rowMatch[0].length)
+  }
+  return out
+}
+
+function remapCellStylesInRanges(
+  sheetXml: string,
+  rowRanges: ReadonlyArray<readonly [number, number]>,
+  xfRemap: ReadonlyMap<number, number>,
+): string {
+  if (xfRemap.size === 0 || rowRanges.length === 0) return sheetXml
+  const cellRegex = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
+  return sheetXml.replace(cellRegex, (full, attrs: string, _end: string) => {
+    const addr = attr(attrs, 'r')
+    if (!addr) return full
+    const sp = splitAddr(addr)
+    if (!sp) return full
+    let inRange = false
+    for (const [lo, hi] of rowRanges) {
+      if (sp.row >= lo && sp.row <= hi) {
+        inRange = true
+        break
+      }
+    }
+    if (!inRange) return full
+    const sStr = attr(attrs, 's')
+    if (sStr == null) return full
+    const newS = xfRemap.get(Number(sStr))
+    if (newS == null) return full
+    const rewrittenAttrs = attrs.replace(/\bs="\d+"/, `s="${newS}"`)
+    return full.replace(attrs, rewrittenAttrs)
+  })
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────────
