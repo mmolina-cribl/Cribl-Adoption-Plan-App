@@ -77,7 +77,11 @@ import {
 } from './psUseCaseLayout'
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
 import { resolveAllSheetNames } from './v091SheetNames'
-import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
+import {
+  effectiveDiskOneDayGbForWg,
+  effectiveIngestEgressGbdForWg,
+  effectiveThroughputGbdForWg,
+} from './workerGroupRollup'
 import { restoreSheetsFromGold } from './v091ExportSheetRestore'
 import {
   buildSheetNamePathMap as buildSheetNamePathMapShared,
@@ -535,16 +539,16 @@ function fillOverviewSheet(
       cap?.egressGb != null && Number.isFinite(cap.egressGb)
         ? cap.egressGb
         : parseNumber(wg.egressGbd)
-    const throughput = parseNumber(wg.throughputGbd)
-    const disk = parseNumber(wg.diskOneDayGb)
+    const throughput = effectiveThroughputGbdForWg(plan, wg)
+    const disk = effectiveDiskOneDayGbForWg(plan, wg)
     row.getCell(1).value = wg.wg
     row.getCell(2).value = ingest === '' ? null : ingest
     row.getCell(3).value = egress === '' ? null : egress
-    row.getCell(4).value = throughput === '' ? null : throughput
+    row.getCell(4).value = throughput == null ? null : throughput
     row.getCell(5).value = wg.workerHosting
     row.getCell(6).value = wg.workerCount
     row.getCell(7).value = wg.workerDetail
-    row.getCell(8).value = disk === '' ? null : disk
+    row.getCell(8).value = disk == null ? null : disk
   }
   // Header rows (row 2 / row 16) are left as-is — the gold pre-styled
   // them with merged title cells and column headers, and the cells we

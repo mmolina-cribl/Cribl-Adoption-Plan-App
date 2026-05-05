@@ -81,7 +81,11 @@ import {
   SHEET_PS_USE_CASE_WORKSHEET,
 } from './psUseCaseLayout'
 import { buildSheetNamePathMap } from './v091ZipUtils'
-import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
+import {
+  effectiveDiskOneDayGbForWg,
+  effectiveIngestEgressGbdForWg,
+  effectiveThroughputGbdForWg,
+} from './workerGroupRollup'
 
 // ─── Tiny XML helpers ──────────────────────────────────────────────────────
 
@@ -831,11 +835,11 @@ function overviewBottomTableOverlay(
     overlay.set(`A${r}`, wg.wg || null)
     overlay.set(`B${r}`, ingest)
     overlay.set(`C${r}`, egress)
-    overlay.set(`D${r}`, parseOverviewNum(wg.throughputGbd))
+    overlay.set(`D${r}`, effectiveThroughputGbdForWg(plan, wg))
     overlay.set(`E${r}`, wg.workerHosting || null)
     overlay.set(`F${r}`, wg.workerCount || null)
     overlay.set(`G${r}`, wg.workerDetail || null)
-    overlay.set(`H${r}`, parseOverviewNum(wg.diskOneDayGb))
+    overlay.set(`H${r}`, effectiveDiskOneDayGbForWg(plan, wg))
   }
   for (let j = wgsCapped.length; j < slots; j += 1) {
     const r = V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + j

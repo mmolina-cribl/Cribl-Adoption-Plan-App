@@ -49,9 +49,9 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
         setImportShellFromBytes(bytes)
         setWarnings(result.warnings)
         if (result.warnings.length) {
-          setOkMsg('Plan loaded with notes above. Review your data before exporting again.')
+          setOkMsg('Plan loaded with notes above. Review your data before exporting again. Export uses the current v0.9.1 workbook format.')
         } else {
-          setOkMsg('Plan loaded. Your current in-browser data was replaced.')
+          setOkMsg('Plan loaded. Your current in-browser data was replaced; Export uses the current v0.9.1 workbook format.')
         }
       } catch {
         setError('Could not read that file.')
@@ -82,10 +82,9 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
       <div>
         <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Import a plan from Excel</h2>
         <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
-          Load an <span className="text-cribl-ink/90">.xlsx</span> file in the same shape as a download from{' '}
-          <span className="text-cribl-ink/80">File → Export</span>. The workbook should include a{' '}
-          <strong>Source summary</strong> sheet and, for topology, <strong>Copy of Sources and WGs</strong>. Other
-          sheets (INSTRUCTIONS, <strong>input_data</strong> picklists) are optional for import.
+          Load an <span className="text-cribl-ink/90">.xlsx</span> adoption plan in either the current v0.9.1 format
+          or the older v0.8.6 Excel-only format. Older imports hydrate the GUI, but{' '}
+          <span className="text-cribl-ink/80">File → Export</span> always writes the current v0.9.1 workbook layout.
         </p>
       </div>
 

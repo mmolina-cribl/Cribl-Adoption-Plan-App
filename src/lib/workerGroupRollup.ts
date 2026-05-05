@@ -71,6 +71,63 @@ export function sumAvgDailyFromSourceSummaryForWg(
 }
 
 /**
+ * Legacy v0.8.6 imports carry the old topology table in `sourceVolume`. Prefer
+ * `sourceSummary` for normal v2.0 edits, but fall back to this table when a
+ * legacy import did not reconcile Source summary rows back to a WG/Fleet id.
+ */
+function sumDailyVolumeFromLegacyTopologyForWg(
+  plan: PlanState,
+  w: WorkerGroupRow,
+): { sum: number; count: number } {
+  const key = w.wg.trim().toLowerCase()
+  let sum = 0
+  let count = 0
+  const sourceNames = new Set<string>()
+  for (const v of plan.sourceVolume ?? []) {
+    const matchId = v.workerGroupId === w.id
+    const matchName = key !== '' && (v.wg ?? '').trim().toLowerCase() === key
+    if (!matchId && !matchName) {
+      continue
+    }
+    const sourceName = (v.source ?? '').trim().toLowerCase()
+    if (sourceName) {
+      sourceNames.add(sourceName)
+    }
+    const n = parseGb(v.dailyVolumeGb)
+    if (Number.isFinite(n) && n >= 0) {
+      sum += n
+      count += 1
+    }
+  }
+  if (count > 0 || sourceNames.size === 0) {
+    return { sum, count }
+  }
+  for (const s of plan.sourceSummary ?? []) {
+    const sourceName = (s.source ?? '').trim().toLowerCase()
+    if (!sourceName || !sourceNames.has(sourceName)) {
+      continue
+    }
+    const n = parseGb(s.avgDailyGb)
+    if (Number.isFinite(n) && n >= 0) {
+      sum += n
+      count += 1
+    }
+  }
+  return { sum, count }
+}
+
+function effectiveIngestSourceTotalForWg(
+  plan: PlanState,
+  w: WorkerGroupRow,
+): { sum: number; count: number } {
+  const fromSummary = sumAvgDailyFromSourceSummaryForWg(plan, w.id)
+  if (fromSummary.count > 0) {
+    return fromSummary
+  }
+  return sumDailyVolumeFromLegacyTopologyForWg(plan, w)
+}
+
+/**
  * Data-reduction (GB/d) from Source summary — same as `WorkerGroupEditor` (auto egress input).
  */
 export function reductionGbFromSourceSummaryForWg(plan: PlanState, workerGroupId: string): number {
@@ -107,22 +164,31 @@ export function effectiveIngestEgressGbdForWg(
   plan: PlanState,
   w: WorkerGroupRow,
 ): { ingestGb: number | null; egressGb: number | null } | null {
-  const fromSources = sumAvgDailyFromSourceSummaryForWg(plan, w.id)
+  const fromSources = effectiveIngestSourceTotalForWg(plan, w)
   const useIngestOverride = w.ingestGbd.trim() !== ''
-  const autoIngestGb = fromSources.count > 0 ? fromSources.sum : null
-  const ingestGb = useIngestOverride
+  const sourceIngestGb = fromSources.count > 0 ? fromSources.sum : null
+  const ingestFromOverrideOrSources = useIngestOverride
     ? parseGb(w.ingestGbd)
-    : autoIngestGb ?? Number.NaN
+    : sourceIngestGb ?? Number.NaN
 
   const reduction = reductionGbFromSourceSummaryForWg(plan, w.id)
   const egressOverrideGb = parseGb(w.egressGbd)
   const autoEgressGb =
-    Number.isFinite(ingestGb) && ingestGb > 0
-      ? Math.max(0, ingestGb - (Number.isFinite(reduction) ? reduction : 0))
+    Number.isFinite(ingestFromOverrideOrSources) && ingestFromOverrideOrSources > 0
+      ? Math.max(0, ingestFromOverrideOrSources - (Number.isFinite(reduction) ? reduction : 0))
       : null
   const egressGb = Number.isFinite(egressOverrideGb) && egressOverrideGb >= 0
     ? egressOverrideGb
     : (autoEgressGb ?? Number.NaN)
+  const inferredIngestFromEgress =
+    !Number.isFinite(ingestFromOverrideOrSources) &&
+    Number.isFinite(egressGb) &&
+    egressGb >= 0
+      ? egressGb + (Number.isFinite(reduction) ? reduction : 0)
+      : Number.NaN
+  const ingestGb = Number.isFinite(ingestFromOverrideOrSources)
+    ? ingestFromOverrideOrSources
+    : inferredIngestFromEgress
 
   const inOk = Number.isFinite(ingestGb)
   const outOk = Number.isFinite(egressGb)
@@ -133,4 +199,35 @@ export function effectiveIngestEgressGbdForWg(
     ingestGb: inOk ? ingestGb : null,
     egressGb: outOk ? egressGb : null,
   }
+}
+
+export function effectiveThroughputGbdForWg(plan: PlanState, w: WorkerGroupRow): number | null {
+  const override = parseGb(w.throughputGbd)
+  if (Number.isFinite(override) && override >= 0) {
+    return override
+  }
+  const cap = effectiveIngestEgressGbdForWg(plan, w)
+  const ingest = cap?.ingestGb
+  const egress = cap?.egressGb
+  const ingestOk = typeof ingest === 'number' && Number.isFinite(ingest)
+  const egressOk = typeof egress === 'number' && Number.isFinite(egress)
+  if (ingestOk && egressOk) {
+    return ingest + egress
+  }
+  if (ingestOk) {
+    return ingest
+  }
+  if (egressOk) {
+    return egress
+  }
+  return null
+}
+
+export function effectiveDiskOneDayGbForWg(plan: PlanState, w: WorkerGroupRow): number | null {
+  const override = parseGb(w.diskOneDayGb)
+  if (Number.isFinite(override) && override >= 0) {
+    return override
+  }
+  const egress = effectiveIngestEgressGbdForWg(plan, w)?.egressGb
+  return typeof egress === 'number' && Number.isFinite(egress) ? egress / 8 : null
 }

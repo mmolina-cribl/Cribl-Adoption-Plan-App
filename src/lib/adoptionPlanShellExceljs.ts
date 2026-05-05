@@ -20,7 +20,11 @@ import { scanCopySourcesWgFromAoa } from './topologySheetLayout'
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
 import { buildSourceSummaryColumnMap } from './sourceSummaryColumnMap'
 import { mergeOoxmlStylePartsFromOriginal } from './shellOoxmlStyleMerge'
-import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
+import {
+  effectiveDiskOneDayGbForWg,
+  effectiveIngestEgressGbdForWg,
+  effectiveThroughputGbdForWg,
+} from './workerGroupRollup'
 
 function sourcesForTopology(plan: PlanState): SourceVolumeRow[] {
   const explicit = (plan.sourceVolume ?? []).filter((s) => String(s.source ?? '').trim() !== '')
@@ -135,8 +139,8 @@ function sourceVolumeValueForHeaderName(name: string, s: SourceVolumeRow): strin
 }
 
 function workerGroupValueForHeaderName(name: string, plan: PlanState, w: WorkerGroupRow): string | number {
-  const tOverride = parseNumberLoose(w.throughputGbd) ?? ''
-  const dOverride = parseNumberLoose(w.diskOneDayGb) ?? ''
+  const throughput = effectiveThroughputGbdForWg(plan, w) ?? ''
+  const diskOneDay = effectiveDiskOneDayGbForWg(plan, w) ?? ''
   const cap = effectiveIngestEgressGbdForWg(plan, w)
   switch (name) {
     case 'WG':
@@ -146,7 +150,7 @@ function workerGroupValueForHeaderName(name: string, plan: PlanState, w: WorkerG
     case 'Egress (GB/Day)':
       return (cap?.egressGb ?? parseNumberLoose(w.egressGbd)) ?? ''
     case 'Throughput (GB/Day)':
-      return tOverride
+      return throughput
     case 'Worker Hosting':
       return w.workerHosting
     case 'Worker Count':
@@ -154,7 +158,7 @@ function workerGroupValueForHeaderName(name: string, plan: PlanState, w: WorkerG
     case 'Worker Detail':
       return w.workerDetail
     case "Disk Req'd For 1 Day Storage":
-      return dOverride
+      return diskOneDay
     default:
       return ''
   }
@@ -349,13 +353,13 @@ function fillTopologyByTemplate(
   const toInsert = Math.max(0, sCount - slots)
   if (toInsert > 0) {
     const pos1 = 1 + wtr0
-    const newRows: unknown[][] = []
+    const newRows: string[][] = []
     for (let n = 0; n < toInsert; n += 1) {
       newRows.push(new Array(10).fill(''))
     }
     // Copy the style of the row above the insertion point (template blank source rows)
     // so inserted rows keep borders, data validation visuals, etc.
-    ws.insertRows(pos1, newRows as any[][], 'i+')
+    ws.insertRows(pos1, newRows, 'i+')
   }
 
   const newWtr0 = wtr0 + toInsert

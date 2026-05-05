@@ -31,19 +31,31 @@ export class ExportShellUnavailableError extends Error {
 }
 
 /**
- * 1) Last **imported** .xlsx (if any) — ExcelJS + OOXML merge for Cribl styling.  
- * 2) **Empty** v0.9.1 shell from `public/adoption-plan-empty.xlsx` (fetched if not yet cached).  
- * Each shell is auto-routed to the v0.9.1 multi-sheet exporter (PR B) or the
- * legacy v0.8.6 ExcelJS pipeline based on its sheet topology — see
- * {@link fillShell}. There is **no** third “plain” xlsx path: that build is
- * ~1.5× the template size, unstyled, and easy to mistake for a real export.
+ * Export always emits the current v0.9.1 workbook shape.
+ *
+ * Shell preference:
+ *   1. Last imported workbook **only if it is already v0.9.1**. This preserves
+ *      harmless customer-side workbook styling edits on modern files.
+ *   2. Bundled empty v0.9.1 shell from `public/adoption-plan-empty.xlsx`
+ *      (fetched if not yet cached; base64-inlined in the standalone build).
+ *
+ * Legacy v0.8.6 imports are data-only: they hydrate the GUI, but we deliberately
+ * do not reuse the legacy workbook as an export shell. Otherwise a user who
+ * imports an old Adoption Plan would keep downloading the old `Source summary` /
+ * `Copy of Sources and WGs` layout instead of being upgraded to the current
+ * v0.9.1 per-WG / per-Fleet workbook.
+ *
+ * There is **no** third “plain” xlsx path: that build is ~1.5× the template
+ * size, unstyled, and easy to mistake for a real export.
  */
 export async function planToBlobAsync(plan: PlanState): Promise<ArrayBuffer> {
   let lastError: unknown
   const imp = getImportShellBuffer()
   if (imp) {
     try {
-      return await fillShell(plan, imp)
+      if (await bufferIsV091Shell(imp)) {
+        return await planToBlobV091(plan, imp)
+      }
     } catch (e) {
       lastError = e
     }

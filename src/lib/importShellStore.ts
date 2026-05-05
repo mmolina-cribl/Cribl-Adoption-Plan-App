@@ -1,7 +1,10 @@
 /**
- * In-memory + KV cache for the last **imported** .xlsx bytes. Export re-reads
- * that buffer so the downloaded file matches the CSE's file (sheets, styles,
- * input_data) with only modeled cells updated. Cleared on "Clear plan".
+ * In-memory + KV cache for the last **imported** .xlsx bytes. Export may re-read
+ * that buffer as a visual shell when it is already in the current v0.9.1 shape,
+ * so the downloaded file preserves harmless customer-side styling edits with
+ * only modeled cells updated. Legacy v0.8.6 imports are still cached here, but
+ * `workbookDownload.ts` treats them as data-only and exports from the bundled
+ * v0.9.1 shell instead.
  *
  * The in-memory `memory: ArrayBuffer | null` is the synchronous read path for
  * Export's click handler. KV is the persistent backing store: hydrated into

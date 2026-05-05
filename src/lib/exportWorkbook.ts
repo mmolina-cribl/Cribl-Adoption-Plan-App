@@ -1,7 +1,11 @@
 import * as XLSX from 'xlsx'
 import { getInputDataRows, TEMPLATE_INSTRUCTIONS } from '../data/referenceData'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
-import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
+import {
+  effectiveDiskOneDayGbForWg,
+  effectiveIngestEgressGbdForWg,
+  effectiveThroughputGbdForWg,
+} from './workerGroupRollup'
 import {
   SHEET_COPY_SOURCES_WG,
   SHEET_INPUT_DATA,
@@ -356,19 +360,17 @@ export function buildSourcesAoaFirst(plan: PlanState) {
   for (let j = 0; j < wCount; j += 1) {
     const w = plan.workerGroups[j]!
     const cap = effectiveIngestEgressGbdForWg(plan, w)
-    const tNum = w.throughputGbd?.trim() ? Number(w.throughputGbd) : Number.NaN
-    const dNum = w.diskOneDayGb?.trim() ? Number(w.diskOneDayGb) : Number.NaN
-    const tOverride = Number.isFinite(tNum) ? tNum : ''
-    const dOverride = Number.isFinite(dNum) ? dNum : ''
+    const throughput = effectiveThroughputGbdForWg(plan, w)
+    const diskOneDay = effectiveDiskOneDayGbForWg(plan, w)
     aoa[wgH + 1 + j] = [
       w.wg,
       cap?.ingestGb ?? (w.ingestGbd ? Number(w.ingestGbd) : ''),
       cap?.egressGb ?? (w.egressGbd ? Number(w.egressGbd) : ''),
-      tOverride,
+      throughput ?? '',
       w.workerHosting,
       w.workerCount,
       w.workerDetail,
-      dOverride,
+      diskOneDay ?? '',
     ] as (string | number | null)[]
   }
   return { aoa, sCount, wCount }
