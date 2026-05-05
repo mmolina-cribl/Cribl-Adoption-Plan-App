@@ -1,23 +1,31 @@
 /**
  * v0.9.1 sheet-name helpers.
  *
- * Every Stream worker group exports as a `wg<name>` sheet; every Edge fleet
- * exports as a `fl<name>_fleet` sheet. The user-typed worker-group / fleet
- * name has to be sanitized into something Excel will accept as a sheet name,
- * and the result has to be unique within the workbook (Excel rejects two
- * sheets with the same name, and Stream sheets and Fleet sheets share the
- * same namespace once their prefixes / suffixes line up).
+ * Every Stream worker group exports as a `wg-<name>` sheet; every Edge
+ * fleet exports as a `fl-<name>` sheet. The dash-prefixed namespaces are
+ * disjoint so a Stream WG and an Edge fleet can share the same body name
+ * (`wg-prod` and `fl-prod`) without colliding. The user-typed worker-
+ * group / fleet name still has to be sanitized into something Excel will
+ * accept as a sheet name (no `: \ / ? * [ ]`, ≤31 chars), and the result
+ * has to be unique within the workbook (Excel rejects two sheets with
+ * the same name, comparison is case-insensitive).
+ *
+ * Backwards compatibility: pre-v2.0.0 workbooks used `wg<name>` (no dash)
+ * for Stream WGs and `fl<name>_fleet` (literal `_fleet` suffix auto-
+ * appended by the exporter) for Edge fleets. The classifier below
+ * accepts both legacy forms on import so existing customer exports
+ * still round-trip; the exporter only ever emits the new dash form.
  *
  * This module is small on purpose — the layout / I/O code in
- * `planWorkbookLayout.ts`, `exportWorkbook.ts`, and `importWorkbook.ts` all
- * depend on these helpers, so it's worth keeping them in one easy-to-test
- * place.
+ * `planWorkbookLayout.ts`, `exportWorkbook.ts`, and `importWorkbook.ts`
+ * all depend on these helpers, so it's worth keeping them in one easy-
+ * to-test place.
  */
 
 import type { WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
 import {
+  LEGACY_V091_FLEET_SHEET_SUFFIX,
   V091_FLEET_SHEET_PREFIX,
-  V091_FLEET_SHEET_SUFFIX,
   V091_WG_SHEET_PREFIX,
 } from './planWorkbookLayout'
 
@@ -67,28 +75,29 @@ function prefixFor(kind: WorkerGroupKind): string {
   return kind === 'edge' ? V091_FLEET_SHEET_PREFIX : V091_WG_SHEET_PREFIX
 }
 
-function suffixFor(kind: WorkerGroupKind): string {
-  return kind === 'edge' ? V091_FLEET_SHEET_SUFFIX : ''
-}
-
 /**
  * Build the raw, pre-uniqueness sheet name for a worker-group / fleet row.
  *
- * Stream WGs use prefix `wg`. Edge fleets use prefix `fl` and suffix
- * `_fleet`. A row with an empty `wg` field falls back to its kind-aware
- * default identifier (`wgWorkerGroup` / `flFleet_fleet`) so the exporter
- * never has to write a sheet named just `wg` or `fl_fleet`.
+ * Stream WGs use prefix `wg-`. Edge fleets use prefix `fl-`. A row with
+ * an empty `wg` field falls back to its kind-aware default identifier
+ * (`wg-WorkerGroup` / `fl-Fleet`) so the exporter never has to write a
+ * sheet named just `wg-` or `fl-`.
+ *
+ * No suffix is appended — pre-v2.0.0 the exporter auto-suffixed `_fleet`
+ * on Edge sheet names, but the dash prefix already disambiguates Stream
+ * from Edge, and the suffix made user-chosen fleet names look like a
+ * code artifact (`apex` rendering as `flapex_fleet`). The legacy form
+ * is still recognized on import — see `classifyV091SheetName`.
  */
 export function rawSheetNameFor(row: WorkerGroupRow): string {
   const prefix = prefixFor(row.kind)
-  const suffix = suffixFor(row.kind)
   const cleaned = cleanRawName(row.wg)
   const fallback = row.kind === 'edge' ? 'Fleet' : 'WorkerGroup'
-  const body = truncateBody(prefix, cleaned || fallback, suffix)
+  const body = truncateBody(prefix, cleaned || fallback, '')
   if (!body) {
-    return `${prefix}${fallback}${suffix}`.slice(0, SHEET_NAME_MAX_LEN)
+    return `${prefix}${fallback}`.slice(0, SHEET_NAME_MAX_LEN)
   }
-  return `${prefix}${body}${suffix}`
+  return `${prefix}${body}`
 }
 
 /**
@@ -161,12 +170,29 @@ export function resolveAllSheetNames(
 
 /**
  * Reverse helper for the importer: classify a sheet name as a Stream
- * worker-group sheet, an Edge fleet sheet, or neither. Returns the cleaned
- * worker-group / fleet display name (without the `wg` prefix or
- * `_fleet` suffix) so the importer can seed `WorkerGroupRow.wg` directly.
+ * worker-group sheet, an Edge fleet sheet, or neither. Returns the
+ * cleaned worker-group / fleet display name (without the prefix / legacy
+ * suffix) so the importer can seed `WorkerGroupRow.wg` directly.
+ *
+ * Recognizes BOTH the v2.0.0+ form and the pre-v2.0.0 legacy form:
+ *
+ *   - new (preferred):  `wg-<name>`             → Stream WG `<name>`
+ *   - new (preferred):  `fl-<name>`             → Edge fleet `<name>`
+ *   - legacy:           `wg<name>` (no dash)    → Stream WG `<name>`
+ *   - legacy:           `fl<name>_fleet`        → Edge fleet `<name>`
+ *
+ * The legacy `_fleet` suffix is stripped on import — it was an exporter
+ * artifact, not a user-typed name fragment, so a fleet that exported as
+ * `flapex_fleet` round-trips as fleet `apex` (re-exporting it now
+ * produces the new `fl-apex` sheet name).
+ *
+ * Order of checks matters because the prefixes nest: a `fl-foo` matches
+ * the new Edge form first; a `flfoo_fleet` matches the legacy Edge form;
+ * only after both Edge branches miss do we fall through to the Stream
+ * branches, which then split between new (`wg-`) and legacy (`wg`).
  *
  * Comparison is case-sensitive on the prefix / suffix to match the gold
- * template (`wgdefault`, not `WGdefault`).
+ * template (`wg-default`, not `WG-default`).
  */
 export function classifyV091SheetName(
   sheetName: string,
@@ -174,20 +200,46 @@ export function classifyV091SheetName(
   | { kind: 'stream'; displayName: string }
   | { kind: 'edge'; displayName: string }
   | null {
-  if (sheetName.startsWith(V091_FLEET_SHEET_PREFIX) && sheetName.endsWith(V091_FLEET_SHEET_SUFFIX)) {
+  // Edge — new dash form: `fl-<name>`
+  if (
+    sheetName.startsWith(V091_FLEET_SHEET_PREFIX) &&
+    sheetName.length > V091_FLEET_SHEET_PREFIX.length
+  ) {
+    return { kind: 'edge', displayName: sheetName.slice(V091_FLEET_SHEET_PREFIX.length) }
+  }
+
+  // Edge — legacy form: `fl<name>_fleet` (no dash, suffix-disambiguated)
+  const legacyEdgePrefix = V091_FLEET_SHEET_PREFIX.slice(0, -1) // 'fl'
+  if (
+    sheetName.startsWith(legacyEdgePrefix) &&
+    sheetName.endsWith(LEGACY_V091_FLEET_SHEET_SUFFIX) &&
+    sheetName.length > legacyEdgePrefix.length + LEGACY_V091_FLEET_SHEET_SUFFIX.length
+  ) {
     const body = sheetName.slice(
-      V091_FLEET_SHEET_PREFIX.length,
-      sheetName.length - V091_FLEET_SHEET_SUFFIX.length,
+      legacyEdgePrefix.length,
+      sheetName.length - LEGACY_V091_FLEET_SHEET_SUFFIX.length,
     )
-    if (body.length === 0) {
-      return null
-    }
     return { kind: 'edge', displayName: body }
   }
-  if (sheetName.startsWith(V091_WG_SHEET_PREFIX) && sheetName.length > V091_WG_SHEET_PREFIX.length) {
-    // `fl<name>_fleet` also starts with `f`, but those are handled above.
-    // A bare `wg<name>` (no `_fleet` suffix) is always a Stream WG.
+
+  // Stream — new dash form: `wg-<name>`
+  if (
+    sheetName.startsWith(V091_WG_SHEET_PREFIX) &&
+    sheetName.length > V091_WG_SHEET_PREFIX.length
+  ) {
     return { kind: 'stream', displayName: sheetName.slice(V091_WG_SHEET_PREFIX.length) }
   }
+
+  // Stream — legacy form: `wg<name>` (no dash). Reject the bare `wg`
+  // prefix with no body so we don't misclassify a sheet literally named
+  // `wg`, but anything longer is a Stream WG.
+  const legacyWgPrefix = V091_WG_SHEET_PREFIX.slice(0, -1) // 'wg'
+  if (
+    sheetName.startsWith(legacyWgPrefix) &&
+    sheetName.length > legacyWgPrefix.length
+  ) {
+    return { kind: 'stream', displayName: sheetName.slice(legacyWgPrefix.length) }
+  }
+
   return null
 }

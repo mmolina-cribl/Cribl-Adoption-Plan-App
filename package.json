@@ -2,12 +2,13 @@
   "name": "adoption-plan",
   "private": true,
   "version": "2.0.0",
-  "description": "Field-facing planning tool for designing a customer's Cribl Stream and Edge adoption — model worker groups / fleets, sources, and projected daily volume; import/export Excel workbooks (gold v0.9.1 schema). Runs embedded inside the Cribl App Platform.",
+  "description": "Field-facing planning tool for designing a customer's Cribl Stream and Edge adoption — model worker groups / fleets, sources, and projected daily volume; import/export Excel workbooks (gold v0.9.1 schema). Ships as a Cribl App Platform install (.tgz) and as a single self-contained HTML file for on-prem use.",
   "author": "Michael Molina (Cribl Sr. CSE)",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:standalone": "tsc -b && vite build --config vite.standalone.config.ts",
     "lint": "eslint .",
     "preview": "vite preview",
     "package": "npm run build && node scripts/package.mjs"
@@ -34,7 +35,8 @@
     "globals": "^17.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vite-plugin-singlefile": "^2.3.3"
   },
   "displayName": "Adoption Plan"
 }

@@ -1,4 +1,4 @@
-import { defineConfig, type IndexHtmlTransformContext, type IndexHtmlTransformResult, type ViteDevServer } from 'vite'
+import { defineConfig, type IndexHtmlTransformContext, type IndexHtmlTransformResult, type Plugin, type ViteDevServer } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { join } from 'path'
@@ -6,6 +6,44 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 // @ts-ignore
 import { servePackageTgz } from './scripts/pkgutil.mjs'
+
+/**
+ * No-op stub for the `virtual:embedded-gold-template` module that the
+ * standalone build (`vite.standalone.config.ts`) registers as a
+ * base64-inlined copy of `public/adoption-plan-empty.xlsx`.
+ *
+ * In the Cribl-Apps build the gold template is fetched at runtime from
+ * the platform's static host (`/adoption-plan-empty.xlsx`), so this
+ * stub just returns `hasEmbeddedGoldTemplate: false` — the runtime
+ * resolver in `src/lib/adoptionPlanTemplateExport.ts` then short-
+ * circuits past the embedded path and uses the fetch result. Adds
+ * ~50 bytes to the App-Platform bundle and keeps the runtime branching
+ * logic identical between both targets.
+ */
+function virtualGoldTemplateStubPlugin(): Plugin {
+  const ID = 'virtual:embedded-gold-template'
+  return {
+    name: 'cribl-virtual-gold-template-stub',
+    enforce: 'pre',
+    resolveId(id) {
+      if (id === ID) {
+        return '\0' + ID
+      }
+      return null
+    },
+    load(id) {
+      if (id === '\0' + ID) {
+        return [
+          '// Stub from vite.config.ts. The standalone build replaces this with the',
+          '// actual base64-encoded gold template via inlineGoldTemplatePlugin().',
+          'export const embeddedGoldTemplateBase64 = ""',
+          'export const hasEmbeddedGoldTemplate = false',
+        ].join('\n')
+      }
+      return null
+    },
+  }
+}
 
 const packageEndpointPlugin = () => ({
   name: 'vite-plugin-package-endpoint',
@@ -63,7 +101,13 @@ const injectScriptFromQueryPlugin = () => {
 };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), packageEndpointPlugin(), injectScriptFromQueryPlugin()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    packageEndpointPlugin(),
+    injectScriptFromQueryPlugin(),
+    virtualGoldTemplateStubPlugin(),
+  ],
   base: './',
   server: {
     cors: true,

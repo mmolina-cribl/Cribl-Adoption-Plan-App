@@ -11,6 +11,7 @@ import {
   setAnimationsEnabled,
   useAnimationsEnabled,
 } from '../lib/animationsPreference'
+import { useActivationCalloutDismissed } from '../lib/activationCalloutPreference'
 
 export function SettingsView() {
   const [value, setValue] = useState<'ask' | 'wizard' | 'manual'>('ask')
@@ -19,6 +20,10 @@ export function SettingsView() {
   // Animation pref reads through the hook so this checkbox stays in
   // sync if it's ever toggled from elsewhere (e.g. a future shortcut).
   const animationsEnabled = useAnimationsEnabled()
+  // Same hook the Plan dashboard's `ActivationCallout` uses, so flipping
+  // the checkbox here brings the "Plan in shape? Activate it." nudge
+  // back instantly on the dashboard.
+  const [activationCalloutDismissed, setActivationCalloutDismissed] = useActivationCalloutDismissed()
 
   useEffect(() => {
     const v = getPostAddPreference()
@@ -95,6 +100,35 @@ export function SettingsView() {
               <p className="m-0 text-sm font-medium text-cribl-ink">Always enter details myself</p>
               <p className="m-0 text-xs text-cribl-muted">Skip the choice dialog and open the full form.</p>
             </div>
+          </label>
+        </div>
+      </section>
+
+      <section className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
+        <h3 className="m-0 text-sm font-semibold text-cribl-ink">Plan dashboard prompts</h3>
+        <p className="m-0 mt-1 text-sm text-cribl-muted">
+          Controls the “Plan in shape? Activate it.” nudge on the Plan dashboard. Dismiss it from there with the
+          ×, or toggle it back on here. Only shown when no Activation tier has been picked yet — once you set
+          one, the dashboard switches to a compact tier strip that always stays visible.
+        </p>
+        <div className="mt-4 space-y-2">
+          <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-cribl-border bg-cribl-canvas/40 px-3 py-2">
+            <div>
+              <p className="m-0 text-sm font-medium text-cribl-ink">
+                Show “Plan in shape? Activate it.” nudge
+              </p>
+              <p className="m-0 text-xs text-cribl-muted">
+                Surfaces Activation as the next step under the Adoption plan hero.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={!activationCalloutDismissed}
+              onChange={(e) => {
+                setActivationCalloutDismissed(!e.target.checked)
+              }}
+              className="mt-1"
+            />
           </label>
         </div>
       </section>

@@ -72,11 +72,14 @@ function App() {
 function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
     useResizableRail()
-  // First-load lands on the Activation tab — that's where a CSE /
-  // customer kicks off an engagement (tier pick, base-scope checklist,
-  // use-case scoping). The Plan dashboard is one click away in the
-  // left nav for returning users who jump straight to the topology.
-  const [mainView, setMainView] = useState<MainView>('activation')
+  // First-load lands on the Plan dashboard — the topology + resource
+  // map are the highest-density introduction to what a customer is
+  // looking at. Activation now sits one click away as a sub-entry
+  // under Plan in the left nav, and the dashboard surfaces a
+  // "Plan in shape? Activate it." nudge that points at it directly,
+  // so a CSE / customer who lands here still has an obvious next step
+  // without us pre-empting the plan view.
+  const [mainView, setMainView] = useState<MainView>('overview')
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
   const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
   const [addSourceOpen, setAddSourceOpen] = useState(false)
@@ -565,6 +568,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onReassignSource={reassignSourceWorkerGroup}
                   onAddSource={openAddSource}
                   onAddWorkerGroup={openAddWorkerGroup}
+                  onGoToActivation={() => setMainView('activation')}
+                  onChangeCustomerName={(v) => setPlan((p) => ({ ...p, customerName: v }))}
                 />
               )}
 

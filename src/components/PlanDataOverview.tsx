@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatGbOrTbPerDayStr } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import { buildDashboardSnapshot, type DashboardSourceRow } from '../lib/planDashboardStats'
@@ -8,6 +8,9 @@ import {
 } from '../lib/workerGroupRollup'
 import { getOnboardingStatusCounts, ONBOARDING_STATUS_COLORS } from '../lib/onboardingStatus'
 import { useEntryAnimation } from '../lib/animationsPreference'
+import { tierPalette } from '../lib/psUseCaseLayout'
+import { useActivationCalloutDismissed } from '../lib/activationCalloutPreference'
+import { PencilIcon } from './PencilIcon'
 import { PlanResourceMap } from './PlanResourceMap'
 import { SearchInput } from './SearchInput'
 import { sourceLabel, type PlanState } from '../types/planTypes'
@@ -44,6 +47,20 @@ type Props = {
    * omitting it preserves the legacy default ('stream').
    */
   onAddWorkerGroup: (kind?: 'stream' | 'edge') => void
+  /**
+   * Jump to the Activation page (the Cribl PS Use Case Worksheet —
+   * tier picker, base scope checklist, use case overview / worksheet).
+   * Wired to the "Plan in shape? Activate it." banner under the hero,
+   * which is the primary nudge on the dashboard for the next step.
+   */
+  onGoToActivation: () => void
+  /**
+   * Persist a new value for `plan.customerName` — wired into the hero's
+   * inline pencil-edit affordance. Mirrors the same setter the header
+   * customer-name field uses so editing in either place updates the
+   * single source of truth in `PlanState`.
+   */
+  onChangeCustomerName: (name: string) => void
 }
 
 function parseGb(s: string | undefined): number {
@@ -352,6 +369,208 @@ function ProgressMini({ pct }: { pct: number }) {
   )
 }
 
+/**
+ * "Plan in shape? Activate it." — the dashboard's primary next-step
+ * nudge.
+ *
+ * Two visual modes:
+ *
+ *   - **Tier unset**: a Cribl-blue gradient band with a primary CTA
+ *     pointing at Activation, and a dismiss (×) in the top-right.
+ *     Customers who don't want the nudge (e.g. they're already mid-
+ *     engagement and don't need the prompt) can click × to hide it.
+ *     The dismissal is persisted in KV via {@link useActivationCalloutDismissed}
+ *     so it survives reloads. Setting an Activation tier later
+ *     swaps the callout to the compact tinted strip below — that one
+ *     is informational, not a nudge, and isn't dismissible.
+ *
+ *   - **Tier set**: a compact tier-tinted strip that reads as a status
+ *     badge ("Activation: Gold") with a "View" link. It still surfaces
+ *     the page, but stays out of the way once the customer has already
+ *     committed.
+ *
+ * Lives between the hero block and the resource map so it's the first
+ * actionable card a returning user sees, but doesn't compete with the
+ * map for the dashboard's main fold.
+ */
+function ActivationCallout({
+  plan,
+  onGoToActivation,
+}: {
+  plan: PlanState
+  onGoToActivation: () => void
+}) {
+  const tier = plan.activation.tier
+  const [dismissed, setDismissed] = useActivationCalloutDismissed()
+
+  if (tier) {
+    const palette = tierPalette(tier)!
+    return (
+      <button
+        type="button"
+        onClick={onGoToActivation}
+        className="group flex w-full items-center justify-between gap-3 rounded-2xl border border-cribl-border/80 bg-white px-5 py-3.5 text-left shadow-ctrl transition hover:border-cribl-primary/40 hover:shadow-card-float"
+        aria-label={`Open Activation — ${tier} tier engagement`}
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <span
+            className={[
+              'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+              palette.chip,
+            ].join(' ')}
+          >
+            <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
+            {tier}
+          </span>
+          <span className="min-w-0 truncate text-sm text-cribl-ink">
+            Activation engagement is set to{' '}
+            <span className={['font-semibold', palette.accentText].join(' ')}>{tier}</span>
+            <span className="text-cribl-muted"> — review base scope and use cases</span>
+          </span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-cribl-primary group-hover:underline">
+          Open Activation
+          <span aria-hidden>→</span>
+        </span>
+      </button>
+    )
+  }
+
+  if (dismissed) {
+    return null
+  }
+
+  return (
+    <section
+      className="relative overflow-hidden rounded-2xl border border-cribl-primary/30 bg-gradient-to-r from-cribl-primary-soft/70 via-white to-cribl-primary-soft/40 px-5 py-4 pr-12 shadow-ctrl sm:px-6 sm:py-5 sm:pr-14"
+      aria-labelledby="plan-activation-callout-title"
+    >
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-cribl-muted transition hover:bg-cribl-primary-soft/60 hover:text-cribl-ink focus:outline-none focus:ring-2 focus:ring-cribl-primary/40"
+        aria-label="Dismiss Activation prompt"
+        title="Dismiss"
+      >
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden>
+          <path
+            d="M3 3 L13 13 M13 3 L3 13"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            fill="none"
+          />
+        </svg>
+      </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="m-0 text-[10px] font-semibold uppercase tracking-wider text-cribl-primary">
+            Next step
+          </p>
+          <h3
+            id="plan-activation-callout-title"
+            className="m-0 mt-0.5 text-base font-semibold text-cribl-ink sm:text-lg"
+          >
+            Plan in shape? Activate it.
+          </h3>
+          <p className="m-0 mt-1 max-w-2xl text-sm leading-relaxed text-cribl-muted">
+            Pick a Cribl Professional Services tier, lock the base scope, and walk the use cases that
+            will deliver this rollout. Silver, Gold, or Platinum — your choice shapes which use cases
+            are in scope.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onGoToActivation}
+          className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg bg-cribl-primary px-4 py-2 text-sm font-medium text-white shadow-ctrl transition hover:bg-cribl-primary/90 sm:self-auto"
+        >
+          Set up Activation
+          <span aria-hidden>→</span>
+        </button>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Inline-edit customer name shown in the Plan dashboard hero.
+ *
+ * Mirrors the {@link HeaderCustomerName} top-right pencil affordance,
+ * but at hero scale (text-xl / sm:text-2xl, left-aligned) so the
+ * customer can edit the name right where they read it on the dashboard.
+ * Both controls are bound to the same `plan.customerName` setter, so
+ * they stay in sync — editing in one updates the other.
+ *
+ * UX: when `value` is empty, we render the placeholder "Cribl" in a
+ * muted italic with a pencil icon, signalling "this is editable, here's
+ * a hint of what to put". Once the customer types something, the value
+ * shows in the normal `text-cribl-ink` weight. The pencil stays visible
+ * either way as the explicit edit affordance — clicking the row swaps
+ * to a focused input that commits on blur / Enter / Escape.
+ */
+function HeroCustomerName({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const trimmed = value.trim()
+
+  useEffect(() => {
+    if (!editing) {
+      return
+    }
+    const el = inputRef.current
+    if (el) {
+      el.focus()
+      el.select()
+    }
+  }, [editing])
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="m-0 mt-1 block w-full max-w-xl rounded-md border border-cribl-primary/50 bg-white px-2 py-1 text-xl font-semibold leading-tight text-cribl-ink shadow-ctrl outline-none focus:border-cribl-primary focus:ring-2 focus:ring-cribl-primary/30 sm:text-2xl"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Escape') {
+            e.currentTarget.blur()
+          }
+        }}
+        placeholder="Cribl"
+        autoComplete="organization"
+        aria-label="Customer name"
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title="Edit customer name"
+      aria-label={trimmed ? `Customer: ${trimmed}. Click to edit.` : 'Edit customer name'}
+      className="group mt-1 inline-flex max-w-full items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 text-left transition hover:bg-cribl-elevate/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/30"
+    >
+      <span
+        className={[
+          'block min-w-0 max-w-full truncate text-xl font-semibold leading-tight sm:text-2xl',
+          trimmed ? 'text-cribl-ink' : 'italic text-cribl-muted/70',
+        ].join(' ')}
+      >
+        {trimmed || 'Cribl'}
+      </span>
+      <PencilIcon className="h-5 w-5 shrink-0 text-cribl-muted/70 transition group-hover:text-cribl-primary" />
+    </button>
+  )
+}
+
 export function PlanDataOverview({
   plan,
   onGoToWorkers,
@@ -362,12 +581,13 @@ export function PlanDataOverview({
   onReassignSource,
   onAddSource,
   onAddWorkerGroup,
+  onGoToActivation,
+  onChangeCustomerName,
 }: Props) {
   const snap = useMemo(() => buildDashboardSnapshot(plan), [plan])
   const nSources = plan.sourceSummary.length
   const nWgStream = plan.workerGroups.filter((w) => w.kind !== 'edge').length
   const nWgEdge = plan.workerGroups.filter((w) => w.kind === 'edge').length
-  const customer = plan.customerName.trim()
   const unassignedSources = plan.sourceSummary.filter((s) => !s.workerGroupId).length
   const [wgPage, setWgPage] = useState(0)
   const [recentSrcQ, setRecentSrcQ] = useState('')
@@ -473,32 +693,37 @@ export function PlanDataOverview({
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <section className="overflow-hidden rounded-2xl border border-cribl-border/80 bg-gradient-to-br from-cribl-primary-soft/60 via-white to-cribl-canvas/90 px-5 py-5 shadow-card-float sm:px-8 sm:py-6">
+      {/*
+       * Adoption-plan hero: floats on the page (no card chrome) so the
+       * eye lands on the customer name + intro copy directly. The
+       * follow-up "Plan in shape? Activate it." callout below keeps
+       * its card framing because it's the primary CTA — the contrast
+       * between a chrome-less hero and a framed nudge gives the nudge
+       * its own visual weight without competing with the title.
+       */}
+      <section>
         <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-cribl-primary">Adoption plan</p>
         {/*
          * TODO: derive the company name from the user's Cribl account details
          * once the platform exposes that to embedded apps. For now the user
-         * types their own company name into the header (it's *their* org's
-         * name, since their customers will be the ones reading the plan).
+         * types their own company name (it's *their* org's name, since
+         * their customers will be the ones reading the plan). The hero
+         * exposes a pencil-edit affordance so editing happens right where
+         * the name is read; the same value is also editable from the
+         * top-right header field — both share `plan.customerName`.
          * See CRIBL_DEV_NOTES.md "User identity inside the iframe".
          */}
-        <h2 className="m-0 mt-1 text-xl font-semibold leading-tight text-cribl-ink sm:text-2xl">
-          {customer || 'Your Company Name'}
-        </h2>
-        {!customer && (
-          <p className="m-0 mt-1 text-xs italic text-cribl-muted/80">
-            Edit it in the field at the top right.
-          </p>
-        )}
-        <p className="m-0 mt-2 max-w-2xl text-sm leading-relaxed text-cribl-muted">
-          Your end-to-end <span className="text-cribl-ink/80">Cribl Stream</span> rollout in one place — the worker
-          groups, the sources feeding them, and the daily volume each one contributes. Fill in details from the left
-          nav, then visualize the plan in the <span className="text-cribl-ink/80">resource maps</span> where
-          criticality and volume cues make priorities easy to spot. <span className="text-cribl-ink/80">Export</span>{' '}
-          to share with your team, or <span className="text-cribl-ink/80">Import</span> an existing plan any time to
-          pick up where you left off.
+        <HeroCustomerName value={plan.customerName} onChange={onChangeCustomerName} />
+        <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
+          Your end-to-end <span className="text-cribl-ink/80">Cribl</span> rollout in one place — worker groups,
+          the sources feeding them, and daily volume. Build it from the left nav, visualize the topology in the{' '}
+          <span className="text-cribl-ink/80">resource maps</span>, and{' '}
+          <span className="text-cribl-ink/80">Export</span> or{' '}
+          <span className="text-cribl-ink/80">Import</span> any time.
         </p>
       </section>
+
+      <ActivationCallout plan={plan} onGoToActivation={onGoToActivation} />
 
       {/*
        * The resource map is the most actionable surface on this page —

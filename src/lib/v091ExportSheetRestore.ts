@@ -18,12 +18,12 @@
  *
  * Empirically, on the gold v0.9.1 shell the drift is:
  *   - INSTRUCTIONS:               0% (lucky — every cell shares s=10)
- *   - PS Use Case Worksheet:     91%  (155 / 170 cells)
- *   - Stream Overview:          100%
- *   - wgdefault / wgdefaultHybrid:100%
- *   - Edge Overview:            100%
- *   - fldefault_fleet:          100%
- *   - input_data:               100% (and we never even modify it)
+ *   - PS Use Case Worksheet:     91%  (155 / 170 cells)            [restored]
+ *   - Stream Overview:          100%                                [restored]
+ *   - wg-default / wg-defaultHybrid:100%                            [restored]
+ *   - Edge Overview:            100%                                [restored]
+ *   - fl-default:               100%                                [restored]
+ *   - input_data:               100% (and we never even modify it)  [restored]
  *
  * Strategy
  * ────────
@@ -34,6 +34,12 @@
  * the gold's `s=` index for every cell. Static gold cells survive byte-
  * exact, including their `s=` indices, so the restored
  * `xl/styles.xml` resolves them correctly.
+ *
+ * For static lookup sheets that the app never writes to (e.g.
+ * `input_data`, the data-validation source for per-WG dropdowns) we
+ * skip the overlay entirely — restoring gold's worksheet XML and
+ * inline-stringifying its `t="s"` cells is enough to bring the
+ * styling back to gold.
  *
  * To sidestep ExcelJS's rewritten `xl/sharedStrings.xml`, every
  * `t="s"` cell on the restored sheet is converted to an inline string
@@ -49,7 +55,20 @@
  * (they still have the same drift they had before).
  */
 import type JSZip from 'jszip'
-import type { Activation, PlanState } from '../types/planTypes'
+import type {
+  Activation,
+  PlanState,
+  WorkerGroupKind,
+  WorkerGroupRow,
+} from '../types/planTypes'
+import { sourceSummaryValueForHeaderName } from './exportWorkbook'
+import {
+  ALL_SOURCE_IMPORT_HEADER_NAMES,
+  V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
+  V091_OVERVIEW_TABLE2_HEADER_ROW,
+  V091_PER_WG_FIRST_DATA_ROW,
+} from './planWorkbookLayout'
+import { resolveAllSheetNames } from './v091SheetNames'
 import {
   PS_BASE_SCOPE_ITEMS,
   PS_BASE_SCOPE_WORKSHEET_FIRST_ROW,
@@ -62,6 +81,7 @@ import {
   SHEET_PS_USE_CASE_WORKSHEET,
 } from './psUseCaseLayout'
 import { buildSheetNamePathMap } from './v091ZipUtils'
+import { effectiveIngestEgressGbdForWg } from './workerGroupRollup'
 
 // ─── Tiny XML helpers ──────────────────────────────────────────────────────
 
@@ -124,11 +144,32 @@ function attr(attrs: string, name: string): string | null {
 // ─── Cell overlay rewriting ────────────────────────────────────────────────
 
 /**
- * One entry per cell address we want to overwrite. `null` means "leave
- * the cell visually empty but keep gold's styling" (renders the same
- * as the gold's pre-shipped empty Notes cells, etc.).
+ * One value an overlay can hold for a single cell:
+ *   - `string` → emitted as an inline string (`t="inlineStr"`) with
+ *     the value escaped + run-level formatting if applicable.
+ *   - `number` → emitted as a numeric cell (`<c …><v>N</v></c>`)
+ *     preserving its native type so Excel formulas / number formats
+ *     keep working. Used for GB/day, ingest, egress, etc. on the
+ *     Stream / Edge overview tables.
+ *   - `boolean` → emitted as a typed boolean cell
+ *     (`<c t="b" …><v>1</v></c>` for true, `0` for false). Mirrors
+ *     what `ExcelJS` writes for `cell.value = true|false` so the
+ *     v0.9.1 importer's boolean-cell parser keeps round-tripping
+ *     `Compliance related?` / `Current?` etc. correctly.
+ *   - `Date` → emitted as a numeric serial number relative to
+ *     Excel's 1899-12-30 epoch (`<c …><v>SERIAL</v></c>`), again
+ *     mirroring ExcelJS. The cell's gold-supplied number format
+ *     renders it as a localized date.
+ *   - `null` → renders an empty styled cell (`<c r="…" s="…"/>`),
+ *     same shape gold uses for its pre-shipped empty Notes cells.
  */
-type OverlayMap = Map<string, string | null>
+type OverlayValue = string | number | boolean | Date | null
+
+/**
+ * One entry per cell address we want to overwrite. See
+ * {@link OverlayValue} for the per-cell value semantics.
+ */
+type OverlayMap = Map<string, OverlayValue>
 
 /**
  * Split a cell address like `"E22"` into its column-letter prefix
@@ -150,24 +191,59 @@ function colCmp(a: string, b: string): number {
 }
 
 /**
- * Build the `<c>` element string for an overlay write. Gold-style
- * "empty styled" cells (`<c r="…" s="…"/>`) are produced when the
- * overlay value is null/empty and we have a gold style index to
- * preserve. Non-empty values are always emitted as inline strings so
- * the sheet stays decoupled from `xl/sharedStrings.xml`.
+ * Build the `<c>` element string for an overlay write.
+ *
+ * - Null / empty-string values produce an empty styled cell
+ *   (`<c r="…" s="…"/>`) — same shape gold uses for its pre-shipped
+ *   empty Notes cells. Preserving `s=` keeps the cell border /
+ *   alignment intact even though it's visually empty.
+ * - Numeric values produce an untyped numeric cell
+ *   (`<c r="…" s="…"><v>N</v></c>`). No `t=` attribute means OOXML's
+ *   default numeric type, so the value is selectable / formula-able
+ *   and the cell's number format (gold-supplied via `s=`) applies.
+ * - String values produce an inline string cell so the worksheet
+ *   stays decoupled from `xl/sharedStrings.xml` (which ExcelJS
+ *   rewrites with new indices).
  */
 function buildOverlayCellXml(
   addr: string,
-  value: string | null,
+  value: OverlayValue,
   goldS: string | null,
 ): string {
   const sFragment = goldS != null ? ` s="${goldS}"` : ''
   if (value == null || value === '') {
     return `<c r="${addr}"${sFragment}/>`
   }
+  if (typeof value === 'boolean') {
+    return `<c r="${addr}"${sFragment} t="b"><v>${value ? 1 : 0}</v></c>`
+  }
+  if (value instanceof Date) {
+    return `<c r="${addr}"${sFragment}><v>${dateToExcelSerial(value)}</v></c>`
+  }
+  if (typeof value === 'number') {
+    return `<c r="${addr}"${sFragment}><v>${value}</v></c>`
+  }
   return `<c r="${addr}"${sFragment} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(
     value,
   )}</t></is></c>`
+}
+
+/**
+ * Convert a JS `Date` to an Excel serial number (days since
+ * 1899-12-30). Mirrors what ExcelJS writes for `cell.value = new
+ * Date(...)`: an integer-or-fractional days count whose cell
+ * number-format then renders as a localized date / datetime. Excel
+ * intentionally treats 1900 as a leap year (Lotus 1-2-3 bug carry-
+ * over); using `1899-12-30` as the epoch produces the same serial
+ * Excel uses for any post-1900-03-01 date, which covers every date
+ * the app cares about (target onboarding / completion dates).
+ *
+ * `getTime()` returns UTC milliseconds, so the math is timezone-
+ * agnostic — the Date is interpreted as the same instant Excel /
+ * Google Sheets expect.
+ */
+function dateToExcelSerial(d: Date): number {
+  return (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000
 }
 
 /**
@@ -185,11 +261,11 @@ function buildOverlayCellXml(
  */
 function insertMissingCells(
   sheetXml: string,
-  missing: Array<[string, string | null]>,
+  missing: Array<[string, OverlayValue]>,
 ): string {
   if (missing.length === 0) return sheetXml
   // Group by row so we make at most one splice per row.
-  const byRow = new Map<number, Array<[string, string | null]>>()
+  const byRow = new Map<number, Array<[string, OverlayValue]>>()
   for (const [addr, value] of missing) {
     const a = splitAddr(addr)
     if (!a) continue
@@ -343,7 +419,7 @@ function overlayCellsInSheet(
       return _full
     },
   )
-  const missing: Array<[string, string | null]> = []
+  const missing: Array<[string, OverlayValue]> = []
   for (const [addr, value] of overlay) {
     if (!visited.has(addr) && value != null && value !== '') {
       missing.push([addr, value])
@@ -610,6 +686,353 @@ async function restorePsUseCaseWorksheetSheet(
     if (goldTable) {
       zOut.file(`xl/tables/${tableFile}`, goldTable)
     }
+  }
+}
+
+// ─── Stream / Edge Overview restorer ───────────────────────────────────────
+
+/**
+ * Per-kind metadata for the Stream / Edge Overview restorer. The two
+ * sheets are structurally identical (same row layout, same column
+ * counts, same hidden top table) — they just differ in sheet name,
+ * which set of WGs to filter, and which `xl/tables/tableN.xml` files
+ * back the two ListObjects.
+ */
+interface OverviewSheetSpec {
+  /** Worksheet display name (`Stream Overview` / `Edge Overview`). */
+  sheetName: string
+  /**
+   * `xl/tables/tableN.xml` files backing this sheet's two
+   * ListObjects, in document order: `[topHidden, bottomVisible]`.
+   * Stream uses table4/table5; Edge uses table6/table7. Only the
+   * bottom table is user-facing — the top is left untouched as
+   * gold's empty hidden region.
+   */
+  tableFiles: readonly [string, string]
+  /**
+   * `<tableParts>`-style rels Targets for the two tables. Same
+   * order as {@link tableFiles}; used to look up whatever rIds
+   * ExcelJS allocated in the output's rels file so we can rewrite
+   * `<tableParts r:id="…"/>` to point at them.
+   */
+  tableTargets: readonly [string, string]
+}
+
+const STREAM_OVERVIEW_SPEC: OverviewSheetSpec = {
+  sheetName: 'Stream Overview',
+  tableFiles: ['table4.xml', 'table5.xml'],
+  tableTargets: ['../tables/table4.xml', '../tables/table5.xml'],
+}
+
+const EDGE_OVERVIEW_SPEC: OverviewSheetSpec = {
+  sheetName: 'Edge Overview',
+  tableFiles: ['table6.xml', 'table7.xml'],
+  tableTargets: ['../tables/table6.xml', '../tables/table7.xml'],
+}
+
+/**
+ * Column footprint of the bottom Worker Groups & Specs / Fleets &
+ * Specs table on Stream Overview / Edge Overview (gold's table5
+ * `WGs` and table7 `FLs`). Both ship with the same 8 columns (A..H):
+ * WG / Fleet, Ingest, Egress, Throughput, Worker Hosting, Worker
+ * Count, Worker Detail, Disk Req'd. The top
+ * "Sources, Volume, Region" tables (gold's table4 / table6) are
+ * intentionally untouched — gold ships their rows as `hidden="1"`
+ * and the v0.9.1 importer ignores them.
+ */
+const OVERVIEW_BOTTOM_COLS: readonly string[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+
+/**
+ * Bottom row of the gold's bottom table when no plan rows exceed the
+ * pre-shipped 8 specs (rows 17..24). Mirrors the `+ 8 - 1` math in
+ * `fixOverviewTableRefs` for the WG / FL tables.
+ */
+const OVERVIEW_BOTTOM_LAST_DATA_ROW_DEFAULT = V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + 8 - 1
+
+/**
+ * Parse a free-text number-like string ("12.5", "1,200", " 0 ") into
+ * a finite JS number, or `null` when blank / unparseable. Mirrors the
+ * `parseNumber` helper inside `v091ExportWorkbook.ts` but returns
+ * `null` instead of `''` so it composes cleanly with {@link OverlayValue}
+ * (where `null` is the gold-empty marker and a literal `0` is a valid
+ * numeric write).
+ */
+function parseOverviewNum(s: string | undefined): number | null {
+  if (!s) return null
+  const t = s.trim()
+  if (!t) return null
+  const n = Number(t.replace(/,/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Build the address → value overlay for one Overview sheet
+ * (`Stream Overview` or `Edge Overview`), filtered to the WGs of the
+ * given `kind`.
+ *
+ * Both sheets ship **two** ListObject tables in the gold, but only
+ * the bottom one is user-facing:
+ *
+ *   - Top table (gold's `SourcesVolumeCollection` /
+ *     `SourcesVolumeCollection_2`, A2:I14) — a v0.8.6 carry-over
+ *     rolled-up Sources table. Gold ships every row in this band as
+ *     `hidden="1"`, and the v0.9.1 importer intentionally ignores it
+ *     (per the doc-comment on `parseV091Workbook`: "the top table …
+ *     is a write-only artifact"). Sources are read from per-WG /
+ *     per-Fleet sheets instead. This restorer therefore writes
+ *     **nothing** to the top half so it stays as gold's empty hidden
+ *     region — invisible to the user.
+ *
+ *   - Bottom table (gold's `WGs` / `FLs`, A16:H24) — Worker Groups
+ *     & Specs / Fleets & Specs. This is what the user sees and
+ *     edits, and what the v0.9.1 importer parses for capacity. We
+ *     mirror the corresponding-kind WG-block writes done by
+ *     `fillOverviewSheet(kind)` in {@link ./v091ExportWorkbook}:
+ *     rows 17..17+M-1 hold one WG / Fleet each (cols A..H), with
+ *     explicit `null` entries on the leftover gold-shipped slots so
+ *     a shrink doesn't leave phantom values from a previous export.
+ *
+ * Numeric columns (B / C / D / H on the bottom table) are written
+ * as `OverlayValue` numbers so the output keeps a real numeric cell
+ * (`<c><v>N</v></c>`) — Excel formulas / number formats stay live
+ * and `Number.isFinite` checks on round-trip read still succeed.
+ * Empty / unparseable values produce gold-empty cells.
+ *
+ * Returns the overlay along with the actual last data row of the
+ * bottom table, used downstream to drive the perimeter-border range.
+ */
+function overviewBottomTableOverlay(
+  plan: PlanState,
+  kind: WorkerGroupKind,
+): {
+  overlay: OverlayMap
+  bottomLastDataRow: number
+} {
+  const overlay: OverlayMap = new Map()
+  const wgs = plan.workerGroups.filter((w) =>
+    kind === 'edge' ? w.kind === 'edge' : w.kind !== 'edge',
+  )
+
+  const slots =
+    OVERVIEW_BOTTOM_LAST_DATA_ROW_DEFAULT - V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + 1
+  const wgsCapped = wgs.slice(0, slots)
+  for (let j = 0; j < wgsCapped.length; j += 1) {
+    const r = V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + j
+    const wg = wgsCapped[j]!
+    const cap = effectiveIngestEgressGbdForWg(plan, wg)
+    const ingest =
+      cap?.ingestGb != null && Number.isFinite(cap.ingestGb)
+        ? cap.ingestGb
+        : parseOverviewNum(wg.ingestGbd)
+    const egress =
+      cap?.egressGb != null && Number.isFinite(cap.egressGb)
+        ? cap.egressGb
+        : parseOverviewNum(wg.egressGbd)
+    overlay.set(`A${r}`, wg.wg || null)
+    overlay.set(`B${r}`, ingest)
+    overlay.set(`C${r}`, egress)
+    overlay.set(`D${r}`, parseOverviewNum(wg.throughputGbd))
+    overlay.set(`E${r}`, wg.workerHosting || null)
+    overlay.set(`F${r}`, wg.workerCount || null)
+    overlay.set(`G${r}`, wg.workerDetail || null)
+    overlay.set(`H${r}`, parseOverviewNum(wg.diskOneDayGb))
+  }
+  for (let j = wgsCapped.length; j < slots; j += 1) {
+    const r = V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + j
+    for (const c of OVERVIEW_BOTTOM_COLS) {
+      overlay.set(`${c}${r}`, null)
+    }
+  }
+
+  // Effective last data row of the bottom table, used to size the
+  // perimeter border rectangle. Capped to the gold default (row 24)
+  // — anything past that lives outside our overlay anyway.
+  const bottomLastDataRow = V091_OVERVIEW_TABLE2_FIRST_DATA_ROW + wgsCapped.length - 1
+  return {
+    overlay,
+    bottomLastDataRow: Math.max(bottomLastDataRow, OVERVIEW_BOTTOM_LAST_DATA_ROW_DEFAULT),
+  }
+}
+
+/**
+ * Replace `xl/tables/${tableFile}` in `zOut` with gold's verbatim
+ * copy, but preserve whatever `ref="…"` ExcelJS / `fixOverviewTableRefs`
+ * has already settled on. Used for Stream / Edge overview tables whose
+ * height grows with plan size:
+ *
+ *   - Gold's pre-shipped table4 ships `ref="A2:I14"` (12 source slots).
+ *   - `fixOverviewTableRefs` widens this to e.g. `ref="A2:I20"` for
+ *     plans with more sources — that wider ref must survive the
+ *     restore.
+ *   - ExcelJS, in turn, also injects `headerRowCount="0"` and an
+ *     `<autoFilter>` block that suppresses the green table-style
+ *     header band; gold's verbatim copy is the cleanest way to drop
+ *     both at once.
+ *
+ * No-op when the gold or output file is missing (e.g. a workbook
+ * shape we don't expect).
+ */
+async function restoreTableWithDynamicRef(
+  zIn: JSZip,
+  zOut: JSZip,
+  tableFile: string,
+): Promise<void> {
+  const path = `xl/tables/${tableFile}`
+  const goldXml = await zIn.file(path)?.async('string')
+  const outXml = await zOut.file(path)?.async('string')
+  if (!goldXml || !outXml) return
+  const dynRefMatch = /\bref="([^"]+)"/.exec(outXml)
+  if (!dynRefMatch) return
+  const dynRef = dynRefMatch[1]!
+  const restored = goldXml.replace(/(<table\b[^>]*?\bref=")[^"]+(")/, `$1${dynRef}$2`)
+  zOut.file(path, restored)
+}
+
+/**
+ * Restore one Overview sheet (`Stream Overview` for `kind="stream"`,
+ * `Edge Overview` for `kind="edge"`). Same playbook as
+ * {@link restorePsUseCaseWorksheetSheet}, scoped to the **bottom**
+ * Worker Groups & Specs / Fleets & Specs table only:
+ *
+ *   - The gold sheet ships two ListObject tables — a top
+ *     "Sources, Volume, Region" rolled-up sources table at A2:I14
+ *     (every row marked `hidden="1"`) and a bottom WGs / FLs table
+ *     at A16:H24. The v0.9.1 importer ignores the top table by
+ *     design (sources live on per-WG / per-Fleet sheets), so we
+ *     leave gold's hidden-empty top half untouched. The user only
+ *     ever sees the bottom table.
+ *
+ *   - Replace the worksheet XML with gold's verbatim copy and
+ *     overlay plan-derived WG / Fleet data on rows 17..24. Numeric
+ *     columns (Ingest / Egress / Throughput / Disk) are written as
+ *     native numeric cells (`<c><v>N</v></c>`) so number formatting
+ *     and formula references continue to work; string columns
+ *     become inline strings (decoupled from
+ *     `xl/sharedStrings.xml`).
+ *
+ *   - Pin the bottom-table header text on row 16 (A16:H16) to white
+ *     via run-level `<rPr><color rgb="FFFFFFFF"/>`. Same reason as
+ *     the PS Use Case Worksheet rows 2/18 fix: those cells have
+ *     `fillId="0"` and rely on the table style's `headerRow` dxf
+ *     for their green band, which Google Sheets does not auto-flip
+ *     text white against.
+ *
+ *   - Replace `xl/tables/${spec.tableFiles[0]}` and
+ *     `${spec.tableFiles[1]}` from gold but keep the dynamic
+ *     `ref="…"` `fixOverviewTableRefs` already wrote. This drops
+ *     ExcelJS's `headerRowCount="0"` / `<autoFilter>` injections so
+ *     the table style re-engages.
+ *
+ *   - Rewrite `<tableParts r:id=…>` to use whatever rIds ExcelJS
+ *     allocated in the output's rels file. Gold says `rId4/5`; the
+ *     output may have allocated `rId1/2`. Skipping this step leaves
+ *     dangling references that Excel tolerates but Google Sheets
+ *     refuses to open.
+ *
+ *   - Append cell-level perimeter borders for the bottom table over
+ *     its dynamic range (A16:H{lastBottomRow}), using the same
+ *     8-borders-+-cellXf-clones machinery as the PS Use Case
+ *     Worksheet. The hidden top table is left without a perimeter —
+ *     it's invisible anyway.
+ *
+ * No-op when either workbook is missing this sheet.
+ */
+async function restoreOverviewSheet(
+  zIn: JSZip,
+  zOut: JSZip,
+  plan: PlanState,
+  kind: WorkerGroupKind,
+  spec: OverviewSheetSpec,
+): Promise<void> {
+  const inMap = await buildSheetNamePathMap(zIn)
+  const outMap = await buildSheetNamePathMap(zOut)
+  const inPath = inMap.get(spec.sheetName)
+  const outPath = outMap.get(spec.sheetName)
+  if (!inPath || !outPath) {
+    return
+  }
+  const goldSheetXml = await zIn.file(inPath)?.async('string')
+  if (!goldSheetXml) {
+    return
+  }
+  const goldSharedStringsXml =
+    (await zIn.file('xl/sharedStrings.xml')?.async('string')) ?? ''
+  const goldSharedStrings = parseSharedStrings(goldSharedStringsXml)
+  const { overlay, bottomLastDataRow } = overviewBottomTableOverlay(plan, kind)
+
+  // Header-row text pin: only row 16 (A..H), the visible WGs / FLs
+  // table. Row 2 (A..I) on the hidden top table is left alone —
+  // pinning a hidden row's text white would have no visible effect,
+  // and any gold-shipped shared-string ref left in those cells will
+  // fall through `overlayCellsInSheet`'s standard t="s" → inlineStr
+  // conversion (which preserves gold's text + s= unchanged).
+  const whiteTextAddresses = new Set<string>()
+  for (const c of OVERVIEW_BOTTOM_COLS) {
+    whiteTextAddresses.add(`${c}${V091_OVERVIEW_TABLE2_HEADER_ROW}`)
+  }
+
+  let patched = overlayCellsInSheet(
+    goldSheetXml,
+    goldSharedStrings,
+    overlay,
+    whiteTextAddresses,
+  )
+
+  // Rewrite <tableParts> to match the rIds ExcelJS allocated in the
+  // output's rels file.
+  const outRelsPath = sheetRelsPathFor(outPath)
+  const outRelsXml = (await zOut.file(outRelsPath)?.async('string')) ?? ''
+  const outRIds: string[] = []
+  for (const target of spec.tableTargets) {
+    const id = rIdForTarget(outRelsXml, target)
+    if (id) {
+      outRIds.push(id)
+    }
+  }
+  if (outRIds.length === spec.tableTargets.length) {
+    patched = rewriteTableParts(patched, outRIds)
+  }
+
+  // Cell-level perimeter borders for the bottom table only. Top
+  // table (A2:I14) lives on hidden rows so a perimeter there is
+  // invisible and just bloats `cellXfs`. Same 8-borders +
+  // cellXf-clone strategy as the PS Use Case Worksheet — only the
+  // outer rectangle is bordered; interior cells keep gold's
+  // no-border default.
+  const overviewTables: readonly TableRect[] = [
+    {
+      topRow: V091_OVERVIEW_TABLE2_HEADER_ROW,
+      bottomRow: bottomLastDataRow,
+      leftCol: 'A',
+      rightCol: 'H',
+      cols: OVERVIEW_BOTTOM_COLS,
+    },
+  ]
+  const existingCellStyles = readExistingCellStyles(patched)
+  const { remap, defaultByEdge } = await patchActivationTablePerimeterCellXfs(
+    zOut,
+    overviewTables,
+    existingCellStyles,
+  )
+  if (remap.size > 0) {
+    patched = applyPerimeterToSheet(
+      patched,
+      overviewTables,
+      existingCellStyles,
+      remap,
+      defaultByEdge,
+    )
+  }
+
+  zOut.file(outPath, patched)
+
+  // Restore both tables from gold — drops ExcelJS's
+  // `headerRowCount="0"` / `<autoFilter>` injections — but preserves
+  // the dynamic `ref="…"` already widened by `fixOverviewTableRefs`.
+  // (The hidden top table's ref widening is meaningless visually but
+  // OOXML-clean.)
+  for (const tableFile of spec.tableFiles) {
+    await restoreTableWithDynamicRef(zIn, zOut, tableFile)
   }
 }
 
@@ -1105,6 +1528,410 @@ function applyPerimeterToSheet(
   return out
 }
 
+// ─── Per-WG / per-Fleet sheet restorer ─────────────────────────────────────
+
+/**
+ * Gold-shipped scaffold sheet names. The export's `cloneScaffolds`
+ * makes any extra plan WGs / fleets clone from the first scaffold of
+ * the matching kind, then `assignKindSheets` renames each scaffold
+ * (consumed in order) to the plan WG's resolved sheet name (e.g.
+ * `wg-default` → `wg-apex`). Whichever scaffolds aren't consumed
+ * survive in the output under their original name and need to be
+ * restored from gold separately.
+ *
+ * Both Stream scaffolds (`wg-default` / `wg-defaultHybrid`) ship with
+ * an identical 31-column row-2 schema in the new gold; either one is
+ * a valid template for any Stream WG. We always source from
+ * `wg-default` for renamed Stream WGs (the clone source) and from
+ * `wg-defaultHybrid` only when restoring an unconsumed
+ * `wg-defaultHybrid` sheet (so its identity is preserved 1:1 from
+ * gold).
+ */
+const PER_WG_GOLD_SCAFFOLDS = {
+  streamPrimary: 'wg-default',
+  streamHybrid: 'wg-defaultHybrid',
+  edgePrimary: 'fl-default',
+} as const
+
+/**
+ * Header → column-letter map built from a gold per-WG / per-Fleet
+ * sheet's row 2. Column D's header swaps between `Worker Group` and
+ * `Fleet` depending on the scaffold; the lookup is forgiving (both
+ * `Worker Group` and `Fleet` keys point at column D) so the same
+ * map can power the overlay regardless of kind.
+ *
+ * Built once per scaffold and shared across every plan WG /
+ * fleet of that kind.
+ */
+function buildPerWgHeaderColumnMap(
+  goldSheetXml: string,
+  goldSharedStrings: readonly string[],
+): Map<string, string> {
+  const m = goldSheetXml.match(/<row\s+r="2"[^>]*>([\s\S]*?)<\/row>/)
+  if (!m) return new Map()
+  const out = new Map<string, string>()
+  const cellRe = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
+  let cm: RegExpExecArray | null
+  while ((cm = cellRe.exec(m[1]!)) !== null) {
+    const attrs = cm[1]!
+    const inner = cm[3] ?? ''
+    const addrAttr = attr(attrs, 'r')
+    if (!addrAttr) continue
+    const sp = splitAddr(addrAttr)
+    if (!sp) continue
+    const t = attr(attrs, 't')
+    let text = ''
+    if (t === 's') {
+      const v = inner.match(/<v>(\d+)<\/v>/)
+      if (v) text = goldSharedStrings[Number(v[1])] ?? ''
+    } else if (t === 'inlineStr') {
+      const tm = inner.match(/<t[^>]*>([\s\S]*?)<\/t>/)
+      if (tm) text = tm[1]!
+    }
+    const trimmed = text.trim()
+    if (trimmed) out.set(trimmed, sp.col)
+  }
+
+  // D column kind alias: gold's `wg-default` ships D2 as "Worker
+  // Group", `fl-default` as "Fleet". The exporter's
+  // sourceSummaryValueForHeaderName accepts both names; mirror that
+  // by ensuring whichever key is missing aliases to the same column
+  // as the one that's present.
+  const wgCol = out.get('Worker Group')
+  const flCol = out.get('Fleet')
+  if (wgCol && !flCol) out.set('Fleet', wgCol)
+  if (flCol && !wgCol) out.set('Worker Group', flCol)
+
+  return out
+}
+
+/**
+ * Convert a JS value coming out of `sourceSummaryValueForHeaderName`
+ * into the {@link OverlayValue} shape. Mirrors `setCellSafe` from
+ * `v091ExportWorkbook.ts`:
+ *
+ *   - `undefined` (the default-case result for headers our model
+ *     doesn't carry, e.g. `Display name`) is treated as `null`
+ *     (gold-empty cell), so a plain export doesn't synthesize new
+ *     content for those columns.
+ *
+ *   - Empty strings collapse to `null` for the same reason.
+ *
+ *   - Booleans / numbers / Dates pass through with their native
+ *     types so {@link buildOverlayCellXml} emits them as `t="b"` /
+ *     numeric / serial-number cells.
+ */
+function normalizeSourceCellValue(
+  value: string | number | boolean | Date | null | undefined,
+): OverlayValue {
+  if (value === undefined || value === null || value === '') {
+    return null
+  }
+  return value
+}
+
+/**
+ * Build the address → value overlay for one per-WG / per-Fleet
+ * sheet, scoped to the sources that belong to `wg`. Mirrors the
+ * writes done by `fillPerWgSheet` in {@link ./v091ExportWorkbook}:
+ * iterates every header in {@link ALL_SOURCE_IMPORT_HEADER_NAMES},
+ * locates its column in the gold's row 2 via `headerColMap`, and
+ * pairs each source row with `V091_PER_WG_FIRST_DATA_ROW + i`.
+ *
+ * Headers absent from gold's row 2 are skipped (e.g. `Display name`
+ * / `Type` / `Region(s)` on a v0.9.1 sheet that doesn't ship
+ * those columns) — same defensive shape as the existing
+ * `headerToCol`-based exporter.
+ */
+function perWgSheetOverlay(
+  plan: PlanState,
+  wg: WorkerGroupRow,
+  headerColMap: ReadonlyMap<string, string>,
+): OverlayMap {
+  const overlay: OverlayMap = new Map()
+  const sources = plan.sourceSummary.filter((s) => s.workerGroupId === wg.id)
+  for (let i = 0; i < sources.length; i += 1) {
+    const r = V091_PER_WG_FIRST_DATA_ROW + i
+    const src = sources[i]!
+    for (const headerName of ALL_SOURCE_IMPORT_HEADER_NAMES) {
+      const col = headerColMap.get(headerName)
+      if (!col) continue
+      const value = sourceSummaryValueForHeaderName(headerName, src, { plan })
+      overlay.set(`${col}${r}`, normalizeSourceCellValue(value))
+    }
+  }
+  return overlay
+}
+
+/**
+ * Restore every per-WG / per-Fleet sheet in the output zip from
+ * gold. Same playbook as the other restorers:
+ *
+ *   - Replace `xl/worksheets/sheetN.xml` with gold's verbatim copy
+ *     of the matching scaffold (Stream WGs source from
+ *     `wg-default`; Edge fleets source from `fl-default`; the
+ *     leftover `wg-defaultHybrid` is restored from itself if no
+ *     plan WG took its slot).
+ *
+ *   - Convert every `t="s"` cell to `t="inlineStr"` against gold's
+ *     `sharedStrings.xml` so the sheet drops its dependency on the
+ *     post-ExcelJS `xl/sharedStrings.xml`.
+ *
+ *   - Overlay app-derived source data via
+ *     {@link perWgSheetOverlay}: rows 3..3+N-1 each hold one
+ *     source's column values across A..AE, with native numeric /
+ *     boolean / date types preserved so number formats and the
+ *     v0.9.1 importer's typed-cell parser keep working.
+ *
+ * Effect: restores gold's row-1 banner fills (SOURCE ONBOARDING /
+ * PRIMARY DATA POINTS / VOLUME & PRIORITY / PHASE & ROADMAP /
+ * INITIATIVE…), the `#EFEFEF` AB1:AE1 grey-blend cells, and the
+ * row-2 column-title styling — all of which drift on the current
+ * export. Source data still round-trips because the overlay writes
+ * the same field set the exporter does.
+ *
+ * No-op when the gold workbook is missing any expected scaffold
+ * sheet.
+ */
+async function restorePerWgSheets(
+  zIn: JSZip,
+  zOut: JSZip,
+  plan: PlanState,
+): Promise<void> {
+  const inMap = await buildSheetNamePathMap(zIn)
+  const outMap = await buildSheetNamePathMap(zOut)
+  const goldSharedStrings = parseSharedStrings(
+    (await zIn.file('xl/sharedStrings.xml')?.async('string')) ?? '',
+  )
+
+  // Read each gold scaffold once; cache header-to-column maps so
+  // the overlay builder doesn't reparse row 2 per WG.
+  const goldTemplates = new Map<string, string>()
+  const headerMaps = new Map<string, Map<string, string>>()
+  for (const name of [
+    PER_WG_GOLD_SCAFFOLDS.streamPrimary,
+    PER_WG_GOLD_SCAFFOLDS.streamHybrid,
+    PER_WG_GOLD_SCAFFOLDS.edgePrimary,
+  ]) {
+    const path = inMap.get(name)
+    if (!path) continue
+    const xml = await zIn.file(path)?.async('string')
+    if (!xml) continue
+    goldTemplates.set(name, xml)
+    headerMaps.set(name, buildPerWgHeaderColumnMap(xml, goldSharedStrings))
+  }
+
+  const restoreOne = (
+    outSheetName: string,
+    scaffoldName: string,
+    overlay: OverlayMap,
+  ) => {
+    const outPath = outMap.get(outSheetName)
+    if (!outPath) return
+    const goldXml = goldTemplates.get(scaffoldName)
+    if (!goldXml) return
+    const patched = overlayCellsInSheet(goldXml, goldSharedStrings, overlay)
+    zOut.file(outPath, patched)
+  }
+
+  // Resolve each plan WG / fleet's expected output sheet name
+  // (mirrors the exporter's `resolveAllSheetNames` call), then
+  // restore that sheet from the matching scaffold. Track which
+  // output sheets we've already populated so the leftover-scaffold
+  // sweep below can't accidentally clobber them with an empty
+  // overlay — a plan WG named `default` resolves to `wg-default`,
+  // which is the same as the gold scaffold name.
+  const finalNames = resolveAllSheetNames(
+    plan.workerGroups,
+    PER_WG_RESERVED_STATIC_SHEET_NAMES,
+  )
+  const restoredOutNames = new Set<string>()
+  for (const wg of plan.workerGroups) {
+    const sheetName = finalNames.get(wg.id)
+    if (!sheetName) continue
+    const scaffoldName =
+      wg.kind === 'edge'
+        ? PER_WG_GOLD_SCAFFOLDS.edgePrimary
+        : PER_WG_GOLD_SCAFFOLDS.streamPrimary
+    const overlay = perWgSheetOverlay(plan, wg, headerMaps.get(scaffoldName) ?? new Map())
+    restoreOne(sheetName, scaffoldName, overlay)
+    restoredOutNames.add(sheetName)
+  }
+
+  // Restore any leftover scaffold sheets the exporter didn't
+  // consume (most commonly `wg-defaultHybrid` when the plan has at
+  // most one Stream WG). They survive in the output under their
+  // gold name and just need their styling rebuilt; no overlay.
+  // Skip any scaffold name that the loop above already restored —
+  // otherwise we'd overwrite that sheet's populated data with an
+  // empty overlay (this hits any plan whose first WG is named
+  // exactly `default` since its resolved name `wg-default` equals
+  // the Stream-primary scaffold name).
+  for (const scaffoldName of [
+    PER_WG_GOLD_SCAFFOLDS.streamPrimary,
+    PER_WG_GOLD_SCAFFOLDS.streamHybrid,
+    PER_WG_GOLD_SCAFFOLDS.edgePrimary,
+  ]) {
+    if (!outMap.has(scaffoldName)) continue
+    if (restoredOutNames.has(scaffoldName)) continue
+    restoreOne(scaffoldName, scaffoldName, new Map())
+  }
+}
+
+/**
+ * Mirror of the static reserved-name set the exporter passes to
+ * `resolveAllSheetNames`. Listed separately here (rather than
+ * imported from `v091ExportWorkbook`) to avoid pulling in the
+ * exporter's full dependency graph from the restore module.
+ */
+const PER_WG_RESERVED_STATIC_SHEET_NAMES: readonly string[] = [
+  'INSTRUCTIONS',
+  'PS Use Case Worksheet',
+  'Stream Overview',
+  'Edge Overview',
+  'input_data',
+] as const
+
+// ─── input_data restorer ───────────────────────────────────────────────────
+
+const SHEET_INPUT_DATA = 'input_data' as const
+
+/**
+ * Column footprint of the `input_data` row-1 column titles. 11
+ * columns: Tech_tiles, Dest_tiles, Pipeline, Criticality,
+ * StreamEdge, Initiatives, Technical use cases, Financial value,
+ * Operational value, Risk reduction value, Strategic value.
+ */
+const INPUT_DATA_HEADER_COLS: readonly string[] = [
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
+] as const
+
+/**
+ * Append (if absent) a `<xf>` to `xl/styles.xml`'s `<cellXfs>` that
+ * paints a cell as a bold-black-text-on-light-grey-fill column
+ * header — gold's input_data column-title look:
+ *
+ *   - `fontId="14"` → bold Open Sans, `<color theme="1"/>` (black).
+ *     This is the bold sibling of gold's `fontId="16"` (Open Sans,
+ *     not bold) which gold already uses on F1:K1 — re-using the
+ *     family/size keeps row 1 typographically uniform after the
+ *     restore.
+ *
+ *   - `fillId="5"` → light grey `#EFEFEF`. Gold's existing
+ *     light-grey fill, the same one used by the `s="89"` / `s="90"`
+ *     header cellXfs the gold ships for F1:K1.
+ *
+ *   - Other attributes mirror the gold's `s="89"` cellXf (no
+ *     border, default xfId, vertical-bottom alignment) so a Google-
+ *     /Excel-side row-height auto-fit doesn't differ between the
+ *     11 columns.
+ *
+ * Idempotent: if the workbook already carries a cellXf with these
+ * exact (`fontId`, `fillId`, `borderId`, `numFmtId`) settings — for
+ * example because a previous export already appended it — that
+ * existing index is reused. Returns the cellXf index callers should
+ * write into the cell's `s=` attribute, or `-1` when `cellXfs` is
+ * malformed (very unlikely, would mean an earlier restore step has
+ * already broken `styles.xml`).
+ */
+async function ensureInputDataHeaderCellXf(zOut: JSZip): Promise<number> {
+  const path = 'xl/styles.xml'
+  const stylesXml = await zOut.file(path)?.async('string')
+  if (!stylesXml) return -1
+
+  const headerXf =
+    `<xf borderId="0" fillId="5" fontId="14" numFmtId="0" xfId="0" applyAlignment="1" applyFill="1" applyFont="1"><alignment vertical="bottom"/></xf>`
+
+  const m = stylesXml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)
+  if (!m) return -1
+  const inner = m[1]!
+  const existingOffset = inner.indexOf(headerXf)
+  if (existingOffset >= 0) {
+    return (inner.slice(0, existingOffset).match(/<xf\b/g) ?? []).length
+  }
+
+  const { xml: appended, indices } = appendCellXfs(stylesXml, [headerXf])
+  zOut.file(path, appended)
+  return indices[0] ?? -1
+}
+
+/**
+ * Restore `input_data` (gold's sheet 8). This sheet is a static
+ * lookup table backing data-validation dropdowns on the per-WG /
+ * per-Fleet sheets — the app never writes to it.
+ *
+ * The drift on `input_data` is the most extreme of any sheet (100%
+ * of cells reference the wrong cellXf row): ExcelJS collapses gold's
+ * 93-entry `cellXfs` table and remaps every cell's `s=` index, so
+ * after the styles.xml swap in {@link restoreV091Styles} the new `s=`
+ * indices land on completely unrelated cellXf rows. Empirically the
+ * remap puts most cells on a dark-green table-style cellXf, which is
+ * why the exported sheet shows up as a wall of green.
+ *
+ * Fix:
+ *   - Replace `xl/worksheets/sheet8.xml` with gold's verbatim copy.
+ *     Every gold cell carries the gold `s=` index, which now
+ *     resolves correctly against the restored `xl/styles.xml`.
+ *
+ *   - Convert every `t="s"` cell to `t="inlineStr"` against the
+ *     gold `sharedStrings.xml` so the sheet has no shared-string
+ *     dependency on the (post-ExcelJS-rewritten) export
+ *     `sharedStrings.xml`.
+ *
+ *   - **Beyond gold**: gold ships A1:E1 with the plain
+ *     no-fill / non-bold `s="19"` cellXf, leaving the first five
+ *     column titles visually distinct from the F1:K1 grey-fill
+ *     headers. Override A1:K1 to all use a single bold black-on-
+ *     grey-#EFEFEF header style (built by
+ *     {@link ensureInputDataHeaderCellXf}) so all 11 column titles
+ *     read uniformly as headers — matching the customer-facing
+ *     reference look.
+ *
+ *   - No table parts, no perimeter borders, no white-text overrides.
+ *
+ * No-op when either workbook is missing this sheet.
+ */
+async function restoreInputDataSheet(zIn: JSZip, zOut: JSZip): Promise<void> {
+  const inMap = await buildSheetNamePathMap(zIn)
+  const outMap = await buildSheetNamePathMap(zOut)
+  const inPath = inMap.get(SHEET_INPUT_DATA)
+  const outPath = outMap.get(SHEET_INPUT_DATA)
+  if (!inPath || !outPath) {
+    return
+  }
+  const goldSheetXml = await zIn.file(inPath)?.async('string')
+  if (!goldSheetXml) {
+    return
+  }
+  const goldSharedStringsXml =
+    (await zIn.file('xl/sharedStrings.xml')?.async('string')) ?? ''
+  const goldSharedStrings = parseSharedStrings(goldSharedStringsXml)
+
+  // Empty overlay — overlayCellsInSheet still walks every <c> element
+  // and converts t="s" → t="inlineStr" using gold's sharedStrings,
+  // which is what we need.
+  let patched = overlayCellsInSheet(goldSheetXml, goldSharedStrings, new Map())
+
+  // Force every column title (A1:K1) onto a uniform bold-grey
+  // header style. Gold ships A1:E1 plain — the customer reference
+  // wants all 11 cells styled like a single header band.
+  const headerS = await ensureInputDataHeaderCellXf(zOut)
+  if (headerS >= 0) {
+    const headerAddrs = new Set(INPUT_DATA_HEADER_COLS.map((c) => `${c}1`))
+    const cellRegex = /<c\s+([^>]*?)(\/>|>[\s\S]*?<\/c>)/g
+    patched = patched.replace(cellRegex, (full, attrs: string) => {
+      const addrRaw = attr(attrs, 'r')
+      if (!addrRaw || !headerAddrs.has(addrRaw)) return full
+      const rewrittenAttrs = /\bs="\d+"/.test(attrs)
+        ? attrs.replace(/\bs="\d+"/, `s="${headerS}"`)
+        : `${attrs.replace(/\s*$/, '')} s="${headerS}"`
+      return full.replace(attrs, rewrittenAttrs)
+    })
+  }
+
+  zOut.file(outPath, patched)
+}
+
 // ─── Orchestrator ──────────────────────────────────────────────────────────
 
 /**
@@ -1128,4 +1955,8 @@ export async function restoreSheetsFromGold(
 ): Promise<void> {
   await patchHeaderRowFontWhite(zOut)
   await restorePsUseCaseWorksheetSheet(zIn, zOut, plan)
+  await restoreOverviewSheet(zIn, zOut, plan, 'stream', STREAM_OVERVIEW_SPEC)
+  await restoreOverviewSheet(zIn, zOut, plan, 'edge', EDGE_OVERVIEW_SPEC)
+  await restoreInputDataSheet(zIn, zOut)
+  await restorePerWgSheets(zIn, zOut, plan)
 }

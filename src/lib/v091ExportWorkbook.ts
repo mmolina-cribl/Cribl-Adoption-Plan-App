@@ -8,10 +8,10 @@
  *                                    static labels / banners / dropdown
  *                                    chrome preserved verbatim (PR C)
  *   3. Stream Overview             — regenerated each save (plain-text rollup)
- *   4. wgdefault                   — Stream WG scaffold #1
- *   5. wgdefaultHybrid             — Stream WG scaffold #2
+ *   4. wg-default                  — Stream WG scaffold #1
+ *   5. wg-defaultHybrid            — Stream WG scaffold #2
  *   6. Edge Overview               — regenerated each save (plain-text rollup)
- *   7. fldefault_fleet             — Edge fleet scaffold #1
+ *   7. fl-default                  — Edge fleet scaffold #1
  *   8. input_data                  — static, preserved verbatim
  *
  * A user's plan can have arbitrarily many Stream worker groups and Edge
@@ -22,8 +22,8 @@
  * lose data validation and conditional formatting on the clones.
  *
  * Pipeline:
- *   1. {@link expandShellScaffolds}  — JSZip-level clone of `wg*` /
- *      `fl*_fleet` sheets so the shell has at least one scaffold per
+ *   1. {@link expandShellScaffolds}  — JSZip-level clone of `wg-*` /
+ *      `fl-*` sheets so the shell has at least one scaffold per
  *      planned WG / fleet. Comments / drawings / vmlDrawings are shared
  *      between clones (they're cosmetic validation hints — same hint
  *      applies to every per-WG sheet).
@@ -52,7 +52,6 @@ import {
   SHEET_INSTRUCTIONS,
   SHEET_STREAM_OVERVIEW_V091,
   V091_FLEET_SHEET_PREFIX,
-  V091_FLEET_SHEET_SUFFIX,
   V091_OVERVIEW_TABLE1_FIRST_DATA_ROW,
   V091_OVERVIEW_TABLE1_LAST_DATA_ROW,
   V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
@@ -134,10 +133,7 @@ export async function bufferIsV091Shell(buffer: ArrayBuffer | Uint8Array): Promi
       if (!name) {
         continue
       }
-      if (name.startsWith(V091_WG_SHEET_PREFIX) && !name.endsWith(V091_FLEET_SHEET_SUFFIX)) {
-        return true
-      }
-      if (name.startsWith(V091_FLEET_SHEET_PREFIX) && name.endsWith(V091_FLEET_SHEET_SUFFIX)) {
+      if (name.startsWith(V091_WG_SHEET_PREFIX) || name.startsWith(V091_FLEET_SHEET_PREFIX)) {
         return true
       }
     }
@@ -159,15 +155,24 @@ function nextRId(wbRelsXml: string): number {
 
 /**
  * Unique placeholder name for a clone before ExcelJS renames it. Names
- * intentionally use the `wg` / `fl…_fleet` prefix/suffix so the Phase 2
+ * intentionally start with the `wg-` / `fl-` prefix so the Phase 2
  * scaffold detector ({@link isStreamScaffoldName} /
  * {@link isEdgeScaffoldName}) matches them — they're indistinguishable
  * from real scaffolds until {@link assignKindSheets} renames each one.
  */
 function placeholderCloneName(kind: WorkerGroupKind, n: number): string {
   return kind === 'edge'
-    ? `${V091_FLEET_SHEET_PREFIX}_v091Clone${n}${V091_FLEET_SHEET_SUFFIX}`
+    ? `${V091_FLEET_SHEET_PREFIX}_v091Clone${n}`
     : `${V091_WG_SHEET_PREFIX}_v091Clone${n}`
+}
+
+/**
+ * Disjoint-prefix check for "is this sheet a scaffold of the given
+ * kind?". Stream uses `wg-`, Edge uses `fl-`. Since the prefixes don't
+ * overlap, prefix-only matching is unambiguous — no suffix check needed.
+ */
+function isScaffoldOfKind(name: string, kind: WorkerGroupKind): boolean {
+  return name.startsWith(kind === 'edge' ? V091_FLEET_SHEET_PREFIX : V091_WG_SHEET_PREFIX)
 }
 
 function findFirstScaffoldOfKind(
@@ -175,17 +180,8 @@ function findFirstScaffoldOfKind(
   kind: WorkerGroupKind,
 ): SheetEntry | null {
   for (const e of entries) {
-    if (kind === 'edge') {
-      if (e.name.startsWith(V091_FLEET_SHEET_PREFIX) && e.name.endsWith(V091_FLEET_SHEET_SUFFIX)) {
-        return e
-      }
-    } else {
-      if (
-        e.name.startsWith(V091_WG_SHEET_PREFIX) &&
-        !(e.name.startsWith(V091_FLEET_SHEET_PREFIX) && e.name.endsWith(V091_FLEET_SHEET_SUFFIX))
-      ) {
-        return e
-      }
+    if (isScaffoldOfKind(e.name, kind)) {
+      return e
     }
   }
   return null
@@ -194,17 +190,8 @@ function findFirstScaffoldOfKind(
 function countScaffoldsOfKind(entries: readonly SheetEntry[], kind: WorkerGroupKind): number {
   let n = 0
   for (const e of entries) {
-    if (kind === 'edge') {
-      if (e.name.startsWith(V091_FLEET_SHEET_PREFIX) && e.name.endsWith(V091_FLEET_SHEET_SUFFIX)) {
-        n += 1
-      }
-    } else {
-      if (
-        e.name.startsWith(V091_WG_SHEET_PREFIX) &&
-        !(e.name.startsWith(V091_FLEET_SHEET_PREFIX) && e.name.endsWith(V091_FLEET_SHEET_SUFFIX))
-      ) {
-        n += 1
-      }
+    if (isScaffoldOfKind(e.name, kind)) {
+      n += 1
     }
   }
   return n
@@ -212,7 +199,7 @@ function countScaffoldsOfKind(entries: readonly SheetEntry[], kind: WorkerGroupK
 
 /**
  * Clone scaffold worksheets in place inside `z` so the workbook has at
- * least `wantStream` `wg*` sheets and `wantEdge` `fl*_fleet` sheets.
+ * least `wantStream` `wg-*` sheets and `wantEdge` `fl-*` sheets.
  *
  * Each clone shares its source's per-sheet rels (comments / drawing /
  * vmlDrawing). That means clones share the same comment / validation-hint
@@ -243,7 +230,7 @@ async function cloneScaffolds(
   }
   if (cloneEdge > 0 && edgeSrc == null) {
     throw new Error(
-      `Cannot export: shell has no Edge scaffold (a sheet named "${V091_FLEET_SHEET_PREFIX}<name>${V091_FLEET_SHEET_SUFFIX}") to clone.`,
+      `Cannot export: shell has no Edge scaffold (a sheet named "${V091_FLEET_SHEET_PREFIX}<name>") to clone.`,
     )
   }
 
@@ -259,6 +246,35 @@ async function cloneScaffolds(
   let nextSheetId =
     (entries.length ? Math.max(...entries.map((e) => e.sheetId)) : 0) + 1
   let nextRid = nextRId(wbRels)
+
+  /**
+   * Insert a `<sheet name="..." .../>` entry into `xl/workbook.xml`'s
+   * `<sheets>` list at a position that keeps the workbook tab order
+   * grouped by kind:
+   *
+   *   ...Stream Overview, wg-*, [stream clones inserted here],
+   *      Edge Overview, fl-*, [edge clones inserted here],
+   *      input_data
+   *
+   * Stream clones anchor on the `Edge Overview` sheet entry (insert
+   * immediately before it); Edge clones anchor on `input_data`. If
+   * either anchor is missing for any reason — defensive fallback for
+   * a hand-edited shell — the clone falls back to the original
+   * "before `</sheets>`" position so the export still completes.
+   */
+  const insertSheetEntry = (kind: WorkerGroupKind, sheetTag: string): void => {
+    const anchorName = kind === 'edge' ? SHEET_INPUT_DATA : SHEET_EDGE_OVERVIEW_V091
+    // Match the static anchor's full self-closing <sheet .../> tag so
+    // the inserted clone lands directly in front of it.
+    const anchorRe = new RegExp(
+      `<sheet\\b[^>]*\\bname="${anchorName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}"[^>]*/>`,
+    )
+    if (anchorRe.test(wbXml)) {
+      wbXml = wbXml.replace(anchorRe, `${sheetTag}$&`)
+      return
+    }
+    wbXml = wbXml.replace(/<\/sheets>/, `${sheetTag}</sheets>`)
+  }
 
   const cloneOne = async (
     kind: WorkerGroupKind,
@@ -286,9 +302,9 @@ async function cloneScaffolds(
       z.file(newRelsPath, relsXml)
     }
 
-    wbXml = wbXml.replace(
-      /(<\/sheets>)/,
-      `<sheet name="${newName}" sheetId="${newSheetId}" r:id="${newRid}"/>$1`,
+    insertSheetEntry(
+      kind,
+      `<sheet name="${newName}" sheetId="${newSheetId}" r:id="${newRid}"/>`,
     )
     wbRels = wbRels.replace(
       /(<\/Relationships>)/,
@@ -340,17 +356,11 @@ async function expandShellScaffolds(
 // ─── Phase 2: ExcelJS fill ───────────────────────────────────────────────────
 
 function isStreamScaffoldName(name: string): boolean {
-  if (!name.startsWith(V091_WG_SHEET_PREFIX)) {
-    return false
-  }
-  if (name.startsWith(V091_FLEET_SHEET_PREFIX) && name.endsWith(V091_FLEET_SHEET_SUFFIX)) {
-    return false
-  }
-  return true
+  return name.startsWith(V091_WG_SHEET_PREFIX)
 }
 
 function isEdgeScaffoldName(name: string): boolean {
-  return name.startsWith(V091_FLEET_SHEET_PREFIX) && name.endsWith(V091_FLEET_SHEET_SUFFIX)
+  return name.startsWith(V091_FLEET_SHEET_PREFIX)
 }
 
 function readPerWgHeaderRow(ws: ExcelJS.Worksheet): string[] {
@@ -758,18 +768,16 @@ const buildSheetNamePathMap = buildSheetNamePathMapShared
 
 /**
  * Extract every `<conditionalFormatting>` block from one canonical
- * per-WG sheet of the gold shell (sheet4 = `wgdefault` is the first
- * Stream scaffold; sheet7 = `fldefault_fleet` is the first Edge
- * scaffold). All per-WG / per-Fleet sheets in the gold share an
- * identical formatting set, so any one of them works as the source. We
- * pick the first one we find by sheet name to be robust against shell
- * variations.
+ * per-WG sheet of the gold shell (sheet4 = `wg-default` is the first
+ * Stream scaffold; sheet7 = `fl-default` is the first Edge scaffold).
+ * All per-WG / per-Fleet sheets in the gold share an identical
+ * formatting set, so any one of them works as the source. We pick the
+ * first one we find by sheet name to be robust against shell variations.
  */
 async function readGoldPerWgConditionalFormatting(zIn: JSZip): Promise<string> {
   const map = await buildSheetNamePathMap(zIn)
   for (const [name, path] of map) {
-    const cls = name.startsWith(V091_WG_SHEET_PREFIX) && !name.endsWith(V091_FLEET_SHEET_SUFFIX)
-    if (!cls) {
+    if (!name.startsWith(V091_WG_SHEET_PREFIX)) {
       continue
     }
     const xml = (await zIn.file(path)?.async('string')) ?? ''
@@ -798,8 +806,8 @@ async function restoreGoldPerWgConditionalFormatting(zIn: JSZip, zOut: JSZip): P
   }
   const outMap = await buildSheetNamePathMap(zOut)
   for (const [name, path] of outMap) {
-    const isStream = name.startsWith(V091_WG_SHEET_PREFIX) && !name.endsWith(V091_FLEET_SHEET_SUFFIX)
-    const isEdge = name.startsWith(V091_FLEET_SHEET_PREFIX) && name.endsWith(V091_FLEET_SHEET_SUFFIX)
+    const isStream = name.startsWith(V091_WG_SHEET_PREFIX)
+    const isEdge = name.startsWith(V091_FLEET_SHEET_PREFIX)
     if (!isStream && !isEdge) {
       continue
     }

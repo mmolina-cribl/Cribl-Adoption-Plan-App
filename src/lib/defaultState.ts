@@ -53,6 +53,7 @@ function defaultSourceRow(_sourceIndex0: number, workerGroupId: string): SourceS
     strategic: '',
     onboardingEffort: '',
     politics: '',
+    additionalNotes: '',
   }
 }
 

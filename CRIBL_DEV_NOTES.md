@@ -250,15 +250,19 @@ periodically. v0.9.1 (April 2026) is a structural break from v0.8.6:
 
 | Concern | v0.8.6 | v0.9.1 |
 |---|---|---|
-| Per-source data | one `Source summary` sheet for the whole plan | one sheet per worker group / fleet (`wg<name>` for Stream, `fl<name>_fleet` for Edge) |
-| Topology overview | one `Copy of Sources and WGs` sheet | inferred top-of-file `Stream Overview` (rolled up from `wg:*` sheets) + `Edge Overview` (rolled up from `fl:*` sheets) |
+| Per-source data | one `Source summary` sheet for the whole plan | one sheet per worker group / fleet (`wg-<name>` for Stream, `fl-<name>` for Edge — see PR D for the rename rationale; PR B initially shipped the `wg<name>` / `fl<name>_fleet` form) |
+| Topology overview | one `Copy of Sources and WGs` sheet | inferred top-of-file `Stream Overview` (rolled up from `wg-*` sheets) + `Edge Overview` (rolled up from `fl-*` sheets) |
 | Activations | not modeled | new `PS Use Case Worksheet` with tier (Silver / Gold / Platinum), base scope, and use-case board |
 | Region semantics | `Region(s)` (cloud-region biased) | `Physical location(s)` (Edge fleets can live on hosts, not regions) |
 | Migration source field | only present on the topology sheet | promoted to the per-WG sheet as `Current Collection` |
 | Per-source columns dropped | n/a | only `Display name` and `Additional notes`. The "value lever" fields (Operational / Risk Reduction / Strategic / Onboarding Effort / Politics) **stay** on every per-WG / per-Fleet sheet — an early read of the gold based on a stale `SAMPLE` sheet incorrectly suggested they were dropped. |
 
-The app's response is a major version bump (`v2.0.0`) split into three
-sequential PRs so each lands as a reviewable, releasable slice:
+The app's response is a major version bump (`v2.0.0`), originally
+planned as three sequential PRs so each landed as a reviewable,
+releasable slice. A fourth (PR D) followed during release polish to
+restore export-time style fidelity, rename the per-WG sheets, and
+add the standalone HTML build target — all backwards-compatible
+additions, all merged before the `v2.0.0` GitHub release:
 
 ### PR A — `feat/v2.0-rc.1-data-model` (this PR)
 
@@ -678,8 +682,283 @@ unconditionally regardless of how many WGs / Fleets the plan has.
   banner / header / dropdown / conditional-formatting block verbatim.
   Verified end-to-end with a 16-spot-check + 4-shape-assertion smoke.
 
+### PR D — `feat/v2.0-export-style-fidelity`
+
+PR D is a grab-bag of work that started as one focused thing
+(restoring style fidelity in the multi-sheet `.xlsx` exporter so
+downloaded workbooks were visually indistinguishable from the gold
+template) and grew during release polish. None of it is a breaking
+change relative to PRs A–C, so all of it ships under the same
+`v2.0.0` tag rather than as a separate point release. Four loose
+groupings:
+
+#### Style-fidelity restoration
+
+The PR B exporter wrote correct values but ExcelJS would silently
+drop styles on the per-WG sheets — green banner backgrounds turned
+white, bold/merged headers lost their formatting, and conditional-
+formatting blocks dropped. PR D adds a JSZip-based post-pass in
+[`src/lib/v091ExportSheetRestore.ts`](./src/lib/v091ExportSheetRestore.ts)
+that opens the freshly-written workbook, walks each sheet's OOXML,
+and restores styling from the gold template wherever ExcelJS dropped
+it. Per-WG sheets, the Stream / Edge overviews, the PS Use Case
+Worksheet, and `input_data` each have a tailored restore path —
+they share scaffolding (`restoreOverviewSheet`, etc.) but the per-
+sheet logic is explicit because each gold sheet has a different
+"style of style" (banner-and-grid vs. card-grid vs. picklist).
+
+A subtle two-pass collision in `restorePerWgSheets` was uncovered
+during smoke testing. Pass 1 populates each plan WG's per-WG sheet;
+pass 2 restores any unconsumed gold scaffold (`wg-default`,
+`wg-defaultHybrid`, `fl-default`) with empty bodies so the output
+workbook always has usable empty templates alongside the user's
+real WGs. Pass 2's "wasn't consumed" check was based on whether the
+scaffold's name appeared in `plan.workerGroups` — but a plan WG
+named `default` resolves to sheet name `wg-default`, which is also
+the name of the first gold scaffold. So pass 2 would happily
+overwrite the populated `wg-default` sheet with an empty overlay
+and silently lose every source the user had assigned to it. Fix:
+pass 1 records every output sheet name it writes into a
+`Set<string>` (`restoredOutNames`), and pass 2 skips any scaffold
+whose target name is in that set. End-to-end smoke (`overview-
+export-smoke.ts`, since deleted) created a plan with two Stream WGs
+(`default`, `apex`) plus an Edge fleet (`rover`), each with sources,
+exported, re-imported, and asserted source counts and
+`additionalNotes` values survived round-trip.
+
+#### Sheet rename: `wg-<name>` / `fl-<name>`
+
+The PR B naming convention (`wg<name>` for Stream, `fl<name>_fleet`
+for Edge) had two flaws that surfaced in field use:
+
+1. **The `_fleet` suffix wasn't intentional.** It came from a literal
+   `default_fleet` worker group name in an early gold template; the
+   exporter accidentally treated it as part of the sheet-name format
+   rather than the WG's name. So a fleet called `rover` would export
+   as `flrover_fleet` instead of just `flrover`.
+2. **No visible separator between prefix and name.** A WG named
+   `default` and a hypothetical WG named `wgdefault` both produced
+   sheet names that started with `wgdefault…` and were impossible to
+   distinguish at a glance.
+
+PR D introduces a dash separator and drops the suffix:
+`wg-<name>` / `fl-<name>`. Tradeoffs:
+
+- **Excel forbids `:` in sheet names.** The user's first proposal
+  (`wg:default`) is impossible. Dashes are valid and visually similar.
+- **Dashed sheet names need single-quoting in formulas.** `wg-default`
+  appearing in `definedName` for autofilter ranges had to become
+  `'wg-default'!$A$2:$AE$21` — the OOXML spec rejects bare hyphenated
+  references. The two gold scaffolds
+  (`public/adoption-plan-empty.xlsx` and the user's local copy) were
+  patched in place via a one-shot Python script
+  (`zipfile` + `xml.etree.ElementTree`); the runtime exporter doesn't
+  emit `definedName` formulas, so no code change was needed there.
+- **The two namespaces are now disjoint.** `wg-` only ever matches
+  Stream, `fl-` only ever matches Edge — the
+  `startsWith(prefix) && !endsWith(suffix)` checks in
+  [`exportWorkbook.ts`](./src/lib/exportWorkbook.ts) collapsed to
+  prefix-only checks, simplifying the scaffold-detection logic.
+
+**Back-compat for import.** Workbooks exported by older copies of
+the app during PR B's life (legacy `wg<name>` and `fl<name>_fleet`)
+still seed cleanly. The classifier in
+[`src/lib/v091SheetNames.ts#classifyV091SheetName`](./src/lib/v091SheetNames.ts)
+matches in this order:
+
+1. New Edge form `fl-<name>` → kind: edge, displayName: name
+2. Legacy Edge form `fl<name>_fleet` → kind: edge, displayName: name
+   (the `_fleet` suffix is **explicitly stripped** so a legacy
+   `flrover_fleet` imports as a fleet named `rover`, matching user
+   intent)
+3. New Stream form `wg-<name>` → kind: stream, displayName: name
+4. Legacy Stream form `wg<name>` → kind: stream, displayName: name
+   (with a guard against bare prefixes that would resolve to an
+   empty display name)
+
+The legacy `_fleet` constant lives on as
+`LEGACY_V091_FLEET_SHEET_SUFFIX` in
+[`planWorkbookLayout.ts`](./src/lib/planWorkbookLayout.ts) — used
+**only** by the import classifier. The exporter no longer emits any
+suffix.
+
+#### Cloned scaffolds inserted in grouped tab order
+
+When a plan has more WGs than the gold's two Stream scaffolds (or
+more fleets than the one Edge scaffold), the exporter clones a
+scaffold to make room for the extras. Pre-PR-D, clones were appended
+at the end of `xl/workbook.xml#sheets`, which produced an unsorted
+tab strip after a few extra WGs/fleets:
+
+```
+INSTRUCTIONS · PS Use Case Worksheet · Stream Overview ·
+wg-default · wg-defaultHybrid · Edge Overview · fl-default ·
+input_data · wg-apex · wg-edge-1 · fl-rover     ← clones, end of strip
+```
+
+`insertSheetEntry` in
+[`exportWorkbook.ts`](./src/lib/exportWorkbook.ts) now inserts each
+clone strategically:
+
+- `wg-*` clones go immediately before the `Edge Overview` entry, so
+  every Stream sheet is contiguous.
+- `fl-*` clones go immediately before the `input_data` entry, so
+  every Edge sheet is contiguous.
+- A fallback path appends before `</sheets>` if either anchor is
+  missing — defensive against a future gold without those sheets.
+
+Result:
+
+```
+INSTRUCTIONS · PS Use Case Worksheet · Stream Overview ·
+wg-default · wg-defaultHybrid · wg-apex · wg-edge-1 ·
+Edge Overview · fl-default · fl-rover · input_data
+```
+
+#### `Additional notes` (column AE) reinstated
+
+The early read of the v0.9.1 gold (PR A) marked `displayName` and
+`additionalNotes` as dropped from the per-WG sheets. Re-reading the
+gold during PR D confirmed `Additional notes` is in fact still
+present — column AE — but had been silently dropped from the
+importer/exporter along with `displayName`. PR D reinstates it
+across the round-trip:
+
+- [`SourceSummaryRow`](./src/types/planTypes.ts) gains
+  `additionalNotes?: string`.
+- The importer maps the `Additional notes` header back into the
+  field; `normalizePlan` defaults missing values to `''` so legacy
+  KV blobs don't crash.
+- The exporter writes the field back into AE, with the same banner
+  + grey-fill column treatment as the surrounding "free-text"
+  columns.
+- The source-detail panel and the source-add wizard each get a new
+  `AdditionalNotesBlock` so the field is editable in the UI, not
+  just on round-trip.
+
+#### A second build target — single self-contained HTML
+
+The v2.0 deliverable is a `.tgz` for the Cribl App Platform; the
+on-prem audience that runs Cribl outside Cribl Cloud (and therefore
+without the App Platform) had no way to use the tool. PR D adds a
+second build target — `npm run build:standalone` — that produces
+`dist-standalone/cribl-adoption-plan.html` as a single self-contained
+file. The customer downloads it, double-clicks it, the app works.
+
+The standalone build is the same React tree, the same components, the
+same I/O code; the difference is bundling:
+
+- [`vite.standalone.config.ts`](./vite.standalone.config.ts) wires
+  [`vite-plugin-singlefile`](https://github.com/richardtallent/vite-plugin-singlefile)
+  to fold every JS chunk and stylesheet into one HTML payload, and a
+  small custom plugin (`inlineGoldTemplatePlugin`) registers the
+  virtual module `virtual:embedded-gold-template` whose default export
+  is `public/adoption-plan-empty.xlsx` re-encoded as a base64 string
+  at build time. A second small plugin
+  (`renameStandaloneOutputPlugin`) renames the produced
+  `index.html` → `cribl-adoption-plan.html` in `closeBundle` so the
+  artifact has a customer-facing filename, and a third
+  (`stripFaviconLinkPlugin`) strips the `<link rel="icon">` from the
+  HTML since the standalone build sets `publicDir: false` and would
+  otherwise leave a 404 in the console.
+- The primary [`vite.config.ts`](./vite.config.ts) registers a no-op
+  stub for the same virtual module so the dynamic
+  `await import('virtual:embedded-gold-template')` in
+  [`adoptionPlanTemplateExport.ts`](./src/lib/adoptionPlanTemplateExport.ts)
+  resolves cleanly in the App-Platform build too. The stub exports
+  `hasEmbeddedGoldTemplate: false`, which the runtime resolver
+  branches on; the App build never reaches the decode path because
+  `fetch('/adoption-plan-empty.xlsx')` always succeeds first. ~50
+  bytes of overhead in the App build, zero in the standalone bundle.
+- `assetsInlineLimit` is bumped to 96 KB in the standalone config so
+  every src-imported asset (the Cribl AI mark, etc.) gets folded into
+  the bundle as a base64 data URL. As part of this, the one source-
+  level reference to a `public/` asset
+  (`<img src="/cribl-ai-icon.png">` in `CriblLogos.tsx`) was migrated
+  to a Vite import (`import url from '../../assets/cribl-ai-icon.png'`)
+  so both build targets produce a working image — the App build emits
+  a fingerprinted `dist/assets/cribl-ai-icon-XXXX.png`, the standalone
+  build inlines it. `public/cribl-ai-icon.png` was relocated to
+  `src/assets/cribl-ai-icon.png` to make this work.
+
+The result is a 2.2 MB / 720 KB-gzipped HTML file that opens
+correctly via `file://` in every modern browser, with no Node, no
+`npm`, no IT-side allowlist, and no extra files to ship alongside.
+End-to-end smoke confirmed:
+
+```
+$ python3 -c "..." dist-standalone/cribl-adoption-plan.html
+decoded xlsx size: 162913 bytes (expected 162913)
+sheets in embedded gold:
+  ['INSTRUCTIONS', 'PS Use Case Worksheet', 'Stream Overview',
+   'wg-default', 'wg-defaultHybrid', 'Edge Overview',
+   'fl-default', 'input_data']
+```
+
+**Persistence under `file://`.** The KV-fallback path
+([`src/lib/kvStore.ts`](./src/lib/kvStore.ts), see "Local-dev fallback"
+below) is the same one the dev server already used, so persistence
+"just works" — but `localStorage` is path-scoped under `file://`,
+which is a non-obvious gotcha worth documenting in the
+[README](./README.md#standalone-deployment): if the user moves the
+`.html` to a different directory, their saved plan does not follow.
+The `.xlsx` Export is the canonical save path and always has been;
+`localStorage` is session continuity, not durable storage. We
+considered IndexedDB, an `import()`-based file picker, and an
+auto-suggested re-export-on-close prompt — all add UX complexity for
+~no real-world benefit since every workflow already produces an
+Excel file at the natural save points. Keep it boring.
+
+**Repo structure.** Both build targets live in the same repo, share
+one `package.json` and one `package-lock.json`, and read the same
+`version` field. Reasons:
+
+- Every src/ change has to land in both targets at once anyway.
+  Keeping them in one repo guarantees they never drift.
+- The version string is the source of truth in `package.json`. The
+  App-Platform `.tgz` reads it via `scripts/package.mjs`; the
+  standalone HTML carries it implicitly via the bundled JS. One bump,
+  two artifacts.
+- `scripts/package.mjs` packages **only** `dist/` into the `.tgz`, so
+  `dist-standalone/` is naturally excluded from the App-Platform
+  release and you can't accidentally ship the wrong artifact.
+
+#### UI polish
+
+Three small but visible changes that don't fit a "feature" label:
+
+1. **Inline pencil edit on the Plan hero.** The "Adoption plan" hero
+   on the Plan dashboard now defaults to "Cribl" in muted grey italic
+   with a pencil icon next to it. Click to edit; the text turns
+   black once the user enters their own customer name. Implemented
+   as a new `HeroCustomerName` subcomponent in
+   [`PlanDataOverview.tsx`](./src/components/PlanDataOverview.tsx) that
+   mirrors the existing `HeaderCustomerName` UX (pencil → input →
+   commit on blur/Enter/Escape) but with hero-scale styling. The
+   underlying state is the same `plan.customerName`, so editing in
+   either place updates both. The hero's card border / shadow /
+   background were also removed (it now "floats"), while the
+   Activation callout below it keeps the card styling for visual
+   prominence.
+2. **Dismissible Activation callout.** The "Plan in shape? Activate
+   it." card on the Plan dashboard now has a small × in its top-right
+   corner. Dismissal is persisted via a new
+   [`activationCalloutPreference.ts`](./src/lib/activationCalloutPreference.ts)
+   (KV under the iframe, `localStorage` outside it — same fallback as
+   the rest of the app), exposed through the
+   `useActivationCalloutDismissed` hook. A reactivation toggle was
+   added to the Settings view ("Show 'Plan in shape? Activate it.'
+   nudge") so a customer who dismisses by accident can bring it back.
+3. **Plan is the default landing page.** Activation had briefly been
+   the default during PR C polish; user feedback was that Plan should
+   remain the default. The `useState<MainView>` initial value in
+   [`App.tsx`](./src/App.tsx) is `'overview'`.
+
 **Tag history.** `v2.0.0-rc.1` (PR A merge), `v2.0.0-rc.2` (PR B
-merge), `v2.0.0` (PR C merge + GitHub release).
+merge), `v2.0.0` (PRs C + D merged together, GitHub release). PR D
+was originally tracked as a hypothetical `v2.1.x` while in flight,
+but since neither rc tag was ever pushed to GitHub the entire v2.0
+arc lands as a single public release.
 
 ---
 

@@ -253,9 +253,11 @@ function parseSourceSummarySheet(
       strategic: strAtMap(row, col, 'Strategic'),
       onboardingEffort: strAtMap(row, col, 'Onboarding Effort'),
       politics: strAtMap(row, col, 'Politics'),
-      // v0.9.1 only dropped two per-source columns from the gold template:
-      // Display name and Additional notes. Both are read and discarded here
-      // so v0.8.6 workbooks still import without losing the rest of the row.
+      additionalNotes: strAtMap(row, col, 'Additional notes'),
+      // The v0.8.6 schema's `Display name` column is the only one we
+      // intentionally drop on import — every other gold column round-trips
+      // through `SourceSummaryRow`. v0.9.1 reinstated `Additional notes`
+      // (read above) after it was briefly dropped in v0.9.0.
     })
   }
   return out
@@ -339,8 +341,9 @@ function parseCopySourcesWg(
     wgs.push({
       id: newId(),
       // v0.8.6 topology only has worker groups; PR B's multi-sheet importer
-      // sets `kind: 'edge'` for entries that come from `fl<name>_fleet`
-      // sheets. Until then every imported row is a Stream worker group.
+      // sets `kind: 'edge'` for entries that come from `fl-<name>` sheets
+      // (or legacy `fl<name>_fleet`). Until then every imported row is a
+      // Stream worker group.
       kind: 'stream',
       wg: wgName,
       ingestGbd: cellToNumStr(cellAt(row, colW('Ingest (GB/day)'))),
@@ -412,7 +415,8 @@ function detectSchemaVersion(sheetNames: string[]): ImportSchemaVersion {
  * table at row 16 onward). Keys are the lowercase, trimmed display name in
  * column A; values are the raw capacity strings ready to drop straight onto a
  * matching {@link WorkerGroupRow}. Display names are the post-prefix /
- * post-suffix body — e.g. `wgdefault` produces key `default`.
+ * post-suffix body — e.g. `wg-default` (or legacy `wgdefault`) produces
+ * key `default`.
  */
 type OverviewSpecCapacity = {
   ingestGbd: string
@@ -523,10 +527,13 @@ function applyOverviewCapacity(
 /**
  * v0.9.1 multi-sheet importer.
  *
- * Per-WG (`wg<name>`) and per-Fleet (`fl<name>_fleet`) sheets are the source
- * of truth for both worker-group identity and per-source data. Each sheet is
- * parsed with the same {@link parseSourceSummarySheet} the v0.8.6 path uses
- * (the column titles overlap intentionally) — the only thing the v0.9.1
+ * Per-WG (`wg-<name>`) and per-Fleet (`fl-<name>`) sheets are the source
+ * of truth for both worker-group identity and per-source data. Pre-v2.0.0
+ * legacy workbooks used `wg<name>` / `fl<name>_fleet`; the classifier in
+ * {@link classifyV091SheetName} accepts both forms so older customer
+ * exports still round-trip cleanly. Each sheet is parsed with the same
+ * {@link parseSourceSummarySheet} the v0.8.6 path uses (the column
+ * titles overlap intentionally) — the only thing the v0.9.1
  * dispatcher adds is associating every parsed source row with the right
  * `workerGroupId` from the start.
  *

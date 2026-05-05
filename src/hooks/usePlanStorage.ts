@@ -44,6 +44,11 @@ function normalizePlan(raw: unknown): PlanState {
         physicalLocations:
           (row.physicalLocations ?? row.regions ?? '').toString(),
         currentCollection: row.currentCollection ?? '',
+        // v0.9.1 reinstated `Additional notes` (column AE) after v0.9.0
+        // briefly dropped it. KV blobs saved against the v0.9.0 shape
+        // won't have this field — backfill `''` so a hydrate doesn't
+        // produce `undefined` cells in source forms or exports.
+        additionalNotes: row.additionalNotes ?? '',
       } as SourceSummaryRow
     }),
     workerGroups: (p.workerGroups ?? []).map((w) => {

@@ -45,12 +45,25 @@ export type SourceSummaryRow = {
   onboardingEffort: string
   politics: string
   /**
-   * v0.9.1 only dropped two per-source columns from the v0.8.6 schema:
-   * `Display name` and `Additional notes`. The "value lever" fields
-   * (Operational / Risk Reduction / Strategic / Onboarding Effort / Politics)
-   * stay on every per-WG and per-Fleet sheet and are still tracked here. The
-   * `PS Use Case Worksheet` (PR C) is a separate account-level tracker, not
-   * a replacement for these per-source fields.
+   * v0.9.1: per-source free-text notes. Lives in column AE on every
+   * `wg-<name>` / `fl-<name>` sheet (the only column that sits
+   * outside any of the row-1 banner groups), and round-trips through
+   * `Additional notes` on the import / export header maps.
+   *
+   * v0.9.0 briefly dropped this column from the gold; v0.9.1
+   * reinstated it because customers used it on every onboarding for
+   * out-of-band annotations (vendor contacts, ticket links, custom
+   * compliance notes) that don't fit any of the more structured
+   * fields. The KV migration in `migrateLoadedPlan` backfills `''`
+   * for plans saved against the v0.9.0 shape.
+   */
+  additionalNotes: string
+  /**
+   * The per-source `Display name` column the v0.8.6 schema carried
+   * was the one column v0.9.1 actually dropped — every other gold
+   * field round-trips through this row. The `PS Use Case Worksheet`
+   * (PR C) is a separate account-level tracker, not a replacement
+   * for these per-source fields.
    */
 }
 
@@ -76,9 +89,9 @@ export type WorkerGroupRow = {
   id: string
   /**
    * v0.9.1: a row in `workerGroups` is either a Cribl Stream worker group
-   * (`'stream'`, exported as a `wg<name>` sheet, surfaced under "Worker
+   * (`'stream'`, exported as a `wg-<name>` sheet, surfaced under "Worker
    * Groups" in the left nav) or a Cribl Edge fleet (`'edge'`, exported as
-   * a `fl<name>_fleet` sheet, surfaced under "Fleets"). Sources still
+   * a `fl-<name>` sheet, surfaced under "Fleets"). Sources still
    * point at one of these via `workerGroupId` regardless of kind. Plans
    * imported from a v0.8.6 workbook (or hydrated from a v1.x KV blob)
    * default every entry to `'stream'`.

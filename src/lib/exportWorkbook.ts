@@ -54,12 +54,13 @@ function dataOptimizationPercentForExcel(s: string): number | string {
 /**
  * One data row; order must follow `SOURCE_HEADERS` (see planWorkbookLayout).
  *
- * v2.0 transitional shape: the v0.8.6 export path emits all 28 columns. Only
- * `Additional notes` (the last column) was actually dropped in v0.9.1, so we
- * write `''` for that slot and keep every other column populated from the
- * data model. PR B switches the export to the v0.9.1 multi-sheet emit (per-
- * WG / per-Fleet sub-sheets); until then this preserves the gold shell's
- * column borders, number formats, and theme references.
+ * v2.0 transitional shape: the v0.8.6 export path emits all 28 columns,
+ * including the trailing `Additional notes` column that round-trips through
+ * `SourceSummaryRow.additionalNotes`. PR B is the v0.9.1 multi-sheet emit
+ * (per-WG / per-Fleet sub-sheets); this path stays around to preserve the
+ * v0.8.6 gold shell's column borders, number formats, and theme references
+ * for any downstream tool that still consumes the legacy single-sheet
+ * shape.
  */
 function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | boolean | Date)[] {
   return [
@@ -90,7 +91,7 @@ function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | 
     s.strategic,
     s.onboardingEffort,
     s.politics,
-    '',
+    s.additionalNotes,
   ]
 }
 
@@ -98,12 +99,15 @@ function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | 
  * Map a Source summary column title (any layout in `ALL_SOURCE_IMPORT_HEADER_NAMES`)
  * to a cell value.
  *
- * Only two columns the v2.0 model deliberately doesn't carry — `Display name`
- * and `Additional notes` — return `''`. Every other column maps to a real
- * field. `Region(s)` (v0.8.6) and `Physical location(s)` (v0.9.1) both read
- * from `physicalLocations`. `Worker Group` / `Fleet` returns the WG/Fleet
- * name resolved from `workerGroupId` so the v0.9.1 per-WG / per-Fleet sheet
- * can populate the redundant column the gold template requires.
+ * Only `Display name` (v0.8.6 only) returns `''` — the v2.0 model doesn't
+ * carry it. Every other column maps to a real field. `Region(s)` (v0.8.6)
+ * and `Physical location(s)` (v0.9.1) both read from `physicalLocations`.
+ * `Worker Group` / `Fleet` returns the WG/Fleet name resolved from
+ * `workerGroupId` so the v0.9.1 per-WG / per-Fleet sheet can populate the
+ * redundant column the gold template requires. `Additional notes` (column
+ * AE on every v0.9.1 per-WG / per-Fleet sheet) returns the per-source
+ * `additionalNotes` field — re-introduced after the gold reinstated this
+ * column post-v0.9.0.
  */
 export function sourceSummaryValueForHeaderName(
   name: string,
@@ -180,7 +184,7 @@ export function sourceSummaryValueForHeaderName(
     case 'Politics':
       return s.politics
     case 'Additional notes':
-      return ''
+      return s.additionalNotes
     default:
       return undefined
   }

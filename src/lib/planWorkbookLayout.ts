@@ -3,7 +3,7 @@
 export const SHEET_INSTRUCTIONS = 'INSTRUCTIONS' as const
 /**
  * v0.8.6 single per-plan source sheet. Replaced by per-WG sheets in v0.9.1
- * (`wg<name>` for Stream, `fl<name>_fleet` for Edge). Kept as a constant so
+ * (`wg-<name>` for Stream, `fl-<name>` for Edge). Kept as a constant so
  * the v0.8.6 import path can still find it on legacy workbooks until PR B
  * (multi-sheet rewrite) lands.
  */
@@ -39,7 +39,7 @@ export const SOURCE_GROUP_LABELS: (string | null)[] = (() => {
  * (`Display name` was an optional 31-col extra that's been dropped, and
  * `Additional notes` is the one column the gold v0.9.1 actually removed).
  * PR B switches the export pipeline to the v0.9.1 multi-sheet layout
- * (`wg<name>` / `fl<name>_fleet`).
+ * (`wg-<name>` / `fl-<name>`).
  */
 export const SOURCE_HEADERS: string[] = [
   'Source',
@@ -157,28 +157,49 @@ export const COPY_SOURCES_WG_TEMPLATE_WG_DATA_ROW_SLOTS = 8
 //   1. `Stream Overview` — rolled-up sources + Stream worker-group capacity
 //      (hyperlinks to per-WG sheets in column A of the WG-spec table)
 //   2. `Edge Overview`   — same shape, scoped to Edge fleets
-//   3. one `wg<name>` sheet per Stream worker group (full per-source data)
-//   4. one `fl<name>_fleet` sheet per Edge fleet
+//   3. one `wg-<name>` sheet per Stream worker group (full per-source data)
+//   4. one `fl-<name>` sheet per Edge fleet
 //   5. `INSTRUCTIONS`, `PS Use Case Worksheet`, `input_data` — static
 //
-// Per-WG / per-Fleet sheets share the same 30-column row-2 header set; only
-// column D's title differs (`Worker Group` vs `Fleet`) and the prefix /
-// suffix on the sheet name. The header set is captured once below and the
-// kind-aware D-column title is patched at write time.
+// Per-WG / per-Fleet sheets share the same 31-column row-2 header set; only
+// column D's title differs (`Worker Group` vs `Fleet`) and the prefix on
+// the sheet name. The header set is captured once below and the kind-
+// aware D-column title is patched at write time.
 
-/** Stream-side overview sheet. Generated on export from every `wg*` sub-sheet. */
+/** Stream-side overview sheet. Generated on export from every `wg-*` sub-sheet. */
 export const SHEET_STREAM_OVERVIEW_V091 = 'Stream Overview' as const
-/** Edge-side overview sheet. Generated on export from every `fl*_fleet` sub-sheet. */
+/** Edge-side overview sheet. Generated on export from every `fl-*` sub-sheet. */
 export const SHEET_EDGE_OVERVIEW_V091 = 'Edge Overview' as const
 
 /**
- * v0.9.1 per-WG sheets are prefixed `wg`; per-Fleet sheets are prefixed `fl`
- * and suffixed `_fleet`. Both prefixes / the suffix are case-sensitive — the
- * gold uses lowercase. Detection at import time uses these.
+ * v0.9.1 per-WG sheets are prefixed `wg-`; per-Fleet sheets are prefixed
+ * `fl-`. Both prefixes are case-sensitive — the gold uses lowercase, and
+ * the dash gives them disjoint namespaces so a Stream WG and an Edge fleet
+ * with the same body name never collide. Detection at import time uses
+ * these constants; for backwards-compatible import of pre-v2.0.0 workbooks
+ * the importer ALSO accepts the legacy `wg<name>` / `fl<name>_fleet`
+ * forms (see `classifyV091SheetName` in `v091SheetNames.ts`).
+ *
+ * Excel-spec note: sheet names containing `-` are treated as containing a
+ * formula special character, so any cross-sheet reference (autofilter
+ * `definedName`, hyperlink `location`, formula `<f>`) must single-quote
+ * the name — `'wg-default'!$A$2:$AE$21`. The shell template's
+ * `_xlnm._FilterDatabase` defined-names already do this; the exporter
+ * doesn't emit any other cross-sheet references that need quoting.
  */
-export const V091_WG_SHEET_PREFIX = 'wg' as const
-export const V091_FLEET_SHEET_PREFIX = 'fl' as const
-export const V091_FLEET_SHEET_SUFFIX = '_fleet' as const
+export const V091_WG_SHEET_PREFIX = 'wg-' as const
+export const V091_FLEET_SHEET_PREFIX = 'fl-' as const
+
+/**
+ * Pre-v2.0.0 workbooks gave every Edge fleet sheet a literal `_fleet`
+ * suffix because the prefix alone (`fl`) overlapped the `wg` namespace
+ * once you stripped two letters. With the dash-style prefixes the suffix
+ * is no longer needed for disambiguation, so the exporter no longer
+ * emits it. The constant is kept around (empty string + legacy literal)
+ * solely for the importer's backwards-compatible classifier — see
+ * `LEGACY_V091_FLEET_SHEET_SUFFIX` and `classifyV091SheetName`.
+ */
+export const LEGACY_V091_FLEET_SHEET_SUFFIX = '_fleet' as const
 
 /**
  * Row 1 group-label merges on a per-WG / per-Fleet sheet (gold v0.9.1).
@@ -197,11 +218,14 @@ export const V091_PER_WG_GROUP_LABELS: (string | null)[] = (() => {
 })()
 
 /**
- * Row 2 of a v0.9.1 per-WG / per-Fleet sheet, in column order A through AD
- * (30 columns). Column D's title flips between `Worker Group` (Stream) and
+ * Row 2 of a v0.9.1 per-WG / per-Fleet sheet, in column order A through AE
+ * (31 columns). Column D's title flips between `Worker Group` (Stream) and
  * `Fleet` (Edge) — pass the kind to {@link perWgRow2Headers} to get the
- * resolved array. AE is blank in the gold (the row 1 merge ends at AA;
- * column AE is unused but counted toward `dims=A1:AE21`).
+ * resolved array. Column AE (`Additional notes`) sits outside every row-1
+ * banner group (SOURCE ONBOARDING / PRIMARY DATA POINTS / VOLUME & PRIORITY
+ * / PHASE & ROADMAP / INITIATIVE…) — gold ships its row-1 cell as a plain
+ * grey blend cell so the bannerless columns at AB:AE visually flow on
+ * from the INITIATIVE banner.
  */
 export const V091_PER_WG_HEADERS_BASE: string[] = [
   'Source',                                          // A
@@ -234,6 +258,7 @@ export const V091_PER_WG_HEADERS_BASE: string[] = [
   'Strategic',                                       // AB
   'Onboarding Effort',                               // AC
   'Politics',                                        // AD
+  'Additional notes',                                // AE
 ]
 
 /**
@@ -254,7 +279,7 @@ export function perWgRow2Headers(kind: 'stream' | 'edge'): string[] {
  *     hyperlink to the source's per-WG sheet.
  *   - Bottom table (row 16 header, data rows 17+): per-WG / per-Fleet
  *     capacity. Column A is the WG / Fleet name as a HYPERLINK to the
- *     `wg<name>` / `fl<name>_fleet` sheet.
+ *     `wg-<name>` / `fl-<name>` sheet.
  *
  * The header titles below match the gold verbatim. Column F differs by kind:
  * `WG` on Stream Overview, `FL` on Edge Overview.

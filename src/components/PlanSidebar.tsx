@@ -565,40 +565,51 @@ export function PlanSidebarRail({
       aria-label="Plan, Worker Groups, Fleets, and Sources"
     >
       <NavButton
-        active={mainView === 'activation'}
-        onClick={onSelectActivation}
-        title="Cribl PS activation worksheet (tier, base scope, use cases)"
-        className="mt-2"
-      >
-        <span className="flex items-center gap-2">
-          <span>Activation</span>
-          {plan.activation.tier ? (
-            (() => {
-              const palette = tierPalette(plan.activation.tier)!
-              return (
-                <span
-                  className={[
-                    'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
-                    palette.chip,
-                  ].join(' ')}
-                  title={`Cribl PS ${plan.activation.tier} tier`}
-                >
-                  <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
-                  {plan.activation.tier}
-                </span>
-              )
-            })()
-          ) : null}
-        </span>
-      </NavButton>
-
-      <NavButton
         active={mainView === 'overview'}
         onClick={onSelectOverview}
-        className="mt-1"
+        className="mt-2"
       >
         Plan
       </NavButton>
+
+      {/*
+       * Activation lives under Plan as an indented sub-entry: visually it's
+       * the next step after the data plan is in shape (pick a Cribl PS tier,
+       * lock the base scope, then walk the use cases). Keeping it under Plan
+       * — instead of a peer at the top — frames the workflow as
+       * "plan first, activate after" without hiding it behind a chevron;
+       * Activation has only one item so a collapsing sub-list would be
+       * overkill.
+       */}
+      <div className="ml-3">
+        <NavButton
+          active={mainView === 'activation'}
+          onClick={onSelectActivation}
+          title="Cribl PS activation worksheet (tier, base scope, use cases)"
+          className="mt-0.5"
+        >
+          <span className="flex items-center gap-2">
+            <span>Activation</span>
+            {plan.activation.tier ? (
+              (() => {
+                const palette = tierPalette(plan.activation.tier)!
+                return (
+                  <span
+                    className={[
+                      'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                      palette.chip,
+                    ].join(' ')}
+                    title={`Cribl PS ${plan.activation.tier} tier`}
+                  >
+                    <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
+                    {plan.activation.tier}
+                  </span>
+                )
+              })()
+            ) : null}
+          </span>
+        </NavButton>
+      </div>
 
       <WorkerGroupKindSection
         kind="stream"
@@ -979,6 +990,20 @@ export function PlanNavMobile({
     <div
       className={`flex items-stretch gap-1.5 overflow-x-auto border-b border-cribl-border bg-white px-2 py-1.5 ${className}`}
     >
+      {/*
+       * Mobile chip order mirrors the desktop rail: Plan first, then
+       * Activation directly after as its sub-step. Keeping them adjacent
+       * (rather than reusing the desktop's indent, which doesn't translate
+       * to a horizontal scroller) preserves the "plan first, activate
+       * after" framing on both layouts.
+       */}
+      <button
+        type="button"
+        className={chip(mainView === 'overview')}
+        onClick={onSelectOverview}
+      >
+        Overview
+      </button>
       <button type="button" className={chip(mainView === 'activation')} onClick={_onSelectActivation}>
         Activation
         {plan.activation.tier
@@ -998,13 +1023,6 @@ export function PlanNavMobile({
               )
             })()
           : null}
-      </button>
-      <button
-        type="button"
-        className={chip(mainView === 'overview')}
-        onClick={onSelectOverview}
-      >
-        Overview
       </button>
       <button type="button" className={chip(mainView === 'workerGroups')} onClick={_onSelectWorkerGroups}>
         Worker Groups

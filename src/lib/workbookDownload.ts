@@ -8,7 +8,7 @@ import type { PlanState } from '../types/planTypes'
 /**
  * Route a candidate shell buffer to the v0.9.1 multi-sheet exporter when the
  * buffer is a v0.9.1 workbook (Stream Overview / Edge Overview present, or any
- * `wg<name>` / `fl<name>_fleet` sub-sheet) or to the legacy v0.8.6 ExcelJS
+ * `wg-<name>` / `fl-<name>` sub-sheet) or to the legacy v0.8.6 ExcelJS
  * pipeline otherwise. The probe is a pure JSZip read of `xl/workbook.xml`,
  * cheap enough to run on every export attempt.
  */

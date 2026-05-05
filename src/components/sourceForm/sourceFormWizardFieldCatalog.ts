@@ -3,10 +3,11 @@
  * a plain-language lede above each input.
  *
  * v2.0 (gold v0.9.1): added `physicalLocations` and `currentCollection`.
- * Removed `additionalNotes` (the only per-source column the gold actually
- * dropped). The value-lever fields (operational / riskReduction / strategic
- * / onboardingEffort / politics) remain — they're still on every per-WG
- * and per-Fleet sheet of the gold template.
+ * The only per-source column gold actually dropped is `Display name` —
+ * `Additional notes` (briefly absent in v0.9.0) was reinstated and round-
+ * trips through column AE on every per-WG / per-Fleet sheet. The value-
+ * lever fields (operational / riskReduction / strategic / onboardingEffort
+ * / politics) all remain.
  *
  * v2.0 also dropped the `streamOrEdge` wizard step — that field is now
  * auto-derived from the worker-group / fleet a source is attached to
@@ -43,6 +44,7 @@ export type SourceWizardFieldKind =
   | 'strategic'
   | 'onboardingEffort'
   | 'politics'
+  | 'additionalNotes'
 
 export type SourceWizardFieldStep = {
   id: string
@@ -271,6 +273,14 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'Organizational dynamics to be aware of: competing teams, a vocal critic, or past project friction. Keep it short and factual—this helps your team plan conversations.',
     kind: 'politics',
+  },
+  {
+    id: 'additionalNotes',
+    section: 'Additional notes',
+    headline: 'Anything else worth flagging?',
+    lede:
+      'Free-text catchall for anything that doesn\u2019t fit the structured fields above\u2014vendor contacts, ticket links, custom compliance carve-outs, ad-hoc reminders for the onboarding team. Round-trips through column AE on the per-WG / per-Fleet Excel sheets.',
+    kind: 'additionalNotes',
   },
   {
     id: 'wrap',

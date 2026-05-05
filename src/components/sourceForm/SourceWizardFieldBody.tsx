@@ -434,6 +434,22 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
         </div>
       )
 
+    case 'additionalNotes':
+      return (
+        <div className="mt-4">
+          <LabeledField id={`w-${row.id}-an`} label="Additional notes">
+            <textarea
+              id={`w-${row.id}-an`}
+              className="field-strong min-h-20 resize-y"
+              value={row.additionalNotes}
+              onChange={(e) => s('additionalNotes', e.target.value)}
+              rows={3}
+              placeholder="Vendor contacts, ticket links, ad-hoc compliance carve-outs, etc."
+            />
+          </LabeledField>
+        </div>
+      )
+
     default:
       return null
   }

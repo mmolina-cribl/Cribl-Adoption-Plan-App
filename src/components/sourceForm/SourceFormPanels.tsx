@@ -329,9 +329,10 @@ export function PhaseRoadmapBlock({ row, s }: Base) {
  * INITIATIVE, USE CASES, VALUE LEVERS
  *
  * Mirrors the gold v0.9.1 per-WG sheet's "INITIATIVE, USE CASES, VALUE
- * LEVERS" header group. v0.9.1 only dropped `Additional notes` from this
- * section vs v0.8.6; the value-lever fields (Operational / Risk Reduction
- * / Strategic / Onboarding Effort / Politics) all stay.
+ * LEVERS" header group (columns W:AA = Initiative case / Technical Use
+ * Case / Financial / Operational / Risk Reduction; AB:AD = Strategic /
+ * Onboarding Effort / Politics). The `Additional notes` column (AE) sits
+ * outside every banner group — see {@link AdditionalNotesBlock}.
  */
 export function InitiativeValueLeversBlock({ row, s }: Base) {
   return (
@@ -409,6 +410,32 @@ export function InitiativeValueLeversBlock({ row, s }: Base) {
         </LabeledField>
       </div>
     </div>
+  )
+}
+
+/**
+ * ADDITIONAL NOTES
+ *
+ * Mirrors the gold v0.9.1 per-WG / per-Fleet sheet's column AE — the only
+ * column that sits outside every row-1 banner group. Free-text catchall
+ * for things that don't fit any of the structured fields above (vendor
+ * contacts, ticket links, custom compliance carve-outs, ad-hoc reminders).
+ * Single textarea, full-width, expandable: matches the `Politics` /
+ * `Blockers` shape so the section reads consistently with the other
+ * notes-style fields elsewhere in the form.
+ */
+export function AdditionalNotesBlock({ row, s }: Base) {
+  return (
+    <LabeledField id={`s-${row.id}-an`} label="Additional notes">
+      <textarea
+        id={`s-${row.id}-an`}
+        className="field-strong min-h-20 resize-y"
+        value={row.additionalNotes}
+        onChange={(e) => s('additionalNotes', e.target.value)}
+        rows={3}
+        placeholder="Anything else worth noting about this source — vendor contacts, ticket links, ad-hoc compliance carve-outs, etc."
+      />
+    </LabeledField>
   )
 }
 
@@ -548,6 +575,10 @@ export function SourceSummaryStack({ plan, row, s, sourceIndex, onOpenGuidedTour
 
       <SectionBox id={`ss-${row.id}-value`} title="Initiative, use cases, value levers" defaultOpen={expandByDefault}>
         <InitiativeValueLeversBlock row={row} s={s} />
+      </SectionBox>
+
+      <SectionBox id={`ss-${row.id}-notes`} title="Additional notes" defaultOpen={expandByDefault}>
+        <AdditionalNotesBlock row={row} s={s} />
       </SectionBox>
     </div>
   )

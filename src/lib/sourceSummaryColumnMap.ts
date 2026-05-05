@@ -41,7 +41,7 @@ const SOURCE_HEADER_EXTRA_CANDIDATES: Partial<Record<string, string[]>> = {
   // import (and the importer always resolves the WG association from the
   // sheet name itself, so this map entry is purely defensive — it keeps
   // `buildSourceSummaryColumnMap` from logging a missing-header warning on
-  // an otherwise well-formed `fl<name>_fleet` sheet).
+  // an otherwise well-formed `fl-<name>` sheet).
   'Worker Group': ['WG', 'Worker group', 'Fleet'],
   'Pipeline usecase': ['Pipeline use case'],
   'Data optimization %': ['Data optimization%', 'Data Optimization %', 'Data optimization  %'],

@@ -3,23 +3,35 @@
 A field-facing planning tool for designing a customer's
 [Cribl Stream](https://cribl.io/stream/) and
 [Cribl Edge](https://cribl.io/edge/) adoption — model worker groups,
-fleets, sources, and projected daily volume in one place. The app runs
-embedded inside the [Cribl App Platform](https://docs.cribl.io/dev/) but
-also works standalone in a browser for local development.
+fleets, sources, and projected daily volume in one place.
+
+The app ships in **two flavors from the same codebase**:
+
+- **Cribl App Platform install** (`.tgz`) — the primary deployment,
+  embedded inside Cribl Cloud / Cribl on-prem tenants that have the
+  [App Platform](https://docs.cribl.io/dev/) enabled. State persists to
+  the platform's per-app KV store.
+- **Standalone HTML file** (`.html`) — a single self-contained file for
+  customers running on-prem **without** the App Platform. Double-click
+  to open in any modern browser; state persists to `localStorage`. The
+  `.xlsx` Export is the canonical save path — see
+  [Standalone deployment](#standalone-deployment) below.
 
 > "Your end-to-end Cribl Stream and Edge rollout in one place — the
 > worker groups and fleets, the sources feeding them, and the daily
 > volume each one contributes."
 
-> **v2.0 shipped.** The app is fully aligned to the v0.9.1 gold Excel
-> template (per-WG sheets, Stream + Edge overviews, PS Use Case Worksheet).
-> PR A (data model alignment) shipped in `2.0.0-rc.1`, PR B (multi-sheet
-> `.xlsx` I/O rewrite + kind-aware resource maps) in `2.0.0-rc.2`, and
-> PR C (Activation page — soft tier picker, base-scope checklist,
-> use-case overview, and use-case worksheet board with full PS Use Case
-> Worksheet round-trip) in `2.0.0`. See
+> **v2.0 shipped.** Full alignment to the v0.9.1 gold Excel template
+> (per-WG sheets, Stream + Edge overviews, PS Use Case Worksheet),
+> Activation page, kind-aware resource maps, multi-sheet exporter with
+> OOXML-level style fidelity, the `wg-<name>` / `fl-<name>` sheet
+> naming scheme (back-compat import for legacy `wg<name>` /
+> `fl<name>_fleet` workbooks), grouped tab order on cloned scaffolds,
+> the standalone HTML deployment target for on-prem use, and a small
+> batch of UX polish (inline customer-name pencil edit on the hero,
+> dismissible Activation callout, Plan as default landing). See
 > [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091)
-> for the full design history.
+> for the full design history (PRs A–D).
 
 ## What it does
 
@@ -41,10 +53,11 @@ also works standalone in a browser for local development.
   paragraph. Bulk-assign worker groups, criticality, context (On-Prem /
   Cloud), or compliance from the index page.
 - **Excel round-trip** — Import an existing `.xlsx` to seed the plan;
-  Export a styled, Cribl-branded workbook (Source summary, input_data,
-  Sources and WGs topology, INSTRUCTIONS) using the imported file as the
-  visual shell so the download is indistinguishable from a hand-edited
-  copy of the gold template.
+  Export a styled, Cribl-branded workbook (INSTRUCTIONS, PS Use Case
+  Worksheet, Stream Overview, per-WG `wg-<name>` sheets, Edge Overview,
+  per-fleet `fl-<name>` sheets, input_data) using the imported file as
+  the visual shell so the download is indistinguishable from a
+  hand-edited copy of the gold v0.9.1 template.
 - **Animations preference** — Subtle entry animations on bars, donuts,
   and connector lines, with a Settings toggle (and automatic respect for
   OS-level `prefers-reduced-motion`).
@@ -58,8 +71,11 @@ npm install
 # Run the dev server (http://localhost:5173)
 npm run dev
 
-# Production build
+# Production build (Cribl App Platform target)
 npm run build
+
+# Production build (standalone HTML target)
+npm run build:standalone
 
 # Lint
 npm run lint
@@ -68,28 +84,75 @@ npm run lint
 npm run package
 ```
 
-The `package` script produces `build/adoption-plan-<version>.tgz`, which
-is what you upload via **Settings → Apps → Install** on a Cribl Cloud or
-on-prem tenant.
+## Build targets
 
-## Running outside the Cribl iframe
+The repo has two production build configs that share every line of
+source code; the only difference is what comes out of `dist/`:
 
-When `window.CRIBL_API_URL` is not defined (i.e. you're hitting the dev
-server directly), the KV store helper transparently falls back to
-`localStorage` with the same namespacing it uses inside the iframe. So
-local development persists state across hard refreshes without any
-config — just open the dev URL and edit.
+| Target          | Command                       | Output                                          | Persistence    | Use case                                                                      |
+| --------------- | ----------------------------- | ----------------------------------------------- | -------------- | ----------------------------------------------------------------------------- |
+| Cribl App       | `npm run build` → `npm run package` | `build/adoption-plan-<version>.tgz`             | KV store       | Upload via **Settings → Apps → Install** on a Cribl Cloud or on-prem tenant   |
+| Standalone HTML | `npm run build:standalone`    | `dist-standalone/cribl-adoption-plan.html` (single file) | `localStorage` | On-prem customers without the App Platform — no install, no server, no Node   |
+
+The standalone build inlines the gold v0.9.1 Excel template
+(`public/adoption-plan-empty.xlsx`) into the HTML as a base64 string at
+build time, so Export and Import work the same way they do inside the
+Cribl iframe — no fetch, no server, no extra files to ship alongside
+the `.html`.
+
+## Standalone deployment
+
+The single HTML file is the entire deliverable. Hand it to a customer
+the way you'd hand them a PDF:
+
+1. Run `npm run build:standalone`.
+2. Send the customer
+   `dist-standalone/cribl-adoption-plan.html` (~2.2 MB / ~720 KB
+   gzipped — comfortable to email).
+3. They double-click the file. It opens in their default browser via
+   `file://` and works immediately. No Node, no `npm`, no IT-side
+   allowlist.
+
+A few UX notes worth setting expectations on:
+
+- **`localStorage` is path-scoped under `file://`.** If a customer
+  moves the `.html` to a different directory (or someone else opens a
+  copy from a different location), the saved plan **does not follow**.
+  Treat the **Excel Export** as the canonical save path — it always
+  has been — and treat `localStorage` as session continuity within a
+  given file location.
+- **No KV-backed multi-user.** There is no shared state across browser
+  profiles, machines, or files. The standalone build is single-user
+  by design; share via Excel Export / Import.
+- **Same UI, same code paths.** The KV helper detects
+  `window.CRIBL_API_URL === undefined` and routes every read/write to
+  `localStorage` — there is no separate "lite mode."
+
+## Running outside the Cribl iframe (dev only)
+
+When `window.CRIBL_API_URL` is not defined (i.e. you're hitting the
+dev server directly via `npm run dev`), the KV store helper
+transparently falls back to `localStorage` with the same namespacing
+it uses inside the iframe. So local development persists state across
+hard refreshes without any config — just open the dev URL and edit.
+This is the same fallback the standalone build relies on at runtime.
 
 ## Importing an existing plan
 
-`File → Import` accepts `.xlsx` files in the same shape this app exports
-(or the same shape as the v0.8.6 "Copy of Adoption plan" gold template).
-The workbook's bytes are cached in memory and re-used as the visual
-shell on the next Export, so styles, themes, merges, and the
+`File → Import` accepts `.xlsx` files in the same shape this app
+exports (the v0.9.1 gold template). The workbook's bytes are cached in
+memory and re-used as the visual shell on the next Export, so styles,
+themes, merges, the per-WG conditional formatting, and the
 `input_data` validation tab survive the round-trip.
 
+The importer also accepts the **legacy** v0.9.0-era sheet names
+(`wg<name>` / `fl<name>_fleet`) so workbooks produced by older copies
+of this app still seed cleanly — see
+[`src/lib/v091SheetNames.ts#classifyV091SheetName`](./src/lib/v091SheetNames.ts).
+
 If no import has been done in the current session, Export falls back to
-a bundled empty shell at `public/adoption-plan-empty.xlsx`. There is no
+the bundled empty shell at `public/adoption-plan-empty.xlsx` (Cribl
+App build) or its base64-inlined twin (standalone build). There is no
 plain-XLSX path: that build is ~1.5× larger, unstyled, and easy to
 mistake for a real export.
 
@@ -139,20 +202,32 @@ src/
     workerGroupRollup.ts     Capacity / volume aggregation per WG
     planDashboardStats.ts    Snapshot stats for the Plan dashboard
     planWorkbookLayout.ts    Sheet names + header layouts shared across import/export
+    v091ExportWorkbook.ts    v0.9.1 multi-sheet exporter (per-WG sheets, overviews, PSU CW)
+    v091ExportSheetRestore.ts OOXML-level style fidelity restoration after ExcelJS write
+    v091SheetNames.ts        wg-/fl- sheet name derivation + legacy-form classifier
+    adoptionPlanTemplateExport.ts Build-flavor-aware gold template loader
+    activationCalloutPreference.ts Plan-dashboard activation nudge dismissal (KV-backed)
     …
   data/
     planDataMap.ts           Sheet → role mapping shown on the Export page
     referenceData.ts         input_data picklists + INSTRUCTIONS copy
   types/
-    planTypes.ts             PlanState, SourceSummaryRow, WorkerGroupRow
+    planTypes.ts             PlanState, SourceSummaryRow, WorkerGroupRow, Activation
     criblGlobals.d.ts        Window-level Cribl App Platform globals
+    virtualModules.d.ts      Build-time virtual module declarations (embedded gold)
+  assets/
+    cribl-ai-icon.png        Cribl AI mark, imported via Vite (inlined in standalone build)
 config/
   proxies.yml                External-domain allowlist (currently empty)
 public/
-  adoption-plan-empty.xlsx   v0.8.6 empty shell used when no import is in memory
+  adoption-plan-empty.xlsx   v0.9.1 gold shell used when no import is in memory
+                             (fetched at runtime in the App build, base64-inlined in standalone)
+  favicon.svg                Tab icon (App build only — stripped from the standalone HTML)
 scripts/
   package.mjs                Build + tarball for the Cribl App Platform installer
   pkgutil.mjs                Tar/gzip plumbing
+vite.config.ts               Cribl App Platform build (the primary target)
+vite.standalone.config.ts    Standalone single-HTML build (vite-plugin-singlefile + inlined gold)
 ```
 
 See [`AGENTS.md`](./AGENTS.md) for the **Cribl App Platform Developer
@@ -164,19 +239,29 @@ user-identity gap, Excel round-trip rationale, GB/d rounding rules).
 ## Versioning
 
 Standard semver, in lockstep between `package.json` and
-`package-lock.json`. Recent history:
+`package-lock.json`. Both build targets share the same version (one
+source of truth in `package.json`). Recent history:
 
-- **1.3.x** — Interactive resource maps, animations preference, full-card
-  click targets, header redesign, dated export filename, reusable
-  `SearchInput` component.
+- **2.0.x** — Gold v0.9.1 alignment. Per-WG sheets (`wg-<name>` for
+  Stream, `fl-<name>` for Edge), Stream + Edge overviews, PS Use Case
+  Worksheet round-trip, multi-sheet `.xlsx` exporter with OOXML-level
+  style fidelity, kind-aware resource maps, Activation page (tier
+  picker, base-scope checklist, use-case overview + worksheet board),
+  standalone HTML build for on-prem deployment, and UI polish (Plan
+  hero pencil-edit customer name, dismissible Activation callout,
+  Plan as default landing).
+- **1.3.x** — Interactive resource maps, animations preference,
+  full-card click targets, header redesign, dated export filename,
+  reusable `SearchInput` component.
 - **1.2.x** — Source-tile catalog refresh, sortable Sources index,
   onboarding-completion bar.
 - **1.1.x** — Filter + Bulk Actions popovers, hosting taxonomy,
   Topology section.
 - **1.0.x** — First stable release.
 
-Tagged commits live on `main`; releases are the `.tgz` produced by
-`npm run package`.
+Tagged commits live on `main`; the App-Platform release is the `.tgz`
+produced by `npm run package`, and the on-prem release is the `.html`
+produced by `npm run build:standalone`.
 
 ## Author
 
