@@ -294,20 +294,59 @@ type MultiComboboxProps = {
   alwaysShowOptions?: boolean
 }
 
-function parseMultiValue(v: string): string[] {
-  const parts = (v || '')
-    .split(/[,;\n]+/g)
-    .map((x) => x.trim())
-    .filter(Boolean)
+function uniqueTokens(parts: string[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const p of parts) {
-    const k = p.toLowerCase()
+    const trimmed = p.trim()
+    if (!trimmed) continue
+    const k = trimmed.toLowerCase()
     if (seen.has(k)) continue
     seen.add(k)
-    out.push(p)
+    out.push(trimmed)
   }
   return out
+}
+
+function parseDelimitedMultiValue(v: string): string[] {
+  return uniqueTokens((v || '').split(/[,;\n]+/g))
+}
+
+function parseMultiValue(v: string, options: readonly string[] = []): string[] {
+  const raw = (v || '').trim()
+  if (!raw) return []
+  if (options.length === 0) return parseDelimitedMultiValue(raw)
+
+  const optionLabels = options.map((s) => String(s).trim()).filter(Boolean)
+  const labelsByLength = [...optionLabels].sort((a, b) => b.length - a.length)
+  const lowerRaw = raw.toLowerCase()
+  const parts: string[] = []
+  let i = 0
+
+  while (i < raw.length) {
+    while (i < raw.length && /[\s,;\n]/.test(raw[i]!)) i += 1
+    if (i >= raw.length) break
+
+    const matched = labelsByLength.find((label) => {
+      if (!lowerRaw.startsWith(label.toLowerCase(), i)) return false
+      const next = raw[i + label.length]
+      return next === undefined || /[,;\n]/.test(next)
+    })
+
+    if (matched) {
+      parts.push(matched)
+      i += matched.length
+      continue
+    }
+
+    let j = i
+    while (j < raw.length && !/[,;\n]/.test(raw[j]!)) j += 1
+    parts.push(raw.slice(i, j))
+    i = j
+  }
+
+  if (parts.length === 0) return parseDelimitedMultiValue(raw)
+  return uniqueTokens(parts)
 }
 
 function serializeMultiValue(parts: string[], joinWith: string): string {
@@ -373,7 +412,6 @@ export function ComboboxText({
 
   useLayoutEffect(() => {
     if (!showListPanel) {
-      setListPos(null)
       return
     }
     updatePosition()
@@ -505,10 +543,9 @@ export function MultiComboboxChips({
   const [listPos, setListPos] = useState<ListPos | null>(null)
   const [q, setQ] = useState('')
 
-  const selected = useMemo(() => parseMultiValue(value), [value])
-  const selectedSet = useMemo(() => new Set(selected.map((s) => s.toLowerCase())), [selected])
-
   const o = useMemo(() => options.map((s) => String(s)), [options])
+  const selected = useMemo(() => parseMultiValue(value, o), [o, value])
+  const selectedSet = useMemo(() => new Set(selected.map((s) => s.toLowerCase())), [selected])
   const isLarge = o.length > TYPEAHEAD_MIN_TO_SEARCH && !alwaysShowOptions
   const suggestEnabled = showSuggestions && o.length > 0
 
@@ -618,7 +655,7 @@ export function MultiComboboxChips({
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm hover:bg-cribl-elevate"
                   onClick={() => addToken(customCandidate)}
                 >
-                  <span className="min-w-0 truncate">
+                  <span className="min-w-0 break-words">
                     Add <span className="font-medium text-cribl-ink">“{customCandidate}”</span>
                   </span>
                   <span className="text-xs text-cribl-muted">Enter</span>
@@ -635,9 +672,12 @@ export function MultiComboboxChips({
                     onClick={() => toggleToken(opt)}
                     aria-selected={isSel}
                   >
-                    <span className="min-w-0 truncate">{opt}</span>
+                    <span className="min-w-0 break-words">{opt}</span>
                     <span
-                      className={['text-sm', isSel ? 'text-cribl-primary' : 'text-transparent'].join(' ')}
+                      className={[
+                        'shrink-0 text-sm',
+                        isSel ? 'text-cribl-primary' : 'text-transparent',
+                      ].join(' ')}
                       aria-hidden
                     >
                       ✓
@@ -672,12 +712,13 @@ export function MultiComboboxChips({
         {selected.map((t) => (
           <span
             key={t.toLowerCase()}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-cribl-border bg-cribl-canvas px-2 py-1 text-sm"
+            className="inline-flex max-w-full items-start gap-1 rounded-xl border border-cribl-border bg-cribl-canvas px-2 py-1 text-sm"
+            title={t}
           >
-            <span className="min-w-0 truncate">{t}</span>
+            <span className="min-w-0 break-words leading-snug">{t}</span>
             <button
               type="button"
-              className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-cribl-muted hover:bg-white hover:text-cribl-ink"
+              className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cribl-muted hover:bg-white hover:text-cribl-ink"
               onClick={(e) => {
                 e.stopPropagation()
                 removeToken(t)
@@ -812,11 +853,6 @@ export function SectionBox({
   const [open, setOpen] = useState(defaultOpen)
   const [touched, setTouched] = useState(defaultOpen)
   const contentId = useId()
-  useEffect(() => {
-    if (open) {
-      setTouched(true)
-    }
-  }, [open])
   const showUnopenedCue = !open && !touched
 
   const simpleHeading = (
@@ -879,7 +915,10 @@ export function SectionBox({
     </div>
   )
 
-  const toggle = () => setOpen((o) => !o)
+  const toggle = () => {
+    setTouched(true)
+    setOpen((o) => !o)
+  }
 
   return (
     <section
