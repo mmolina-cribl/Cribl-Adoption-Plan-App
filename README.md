@@ -231,10 +231,12 @@ vite.standalone.config.ts    Standalone single-HTML build (vite-plugin-singlefil
 ```
 
 See [`AGENTS.md`](./AGENTS.md) for the **Cribl App Platform Developer
-Guide** (fetch proxy rules, KV API shape, `proxies.yml` schema, etc.) and
+Guide** (fetch proxy rules, KV API shape, `proxies.yml` schema, etc.),
 [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) for engineering-side
 decisions referenced from inline code comments (KV hydration strategy,
-user-identity gap, Excel round-trip rationale, GB/d rounding rules).
+user-identity gap, Excel round-trip rationale, GB/d rounding rules), and
+[`ROADMAP.md`](./ROADMAP.md) for upcoming project themes such as Edge
+subfleet support.
 
 ## Versioning
 
