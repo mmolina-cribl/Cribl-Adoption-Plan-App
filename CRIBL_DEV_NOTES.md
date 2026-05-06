@@ -486,11 +486,10 @@ PR B is sized in commits, not one big rewrite:
    per-row WG/Fleet badge, flips the "in/out" capacity tooltip to
    "Same as Fleet → Capacity…" for Edge rows, and pairs "All
    worker groups" with a new "All fleets" jump-link wired through
-   a new `onGoToFleets` prop on `PlanDataOverview`. (A follow-up
-   pure-rename PR is filed to rename the WG-prefixed shared
-   modules — `WorkerGroupResourceMap`, `WorkerGroupDetailView`,
-   `WorkerGroupEditor`, etc. — to kind-neutral names; deferred
-   until after rc.2 to keep this commit copy-only.)
+   a new `onGoToFleets` prop on `PlanDataOverview`. The deferred
+   pure-rename follow-up for WG-prefixed shared modules now lives
+   in [`ROADMAP.md`](./ROADMAP.md), which is the project-facing
+   source of truth for future work.
 5. _Version bump + smoke_: `2.0.0-rc.1` → `2.0.0-rc.2`. Round-trip
    smoke tests cover empty / single Stream / single Edge / mixed
    small / heavy-clone shapes; tsx import + openpyxl strict load
