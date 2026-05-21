@@ -86,6 +86,7 @@ function defaultWorkerGroupRow(kind: WorkerGroupKind = 'stream'): WorkerGroupRow
     workerCount: '',
     workerDetail: '',
     diskOneDayGb: '',
+    parentFleetId: '',
   }
 }
 

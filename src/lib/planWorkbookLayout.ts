@@ -202,6 +202,32 @@ export const V091_FLEET_SHEET_PREFIX = 'fl-' as const
 export const LEGACY_V091_FLEET_SHEET_SUFFIX = '_fleet' as const
 
 /**
+ * Reserved sheet name for the export-only "unassigned" bucket. Any source
+ * with no `workerGroupId` is collected onto this sheet so it survives a
+ * round-trip even when the customer has not yet attached it to a Stream
+ * worker group or Edge fleet. The bucket is synthesized on export and
+ * special-cased on import — it never materializes as a real
+ * `WorkerGroupRow` in `PlanState`.
+ *
+ * Reserved name. Any user-named worker group whose `wg` field happens to
+ * be the literal string "unassigned" is disambiguated to `wg-unassigned-2`
+ * on export. The trade-off is that a customer who really insists on a
+ * Stream WG named "unassigned" loses the exact display name on round-trip
+ * (it comes back as "unassigned-2"); the upside is a stable, predictable
+ * bucket sheet name the importer can detect with a single equality check.
+ */
+export const V091_UNASSIGNED_BUCKET_SHEET_NAME = 'wg-unassigned' as const
+
+/**
+ * Reserved synthetic worker-group id used by the v0.9.1 exporter to
+ * temporarily group unassigned sources under a single fake Stream WG so
+ * they fill the {@link V091_UNASSIGNED_BUCKET_SHEET_NAME} sheet using the
+ * normal per-WG fill path. This id never appears in `PlanState` — the
+ * importer always strips it back to `''` when reading the bucket sheet.
+ */
+export const V091_UNASSIGNED_BUCKET_WG_ID = '__unassigned__' as const
+
+/**
  * Row 1 group-label merges on a per-WG / per-Fleet sheet (gold v0.9.1).
  * Column A is intentionally blank; the five group banners cover B:D, E:J,
  * K:N, O:V, W:AA. Unmerged cells AB:AE within the W1 banner are left blank

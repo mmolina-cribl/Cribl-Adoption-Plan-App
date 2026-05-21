@@ -12,6 +12,11 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sumAvgDailyFromSourceSummaryForWg } from '../lib/workerGroupRollup'
 import { AnimatedCollapse } from './AnimatedCollapse'
 import { tierPalette } from '../lib/psUseCaseLayout'
+import {
+  useDragReorder,
+  type DragReorder,
+  type DropPosition,
+} from '../lib/useDragReorder'
 
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
@@ -71,6 +76,28 @@ type Props = {
   onAddSource: () => void
   onRemoveSource: (id: string) => void
   onRenameSource: (id: string, name: string) => void
+  /**
+   * v2.0+: drag-to-reorder hooks for the left nav.
+   *
+   * `onReorderSources` reorders rows inside `plan.sourceSummary`; the
+   * resulting order drives Excel export ordering for both per-WG/Fleet
+   * sheet rows and the Stream / Edge Overview source-rows blocks.
+   *
+   * `onReorderWorkerGroups` reorders rows inside `plan.workerGroups`;
+   * it is the caller's responsibility to ensure `fromId` and `toId`
+   * share the same `kind` (the sidebar restricts drag scope to within
+   * a section, so the parent reducer can no-op cross-kind drops).
+   *
+   * Both are optional — the mobile chip nav doesn't expose drag
+   * handles, so it just doesn't pass them. When omitted, the desktop
+   * rail still renders without grip handles.
+   */
+  onReorderSources?: (fromId: string, toId: string, position: DropPosition) => void
+  onReorderWorkerGroups?: (
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => void
   onSelectImport: () => void
   onSelectExport: () => void
   onClearPlan: () => void
@@ -151,6 +178,110 @@ function NavButton({
   )
 }
 
+/**
+ * Drag-handle grip rendered at the leading edge of every reorderable
+ * row in the desktop rail. The grip is the *only* part of the row that
+ * is `draggable`, so users can still click the row's name button or
+ * inline-edit the name without accidentally starting a drag. Drag
+ * scope is contained to its parent section by `useDragReorder`'s
+ * `canDropOn` predicate, so each section behaves like a stand-alone
+ * sortable list.
+ *
+ * Mouse-only by design: native HTML5 D&D doesn't fire on iOS Safari
+ * and is awkward on Android, so the mobile chip nav doesn't render
+ * the grip at all. Touch users still have add / remove + edit
+ * affordances, and a future enhancement (e.g. Pointer Events with a
+ * polyfill, or a keyboard reorder shortcut) can layer on without
+ * changing the data model.
+ */
+function GripHandle({
+  draggable,
+  onDragStart,
+  onDragEnd,
+  ariaLabel,
+  className = '',
+}: {
+  draggable: boolean
+  onDragStart: (e: React.DragEvent) => void
+  onDragEnd: () => void
+  ariaLabel: string
+  className?: string
+}) {
+  return (
+    <span
+      role="button"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      tabIndex={-1}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={[
+        // The grip sits as a flush-left strip on the row. Its
+        // background is transparent until hovered so the rounded
+        // border of the row reads cleanly when at rest, and only the
+        // grip area picks up a "grab" affordance when the cursor
+        // enters it. `cursor-grab` flips to `cursor-grabbing` only
+        // while the parent has the dragging class — otherwise the
+        // platform's own drag cursor takes over after `dragstart`.
+        'flex w-5 shrink-0 items-center justify-center self-stretch border-0 border-r border-cribl-border/40 bg-transparent text-cribl-muted/60 transition',
+        'cursor-grab hover:bg-cribl-elevate hover:text-cribl-ink',
+        'select-none',
+        className,
+      ].join(' ')}
+    >
+      <svg
+        viewBox="0 0 16 16"
+        className="h-3.5 w-3.5"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {/*
+         * Six-dot grip — a near-universal "drag to reorder" glyph.
+         * Two columns × three rows of 1.4px circles keeps it readable
+         * at the rail's small width without leaning on a font icon.
+         */}
+        <circle cx="6" cy="4" r="1.2" fill="currentColor" />
+        <circle cx="10" cy="4" r="1.2" fill="currentColor" />
+        <circle cx="6" cy="8" r="1.2" fill="currentColor" />
+        <circle cx="10" cy="8" r="1.2" fill="currentColor" />
+        <circle cx="6" cy="12" r="1.2" fill="currentColor" />
+        <circle cx="10" cy="12" r="1.2" fill="currentColor" />
+      </svg>
+    </span>
+  )
+}
+
+/**
+ * Thin teal insertion line drawn directly above (`'before'`) or below
+ * (`'after'`) a row that the cursor is hovering over while dragging.
+ * Sits absolutely-positioned over the row container so it doesn't
+ * disturb the surrounding flex layout, and so it can poke a couple of
+ * pixels outside the row's rounded border without triggering a
+ * reflow.
+ */
+function DropIndicator({ position }: { position: DropPosition }) {
+  if (position === 'nest') {
+    return (
+      <span
+        aria-hidden
+        className="pointer-events-none absolute bottom-0 left-2 right-2 flex justify-center rounded-md border border-dashed border-cribl-edge/60 bg-cribl-edge-soft py-1 text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink"
+      >
+        Sub-fleet
+      </span>
+    )
+  }
+  return (
+    <span
+      aria-hidden
+      className={[
+        'pointer-events-none absolute left-0 right-0 h-0.5 rounded-full bg-cribl-primary',
+        position === 'before' ? '-top-0.5' : '-bottom-0.5',
+      ].join(' ')}
+    />
+  )
+}
+
 function SourceRowRail({
   row,
   index,
@@ -158,6 +289,7 @@ function SourceRowRail({
   canRemove,
   workerGroupName,
   workerGroupKind,
+  drag,
   onSelect,
   onRemove,
   onRename,
@@ -178,6 +310,12 @@ function SourceRowRail({
    *   - `null`     → muted grey ("not yet attached")
    */
   workerGroupKind: 'stream' | 'edge' | null
+  /**
+   * Drag-and-drop wiring from `useDragReorder`. Optional — when the
+   * parent doesn't pass it (e.g. a future read-only render), the row
+   * simply omits the grip handle and drop targets.
+   */
+  drag?: DragReorder
   onSelect: () => void
   onRemove: () => void
   onRename: (name: string) => void
@@ -207,15 +345,48 @@ function SourceRowRail({
     }
   }, [editing])
 
+  // Drag-and-drop wiring. Disabled while inline-editing the row's name
+  // so the input field captures clicks/drags normally — re-enabling on
+  // blur is automatic via the `editing` state flip.
+  const dragEnabled = Boolean(drag) && !editing
+  const handleProps = drag && dragEnabled ? drag.getHandleProps(row.id) : null
+  const rowDragProps = drag ? drag.getRowProps(row.id) : null
+  const isDragging = drag?.draggingId === row.id
+  const isOver = drag?.overId === row.id && drag?.overPosition != null
+
+  // Outer wrapper carries `position: relative` and the drop-indicator
+  // overlay so the inner row can keep its `overflow-hidden` (needed
+  // to clip the rounded corners of the inline action buttons). The
+  // wrapper also owns the drag-over event handlers; HTML5 D&D will
+  // fire them on whichever element is under the cursor regardless of
+  // pointer-events on overlay siblings.
   return (
     <div
-      className={[
-        'ml-3 flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
-        isActive
-          ? 'border-cribl-primary bg-white shadow-sm'
-          : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
-      ].join(' ')}
+      className="relative ml-3"
+      onDragOver={rowDragProps?.onDragOver}
+      onDragLeave={rowDragProps?.onDragLeave}
+      onDrop={rowDragProps?.onDrop}
     >
+      {isOver && drag?.overPosition ? (
+        <DropIndicator position={drag.overPosition} />
+      ) : null}
+      <div
+        className={[
+          'flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
+          isActive
+            ? 'border-cribl-primary bg-white shadow-sm'
+            : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
+          isDragging ? 'opacity-50' : '',
+        ].join(' ')}
+      >
+      {handleProps ? (
+        <GripHandle
+          draggable={handleProps.draggable}
+          onDragStart={handleProps.onDragStart}
+          onDragEnd={handleProps.onDragEnd}
+          ariaLabel={`Drag to reorder ${label}`}
+        />
+      ) : null}
       {editing ? (
         <div className="min-w-0 flex-1 py-1.5 pl-3 pr-1">
           <input
@@ -296,6 +467,7 @@ function SourceRowRail({
           ×
         </button>
       )}
+      </div>
     </div>
   )
 }
@@ -313,6 +485,7 @@ function WorkerGroupRowRail({
    */
   totalSourceIngestGb,
   sourceCount,
+  drag,
   onSelect,
   onRemove,
   onUpdateWg,
@@ -324,6 +497,13 @@ function WorkerGroupRowRail({
   canRemove: boolean
   totalSourceIngestGb: number
   sourceCount: number
+  /**
+   * Drag-and-drop wiring shared with sibling rows in the same section
+   * (Stream WGs or Edge fleets, never both). Optional so callers that
+   * don't need reordering — currently only the mobile chip nav — can
+   * skip it without touching the row component's internals.
+   */
+  drag?: DragReorder
   onSelect: () => void
   onRemove: () => void
   onUpdateWg: (wg: string) => void
@@ -352,17 +532,49 @@ function WorkerGroupRowRail({
     }
   }, [editing])
 
+  const dragEnabled = Boolean(drag) && !editing
+  const handleProps = drag && dragEnabled ? drag.getHandleProps(row.id) : null
+  const rowDragProps = drag ? drag.getRowProps(row.id) : null
+  const isDragging = drag?.draggingId === row.id
+  const isOver = drag?.overId === row.id && drag?.overPosition != null
+  const isSubFleet = row.kind === 'edge' && Boolean((row.parentFleetId ?? '').trim())
+
   return (
     <div
-      className={[
-        'ml-3 flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
-        isActive
-          ? 'border-cribl-primary bg-white shadow-sm'
-          : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
-      ].join(' ')}
+      className={isSubFleet ? 'relative ml-7' : 'relative ml-3'}
+      onDragOver={rowDragProps?.onDragOver}
+      onDragLeave={rowDragProps?.onDragLeave}
+      onDrop={rowDragProps?.onDrop}
     >
+      {isOver && drag?.overPosition ? (
+        <DropIndicator position={drag.overPosition} />
+      ) : null}
+      <div
+        className={[
+          'flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
+          isActive
+            ? 'border-cribl-primary bg-white shadow-sm'
+            : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
+          isDragging ? 'opacity-50' : '',
+        ].join(' ')}
+      >
+      {handleProps ? (
+        <GripHandle
+          draggable={handleProps.draggable}
+          onDragStart={handleProps.onDragStart}
+          onDragEnd={handleProps.onDragEnd}
+          ariaLabel={
+            row.kind === 'edge' ? `Drag to reorder fleet ${label}` : `Drag to reorder worker group ${label}`
+          }
+        />
+      ) : null}
       {editing ? (
         <div className="min-w-0 flex-1 py-1.5 pl-3 pr-1">
+          {isSubFleet ? (
+            <span className="mb-1 inline-block rounded border border-cribl-edge/40 bg-cribl-edge-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+              Sub fleet
+            </span>
+          ) : null}
           <input
             ref={inputRef}
             className="w-full min-w-0 max-w-full border-0 bg-transparent p-0 text-sm font-medium text-cribl-ink outline-none"
@@ -388,6 +600,13 @@ function WorkerGroupRowRail({
           onClick={onSelect}
           className="min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-cribl-ink"
         >
+          {isSubFleet ? (
+            <span className="mb-1 block w-full">
+              <span className="inline-block rounded border border-cribl-edge/40 bg-cribl-edge-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                Sub fleet
+              </span>
+            </span>
+          ) : null}
           <span className="block truncate">{label}</span>
           {sub ? (
             <span className="mt-0.5 block max-w-full truncate text-xs font-normal text-cribl-muted">{sub}</span>
@@ -416,6 +635,7 @@ function WorkerGroupRowRail({
           ×
         </button>
       )}
+      </div>
     </div>
   )
 }
@@ -441,6 +661,7 @@ function WorkerGroupKindSection({
   onAddWorkerGroup,
   onRemoveWorkerGroup,
   onUpdateWorkerGroupWg,
+  onReorderWorkerGroups,
 }: {
   kind: WorkerGroupKind
   plan: PlanState
@@ -455,11 +676,42 @@ function WorkerGroupKindSection({
   onAddWorkerGroup: (kind?: WorkerGroupKind) => void
   onRemoveWorkerGroup: (id: string) => void
   onUpdateWorkerGroupWg: (id: string, wg: string) => void
+  onReorderWorkerGroups?: (
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => void
 }) {
   const sectionTitle = kind === 'edge' ? 'Fleets' : 'Worker Groups'
   const indexView: MainView = kind === 'edge' ? 'fleets' : 'workerGroups'
   const addLabel = kind === 'edge' ? '+ Add Fleet' : '+ Add Worker Group'
   const empty = rows.length === 0
+  const headerCount =
+    kind === 'edge' ? rows.filter((r) => !(r.parentFleetId ?? '').trim()).length : rows.length
+  // Drag-reorder is scoped to this section: a Stream WG can only be
+  // dropped on another Stream WG, never on an Edge fleet (and vice
+  // versa). We enforce that with a `canDropOn` predicate that checks
+  // the *kind* of both rows in `plan.workerGroups`. The parent's
+  // `onReorderWorkerGroups` reducer also defends against cross-kind
+  // moves, but enforcing it here keeps the drop-indicator UX honest.
+  const drag = useDragReorder({
+    onReorder: (fromId, toId, position) => {
+      onReorderWorkerGroups?.(fromId, toId, position)
+    },
+    canDropOn: (fromId, toId) => {
+      const from = plan.workerGroups.find((w) => w.id === fromId)
+      const to = plan.workerGroups.find((w) => w.id === toId)
+      return Boolean(from && to && from.kind === to.kind && from.kind === kind)
+    },
+    nestAffinity:
+      kind === 'edge'
+        ? (_fromId, toId) => {
+            const to = plan.workerGroups.find((w) => w.id === toId)
+            return Boolean(to?.kind === 'edge' && !(to.parentFleetId ?? '').trim())
+          }
+        : undefined,
+  })
+  const dragForRows = onReorderWorkerGroups ? drag : undefined
   return (
     <>
       <div className="mt-3 flex items-center gap-1">
@@ -471,7 +723,7 @@ function WorkerGroupKindSection({
           <span className="flex items-center gap-2">
             <span>{sectionTitle}</span>
             {rows.length > 0 ? (
-              <span className="text-xs font-normal text-cribl-muted">({rows.length})</span>
+              <span className="text-xs font-normal text-cribl-muted">({headerCount})</span>
             ) : null}
           </span>
         </NavButton>
@@ -497,6 +749,7 @@ function WorkerGroupKindSection({
                 canRemove={canRemove}
                 totalSourceIngestGb={sourceTotal.sum}
                 sourceCount={sourceTotal.count}
+                drag={dragForRows}
                 onSelect={() => onSelectWorkerGroup(r.id)}
                 onRemove={() => onRemoveWorkerGroup(r.id)}
                 onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
@@ -536,10 +789,12 @@ export function PlanSidebarRail({
   onAddWorkerGroup,
   onRemoveWorkerGroup,
   onUpdateWorkerGroupWg,
+  onReorderWorkerGroups,
   onSelectSource,
   onAddSource,
   onRemoveSource,
   onRenameSource,
+  onReorderSources,
   onSelectImport,
   onSelectExport,
   onClearPlan,
@@ -558,58 +813,76 @@ export function PlanSidebarRail({
   const [wgListOpen, setWgListOpen] = useState(true)
   const [fleetListOpen, setFleetListOpen] = useState(true)
   const [sourcesListOpen, setSourcesListOpen] = useState(true)
+  /** Desktop rail: when false, the indented Activation entry under Plan is hidden. */
+  const [planSectionOpen, setPlanSectionOpen] = useState(true)
+
+  useEffect(() => {
+    if (mainView === 'activation') {
+      setPlanSectionOpen(true)
+    }
+  }, [mainView])
+
+  // Sources is a single flat list, so the drag context lives at this
+  // level. Per-section drag state for Stream WGs vs Edge fleets lives
+  // inside each `WorkerGroupKindSection` below — a row dragged in one
+  // section can't be dropped in the other.
+  const sourceDrag = useDragReorder({
+    onReorder: (fromId, toId, position) => {
+      onReorderSources?.(fromId, toId, position)
+    },
+  })
+  const sourceDragForRows = onReorderSources ? sourceDrag : undefined
 
   return (
     <nav
       className={`flex flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
       aria-label="Plan, Worker Groups, Fleets, and Sources"
     >
-      <NavButton
-        active={mainView === 'overview'}
-        onClick={onSelectOverview}
-        className="mt-2"
-      >
-        Plan
-      </NavButton>
-
-      {/*
-       * Activation lives under Plan as an indented sub-entry: visually it's
-       * the next step after the data plan is in shape (pick a Cribl PS tier,
-       * lock the base scope, then walk the use cases). Keeping it under Plan
-       * — instead of a peer at the top — frames the workflow as
-       * "plan first, activate after" without hiding it behind a chevron;
-       * Activation has only one item so a collapsing sub-list would be
-       * overkill.
-       */}
-      <div className="ml-3">
+      <div className="mt-2 flex items-center gap-1">
         <NavButton
-          active={mainView === 'activation'}
-          onClick={onSelectActivation}
-          title="Cribl PS activation worksheet (tier, base scope, use cases)"
-          className="mt-0.5"
+          active={mainView === 'overview'}
+          onClick={onSelectOverview}
+          className="flex-1"
         >
-          <span className="flex items-center gap-2">
-            <span>Activation</span>
-            {plan.activation.tier ? (
-              (() => {
-                const palette = tierPalette(plan.activation.tier)!
-                return (
-                  <span
-                    className={[
-                      'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
-                      palette.chip,
-                    ].join(' ')}
-                    title={`Cribl PS ${plan.activation.tier} tier`}
-                  >
-                    <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
-                    {plan.activation.tier}
-                  </span>
-                )
-              })()
-            ) : null}
-          </span>
+          Plan
         </NavButton>
+        <ChevronToggle
+          open={planSectionOpen}
+          onClick={() => setPlanSectionOpen((v) => !v)}
+          label="Plan section"
+        />
       </div>
+      <AnimatedCollapse open={planSectionOpen}>
+        <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+          <NavButton
+            active={mainView === 'activation'}
+            onClick={onSelectActivation}
+            title="Cribl PS activation worksheet (tier, base scope, use cases)"
+            className="mt-0.5"
+          >
+            <span className="flex items-center gap-2">
+              <span>Activation</span>
+              {plan.activation.tier ? (
+                (() => {
+                  const palette = tierPalette(plan.activation.tier)!
+                  return (
+                    <span
+                      className={[
+                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                        palette.chip,
+                      ].join(' ')}
+                      title={`Cribl PS ${plan.activation.tier} tier`}
+                    >
+                      <span aria-hidden className={['h-1.5 w-1.5 rounded-full', palette.dot].join(' ')} />
+                      {plan.activation.tier}
+                    </span>
+                  )
+                })()
+              ) : null}
+            </span>
+          </NavButton>
+        </div>
+      </AnimatedCollapse>
 
       <WorkerGroupKindSection
         kind="stream"
@@ -625,6 +898,7 @@ export function PlanSidebarRail({
         onAddWorkerGroup={onAddWorkerGroup}
         onRemoveWorkerGroup={onRemoveWorkerGroup}
         onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
+        onReorderWorkerGroups={onReorderWorkerGroups}
       />
 
       <WorkerGroupKindSection
@@ -641,6 +915,7 @@ export function PlanSidebarRail({
         onAddWorkerGroup={onAddWorkerGroup}
         onRemoveWorkerGroup={onRemoveWorkerGroup}
         onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
+        onReorderWorkerGroups={onReorderWorkerGroups}
       />
 
       <div className="mt-3 flex items-center gap-1">
@@ -682,6 +957,7 @@ export function PlanSidebarRail({
                 canRemove={canRemove}
                 workerGroupName={wgName}
                 workerGroupKind={wgKind}
+                drag={sourceDragForRows}
                 onSelect={() => onSelectSource(r.id)}
                 onRemove={() => onRemoveSource(r.id)}
                 onRename={(name) => onRenameSource(r.id, name)}
@@ -912,8 +1188,9 @@ function WorkerGroupChipMobile({
           className={['max-w-[6.5rem] truncate', chip(isActive)].join(' ')}
           onClick={onSelect}
           title={
-            row.wg.trim() ||
-            (row.kind === 'edge' ? `Fleet ${index + 1}` : `Worker group ${index + 1}`)
+            (row.wg.trim() ||
+              (row.kind === 'edge' ? `Fleet ${index + 1}` : `Worker group ${index + 1}`)) +
+            (row.kind === 'edge' && (row.parentFleetId ?? '').trim() ? ' · Sub fleet' : '')
           }
         >
           {label}

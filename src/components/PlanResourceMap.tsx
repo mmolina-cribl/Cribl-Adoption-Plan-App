@@ -19,6 +19,7 @@ import { CHART_CRIBL_BLUE, CHART_CRIBL_EDGE_BLUE } from '../lib/chartColors'
 import { getOnboardingStatus } from '../lib/onboardingStatus'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
+import { edgeFleetUnassignedOrphans } from '../lib/fleetHierarchy'
 
 const UNASSIGNED_ID = '__unassigned__'
 /**
@@ -85,6 +86,30 @@ type WgGroup = {
   name: string
   sources: SourceLeaf[]
   totalGb: number
+  /** Edge parent fleets only: nested sub-fleets rendered in the same grid row. */
+  subFleets?: WgGroup[]
+}
+
+function findOwningGroup(groups: WgGroup[], needle: string | null): WgGroup | null {
+  if (!needle) return null
+  for (const g of groups) {
+    if (g.id === needle) return g
+    if (g.sources.some((s) => s.id === needle)) return g
+    for (const sf of g.subFleets ?? []) {
+      if (sf.id === needle) return sf
+      if (sf.sources.some((s) => s.id === needle)) return sf
+    }
+  }
+  return null
+}
+
+function eachGroupDepthFirst(groups: WgGroup[], fn: (g: WgGroup) => void) {
+  for (const g of groups) {
+    fn(g)
+    for (const sf of g.subFleets ?? []) {
+      fn(sf)
+    }
+  }
 }
 
 type Point = { x: number; y: number }
@@ -269,36 +294,56 @@ export function PlanResourceMap({
    * — they never branch into a synthetic "Unassigned" WG card; the user
    * starts a connection from each source's drag handle instead.
    */
-  const { groups, unassignedSources } = useMemo<{
+  const { groups, unassignedSources, unassignedFleets } = useMemo<{
     groups: WgGroup[]
     unassignedSources: SourceLeaf[]
+    unassignedFleets: WorkerGroupRow[]
   }>(() => {
-    // Index source rows by their position in plan.sourceSummary so the leaf
-    // builder can render a stable "Source N" fallback for unnamed rows.
     const indexById = new Map(plan.sourceSummary.map((r, i) => [r.id, i]))
-    const groups: WgGroup[] = plan.workerGroups.map((wg) => {
+
+    const buildWgGroup = (wg: WorkerGroupRow): WgGroup => {
       const sources = plan.sourceSummary
         .filter((r) => r.workerGroupId === wg.id)
         .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
         .sort((a, b) => b.volumeGb - a.volumeGb)
       const totalGb = sources.reduce((acc, s) => acc + s.volumeGb, 0)
-      // Stream WGs and Edge fleets share the resource map for now (PR A);
-      // only the empty-name fallback differs so an unnamed Fleet does not
-      // present as "Untitled worker group" in the tree.
       const fallback = wg.kind === 'edge' ? 'Untitled fleet' : 'Untitled worker group'
-      return {
+      const base: WgGroup = {
         id: wg.id,
         wg,
         name: wg.wg.trim() || fallback,
         sources,
         totalGb,
       }
-    })
+      if (wg.kind !== 'edge') {
+        return base
+      }
+      const childRows = plan.workerGroups.filter(
+        (c) => c.kind === 'edge' && (c.parentFleetId ?? '').trim() === wg.id,
+      )
+      if (childRows.length === 0) {
+        return base
+      }
+      return {
+        ...base,
+        subFleets: childRows.map((c) => buildWgGroup(c)),
+      }
+    }
+
+    const columnWgs = plan.workerGroups.filter(
+      (wg) => wg.kind === 'stream' || (wg.kind === 'edge' && !(wg.parentFleetId ?? '').trim()),
+    )
+
+    const groups: WgGroup[] = columnWgs.map((wg) => buildWgGroup(wg))
+
     const unassignedSources = plan.sourceSummary
       .filter((r) => !r.workerGroupId)
       .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
       .sort((a, b) => b.volumeGb - a.volumeGb)
-    return { groups, unassignedSources }
+
+    const unassignedFleets = edgeFleetUnassignedOrphans(plan.workerGroups, plan.sourceSummary)
+
+    return { groups, unassignedSources, unassignedFleets }
   }, [plan.workerGroups, plan.sourceSummary])
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -364,24 +409,36 @@ export function PlanResourceMap({
     }
   }, [])
 
-  const totalSources = useMemo(
-    () => groups.reduce((acc, g) => acc + g.sources.length, 0),
-    [groups],
-  )
-  const totalGb = useMemo(() => groups.reduce((acc, g) => acc + g.totalGb, 0), [groups])
+  const totalSources = useMemo(() => {
+    let n = 0
+    eachGroupDepthFirst(groups, (g) => {
+      n += g.sources.length
+    })
+    return n
+  }, [groups])
+  const totalGb = useMemo(() => {
+    let t = 0
+    eachGroupDepthFirst(groups, (g) => {
+      t += g.totalGb
+    })
+    return t
+  }, [groups])
   const maxSourceVolGb = useMemo(() => {
     let m = 0
-    for (const g of groups) {
+    eachGroupDepthFirst(groups, (g) => {
       for (const s of g.sources) {
         if (s.volumeGb > m) m = s.volumeGb
       }
-    }
+    })
     return Math.max(0.0001, m)
   }, [groups])
-  const maxGroupVolGb = useMemo(
-    () => Math.max(0.0001, ...groups.map((g) => g.totalGb)),
-    [groups],
-  )
+  const maxGroupVolGb = useMemo(() => {
+    let m = 0.0001
+    eachGroupDepthFirst(groups, (g) => {
+      m = Math.max(m, g.totalGb)
+    })
+    return Math.max(0.0001, m)
+  }, [groups])
 
   /**
    * O(1) lookup from `groupId` → WG kind so the SVG render loop can
@@ -390,11 +447,11 @@ export function PlanResourceMap({
    */
   const groupKindById = useMemo(() => {
     const m = new Map<string, 'stream' | 'edge'>()
-    for (const g of groups) {
+    eachGroupDepthFirst(groups, (g) => {
       if (g.wg) {
         m.set(g.id, g.wg.kind)
       }
-    }
+    })
     return m
   }, [groups])
 
@@ -421,9 +478,9 @@ export function PlanResourceMap({
 
     const newPaths: Branch[] = []
 
-    for (const g of groups) {
+    const measureOne = (g: WgGroup) => {
       const wgEl = wgRefs.current.get(g.id)
-      if (!wgEl) continue
+      if (!wgEl) return
       const wb = wgEl.getBoundingClientRect()
       const wgLeftX = wb.left - cb.left
       const wgY = wb.top - cb.top + wb.height / 2
@@ -444,12 +501,6 @@ export function PlanResourceMap({
           if (x2 - x1 >= 24) {
             const dx = Math.max(40, (x2 - x1) * 0.55)
             const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
-            // Even when a group reports no volume yet we still draw a
-            // thin dashed connector so the source ↔ WG/fleet
-            // attachment is always visually obvious. The 1.8 floor
-            // (vs. 1.4 before) keeps the line thick enough to survive
-            // anti-aliasing at 0.55 opacity when another group is
-            // hovered and this one is "faded".
             const weight =
               g.totalGb > 0
                 ? Math.max(1.8, Math.min(6, (g.totalGb / maxGroupVolGb) * 4.5 + 2))
@@ -477,10 +528,6 @@ export function PlanResourceMap({
           if (x2 - x1 < 24) continue
           const dx = Math.max(40, (x2 - x1) * 0.55)
           const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
-          // Sources without reported volume still get a visible (thin)
-          // connector so the attachment to the WG/fleet is never invisible.
-          // The 1.6 floor matches what summary branches use when a whole
-          // group has no volume yet.
           const weight = s.hasVolume
             ? Math.max(1.6, Math.min(6, (s.volumeGb / maxSourceVolGb) * 4.5 + 1.4))
             : 1.6
@@ -494,6 +541,13 @@ export function PlanResourceMap({
             dst: { x: x2, y: y2 },
           })
         }
+      }
+    }
+
+    for (const g of groups) {
+      measureOne(g)
+      for (const sf of g.subFleets ?? []) {
+        measureOne(sf)
       }
     }
 
@@ -584,7 +638,13 @@ export function PlanResourceMap({
   )
 
   const expandAll = useCallback(() => {
-    setExpanded(new Set(groups.filter((g) => g.sources.length > 0).map((g) => g.id)))
+    const ids: string[] = []
+    eachGroupDepthFirst(groups, (g) => {
+      if (g.sources.length > 0) {
+        ids.push(g.id)
+      }
+    })
+    setExpanded(new Set(ids))
     beginAnimationLoop()
   }, [groups, beginAnimationLoop])
 
@@ -747,9 +807,8 @@ export function PlanResourceMap({
    */
   const hoveredGroupId = useMemo(() => {
     if (!hovered) return null
-    if (groups.some((g) => g.id === hovered)) return hovered
-    const owning = groups.find((g) => g.sources.some((s) => s.id === hovered))
-    return owning ? owning.id : null
+    const owning = findOwningGroup(groups, hovered)
+    return owning?.id ?? null
   }, [hovered, groups])
 
   /**
@@ -797,11 +856,8 @@ export function PlanResourceMap({
    */
   const delayedHoveredGroupId = useMemo(() => {
     if (!delayedHovered) return null
-    if (groups.some((g) => g.id === delayedHovered)) return delayedHovered
-    const owning = groups.find((g) =>
-      g.sources.some((s) => s.id === delayedHovered),
-    )
-    return owning ? owning.id : null
+    const owning = findOwningGroup(groups, delayedHovered)
+    return owning?.id ?? null
   }, [delayedHovered, groups])
 
   /**
@@ -817,9 +873,9 @@ export function PlanResourceMap({
   >({})
   useEffect(() => {
     if (!hovered) return
-    if (groups.some((g) => g.id === hovered)) return
-    const owning = groups.find((g) => g.sources.some((s) => s.id === hovered))
+    const owning = findOwningGroup(groups, hovered)
     if (!owning) return
+    if (owning.id === hovered) return
     const src = owning.sources.find((s) => s.id === hovered)
     if (!src) return
     setStickySourceByGroup((prev) =>
@@ -839,7 +895,7 @@ export function PlanResourceMap({
     [hovered, hoveredGroupId],
   )
 
-  if (groups.length === 0 && unassignedSources.length === 0) {
+  if (groups.length === 0 && unassignedSources.length === 0 && unassignedFleets.length === 0) {
     return (
       <div
         className={[
@@ -1487,8 +1543,181 @@ export function PlanResourceMap({
                     </div>
                   </>
                 )}
+                {(g.subFleets ?? []).map((sf) => {
+                  const sfExpanded = expanded.has(sf.id)
+                  const sfWgHovered = hovered === sf.id
+                  return (
+                    <div key={sf.id} className="mt-4 border-l-2 border-cribl-edge/40 pl-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                        Sub-fleet · {sf.name}
+                      </p>
+                      {sf.sources.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-cribl-border/80 bg-cribl-card-body px-3 py-2 text-[11px] text-cribl-muted">
+                          No sources attached yet.
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            ref={(el) => setSummaryRef(sf.id, el)}
+                            onClick={() => toggleGroup(sf.id)}
+                            onMouseEnter={() => {
+                              if (isDragging) return
+                              setHovered(sf.id)
+                            }}
+                            onMouseLeave={() => {
+                              if (isDragging) return
+                              setHovered((cur) => (cur === sf.id ? null : cur))
+                            }}
+                            onFocus={() => {
+                              if (isDragging) return
+                              setHovered(sf.id)
+                            }}
+                            onBlur={() => {
+                              if (isDragging) return
+                              setHovered((cur) => (cur === sf.id ? null : cur))
+                            }}
+                            className={[
+                              'group flex min-w-0 items-center gap-3 rounded-xl border bg-white px-3 py-2.5 text-left shadow-ctrl transition',
+                              sfWgHovered
+                                ? 'border-cribl-edge/60 ring-2 ring-cribl-edge/30 -translate-y-0.5'
+                                : sfExpanded
+                                ? 'border-cribl-edge/30'
+                                : 'border-cribl-border/80 hover:border-cribl-edge/40',
+                            ].join(' ')}
+                            aria-expanded={sfExpanded}
+                            title={sfExpanded ? 'Collapse sources' : 'Expand sources'}
+                          >
+                            <span
+                              aria-hidden
+                              className={[
+                                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
+                                sfWgHovered || sfExpanded
+                                  ? 'bg-cribl-edge text-white'
+                                  : 'bg-cribl-edge-soft text-cribl-edge-ink',
+                              ].join(' ')}
+                            >
+                              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                <path d="M3.5 5h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Zm0 4h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Zm0 4h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Z" />
+                              </svg>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-cribl-ink">
+                                {sf.sources.length} {sf.sources.length === 1 ? 'source' : 'sources'}
+                              </span>
+                              <span className="block truncate text-[11px] text-cribl-muted">
+                                {sf.totalGb > 0 ? formatGbOrTbPerDayStr(sf.totalGb) : 'No volume yet'}
+                                {' · '}
+                                {sfExpanded ? 'click to collapse' : 'expand to view'}
+                              </span>
+                            </span>
+                            <ChevronCue open={sfExpanded} />
+                          </button>
+                          <div
+                            aria-hidden={!sfExpanded}
+                            className="ml-6 grid"
+                            style={{
+                              gridTemplateRows: sfExpanded ? '1fr' : '0fr',
+                              opacity: sfExpanded ? 1 : 0,
+                              marginTop: sfExpanded ? 8 : 0,
+                              pointerEvents: sfExpanded ? undefined : 'none',
+                              transitionProperty: 'grid-template-rows, opacity, margin-top',
+                              transitionDuration: `${TRANSITION_DURATION_MS}ms`,
+                              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                            }}
+                          >
+                            <div className="min-h-0 overflow-hidden">
+                              <div className="flex flex-col gap-2">
+                                {sf.sources.map((s) => {
+                                  const isHovered = hovered === s.id
+                                  const volStr = s.hasVolume
+                                    ? formatGbOrTbPerDayStr(s.volumeGb)
+                                    : '—'
+                                  return (
+                                    <div
+                                      key={s.id}
+                                      ref={(el) => setSourceRef(s.id, el)}
+                                      role="button"
+                                      tabIndex={sfExpanded ? 0 : -1}
+                                      onClick={() => onOpenSource(s.id)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          e.preventDefault()
+                                          onOpenSource(s.id)
+                                        }
+                                      }}
+                                      onMouseEnter={() => {
+                                        if (isDragging) return
+                                        setHovered(s.id)
+                                      }}
+                                      onMouseLeave={() => {
+                                        if (isDragging) return
+                                        setHovered((cur) => (cur === s.id ? null : cur))
+                                      }}
+                                      onFocus={() => {
+                                        if (isDragging) return
+                                        setHovered(s.id)
+                                      }}
+                                      onBlur={() => {
+                                        if (isDragging) return
+                                        setHovered((cur) => (cur === s.id ? null : cur))
+                                      }}
+                                      title="Open source detail"
+                                      aria-label={`Open ${s.name}`}
+                                      className={[
+                                        'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border bg-white px-2.5 py-2 text-left shadow-ctrl transition focus-visible:ring-2 focus-visible:ring-cribl-primary/40 focus-visible:outline-none',
+                                        isHovered
+                                          ? 'border-cribl-primary/60 ring-2 ring-cribl-primary/30'
+                                          : 'border-cribl-border/80',
+                                      ].join(' ')}
+                                    >
+                                      <KindDot kind="edge" className="shrink-0" />
+                                      <div className="flex min-w-0 flex-1 flex-col items-start gap-0">
+                                        <span className="block max-w-full truncate text-[13px] font-semibold text-cribl-ink">
+                                          {s.name}
+                                        </span>
+                                        {s.subtitle ? (
+                                          <span className="block max-w-full truncate text-[11px] text-cribl-muted">
+                                            {s.subtitle}
+                                          </span>
+                                        ) : null}
+                                        {(s.criticality && critToneClass(s.criticality)) || s.isCompliance ? (
+                                          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                            {s.criticality && critToneClass(s.criticality) ? (
+                                              <span
+                                                className={`rounded-md border px-1.5 py-0.5 ${critToneClass(s.criticality)}`}
+                                              >
+                                                {s.criticality}
+                                              </span>
+                                            ) : null}
+                                            {s.isCompliance ? (
+                                              <span className="rounded-md border border-cribl-primary/30 bg-cribl-primary-soft px-1.5 py-0.5 text-cribl-primary-ink">
+                                                Compliance
+                                              </span>
+                                            ) : null}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <span className="shrink-0 rounded-md bg-cribl-card-body px-1.5 py-0.5 text-[11px] tabular-nums text-cribl-ink/80">
+                                        {volStr}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
+              <div
+                className="relative z-10 flex min-w-0 flex-col gap-3"
+                style={{ gridColumn: 2, gridRow: i + 1 }}
+              >
               <div
                 ref={(el) => setWgRef(g.id, el)}
                 {...(!isUnassigned && g.wg
@@ -1554,7 +1783,6 @@ export function PlanResourceMap({
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                style={{ gridColumn: 2, gridRow: i + 1 }}
               >
                 {/*
                  * Drop-here indicator. Appears on the left edge of
@@ -1681,19 +1909,139 @@ export function PlanResourceMap({
                   })()
                 ) : null}
               </div>
+                {(g.subFleets ?? []).map((sf) => {
+                  const sfWgHovered = hovered === sf.id
+                  const sfIsDropTarget =
+                    !!drag && drag.overWgId === sf.id && drag.originGroupId !== sf.id
+                  const sfIsDropCandidate =
+                    !!drag && drag.originGroupId !== sf.id && drag.overWgId !== sf.id
+                  return (
+                    <div
+                      key={sf.id}
+                      ref={(el) => setWgRef(sf.id, el)}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenWorkerGroup(sf.id)}
+                      onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onOpenWorkerGroup(sf.id)
+                        }
+                      }}
+                      title={`Open ${sf.name}`}
+                      aria-label={`Open ${sf.name}`}
+                      onMouseEnter={() => {
+                        if (isDragging) return
+                        setHovered(sf.id)
+                      }}
+                      onMouseLeave={() => {
+                        if (isDragging) return
+                        setHovered((cur) => (cur === sf.id ? null : cur))
+                      }}
+                      onFocus={() => {
+                        if (isDragging) return
+                        setHovered(sf.id)
+                      }}
+                      onBlur={() => {
+                        if (isDragging) return
+                        setHovered((cur) => (cur === sf.id ? null : cur))
+                      }}
+                      className={[
+                        'relative z-10 flex min-w-0 cursor-pointer flex-col gap-1 rounded-xl border px-3 py-2.5 shadow-ctrl transition focus-visible:ring-2 focus-visible:ring-cribl-edge/40 focus-visible:outline-none',
+                        'border-cribl-edge/50 bg-white/90',
+                        sfIsDropTarget
+                          ? 'ring-4 ring-cribl-edge/70 ring-offset-2 ring-offset-white scale-[1.015]'
+                          : sfIsDropCandidate
+                          ? 'ring-2 ring-cribl-edge/20'
+                          : sfWgHovered
+                          ? 'ring-2 ring-cribl-edge/35'
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
+                      {drag && drag.originGroupId !== sf.id ? (
+                        <span
+                          aria-hidden
+                          className={[
+                            'pointer-events-none absolute left-0 top-1/2 z-20',
+                            '-translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150 ease-out',
+                            sfIsDropTarget
+                              ? 'h-4 w-4 bg-cribl-edge ring-4 ring-cribl-edge/35'
+                              : 'h-3 w-3 bg-cribl-edge/70 ring-4 ring-cribl-edge/15',
+                          ].join(' ')}
+                          title="Drop here to attach"
+                        />
+                      ) : null}
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cribl-edge text-white shadow-ctrl"
+                        >
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                            <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h11A1.5 1.5 0 0 1 17 4.5v2A1.5 1.5 0 0 1 15.5 8h-11A1.5 1.5 0 0 1 3 6.5v-2Zm0 5A1.5 1.5 0 0 1 4.5 8h11A1.5 1.5 0 0 1 17 9.5v2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 11.5v-2Zm0 5A1.5 1.5 0 0 1 4.5 13h11a1.5 1.5 0 0 1 1.5 1.5v2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-2Z" />
+                          </svg>
+                        </span>
+                        <div className="min-w-0">
+                          <p className="m-0 text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                            Sub fleet
+                          </p>
+                          <p className="m-0 max-w-full truncate text-[13px] font-semibold text-cribl-ink">
+                            {sf.name}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-cribl-muted">
+                        <span className="rounded-md bg-white/70 px-1.5 py-0.5 tabular-nums text-cribl-ink/80">
+                          {sf.sources.length} {sf.sources.length === 1 ? 'src' : 'srcs'}
+                        </span>
+                        <span className="rounded-md bg-white/70 px-1.5 py-0.5 tabular-nums text-cribl-ink/80">
+                          {sf.totalGb > 0 ? formatGbOrTbPerDayStr(sf.totalGb) : '—'}
+                        </span>
+                      </div>
+                      {stickySourceByGroup[sf.id] ? (
+                        (() => {
+                          const showSourceName =
+                            delayedHoveredGroupId === sf.id && delayedHovered !== sf.id
+                          return (
+                            <div
+                              aria-hidden={!showSourceName}
+                              className="overflow-hidden"
+                              style={{
+                                maxHeight: showSourceName ? 28 : 0,
+                                opacity: showSourceName ? 1 : 0,
+                                marginTop: showSourceName ? 4 : 0,
+                                transitionProperty: 'max-height, opacity, margin-top',
+                                transitionDuration: '220ms',
+                                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                              }}
+                            >
+                              <p className="m-0 truncate rounded-md bg-white/70 px-2 py-0.5 text-[10px] text-cribl-edge-ink">
+                                ↦ {stickySourceByGroup[sf.id]}
+                              </p>
+                            </div>
+                          )
+                        })()
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
             </Fragment>
           )
         })}
         </div>
 
-        {unassignedSources.length > 0 ? (
+        {unassignedSources.length > 0 || unassignedFleets.length > 0 ? (
           <UnassignedSection
             sources={unassignedSources}
+            orphanFleets={unassignedFleets}
             interactive={interactive}
             isDragging={isDragging}
             drag={drag}
             hovered={hovered}
             onOpenSource={onOpenSource}
+            onOpenWorkerGroup={onOpenWorkerGroup}
             setHovered={setHovered}
             onBeginDrag={(sourceId, anchorEl) => {
               const anchor = containerRelativeCenter(anchorEl)
@@ -1724,11 +2072,14 @@ export function PlanResourceMap({
  */
 type UnassignedSectionProps = {
   sources: SourceLeaf[]
+  /** Top-level Edge fleets with no sources and no sub-fleets — same bucket as loose sources. */
+  orphanFleets: WorkerGroupRow[]
   interactive: boolean
   isDragging: boolean
   drag: DragState | null
   hovered: string | null
   onOpenSource: (id: string) => void
+  onOpenWorkerGroup: (id: string) => void
   setHovered: React.Dispatch<React.SetStateAction<string | null>>
   /** Begin a drag from the press location of the given handle element. */
   onBeginDrag: (sourceId: string, anchorEl: HTMLElement) => void
@@ -1737,11 +2088,13 @@ type UnassignedSectionProps = {
 
 function UnassignedSection({
   sources,
+  orphanFleets,
   interactive,
   isDragging,
   drag,
   hovered,
   onOpenSource,
+  onOpenWorkerGroup,
   setHovered,
   onBeginDrag,
   sectionRef,
@@ -1793,17 +2146,23 @@ function UnassignedSection({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-muted">
-            Unassigned sources
+            Unassigned sources & fleets
           </p>
           <p className="m-0 mt-0.5 text-xs text-cribl-muted">
             {interactive
-              ? 'Press and drag the dot on the right edge of any source onto a worker group or fleet above to assign it.'
-              : 'These sources aren’t attached to any worker group or fleet yet.'}
+              ? 'Drag a source’s handle onto a worker group or fleet above to assign it. Fleets listed below have no sources yet — nest them under a parent fleet from the left nav (bottom drop band) to form a sub-fleet.'
+              : 'These sources and fleets aren’t wired into the topology above yet.'}
           </p>
         </div>
         <span className="shrink-0 text-[11px] tabular-nums text-cribl-muted">
           {trimmed ? `${filtered.length} of ${sources.length}` : sources.length}{' '}
           {sources.length === 1 ? 'source' : 'sources'}
+          {orphanFleets.length > 0 ? (
+            <>
+              {' · '}
+              {orphanFleets.length} {orphanFleets.length === 1 ? 'fleet' : 'fleets'}
+            </>
+          ) : null}
         </span>
       </div>
       <SearchInput
@@ -1815,11 +2174,13 @@ function UnassignedSection({
         className="mt-3"
       />
       {filtered.length === 0 ? (
-        <p className="m-0 mt-3 rounded-lg border border-dashed border-cribl-border/70 bg-white/60 px-3 py-4 text-center text-[12px] text-cribl-muted">
-          No unassigned sources match “{query}”.
-        </p>
+        sources.length > 0 ? (
+          <p className="m-0 mt-3 rounded-lg border border-dashed border-cribl-border/70 bg-white/60 px-3 py-4 text-center text-[12px] text-cribl-muted">
+            No unassigned sources match “{query}”.
+          </p>
+        ) : null
       ) : (
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((s) => {
           const isHovered = hovered === s.id
           const isDragSubject = drag?.sourceId === s.id
@@ -1917,8 +2278,53 @@ function UnassignedSection({
             </div>
           )
         })}
-      </div>
+        </div>
       )}
+      {orphanFleets.length > 0 ? (
+        <div className="mt-5 border-t border-cribl-border/60 pt-4">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-edge-ink">
+            Unassigned fleets
+          </p>
+          <p className="m-0 mt-1 text-xs text-cribl-muted">
+            No sources yet — drag under a top-level fleet in the left nav (use the bottom “Sub-fleet”
+            drop band) to nest.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {orphanFleets.map((f) => {
+              const label = f.wg.trim() || 'Untitled fleet'
+              const isHovered = hovered === f.id
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => onOpenWorkerGroup(f.id)}
+                  onMouseEnter={() => {
+                    if (isDragging) return
+                    setHovered(f.id)
+                  }}
+                  onMouseLeave={() => {
+                    if (isDragging) return
+                    setHovered((cur) => (cur === f.id ? null : cur))
+                  }}
+                  className={[
+                    'flex min-w-0 cursor-pointer flex-col items-start gap-1 rounded-lg border bg-white px-3 py-2.5 text-left shadow-ctrl transition focus-visible:ring-2 focus-visible:ring-cribl-edge/40 focus-visible:outline-none',
+                    isHovered
+                      ? 'border-cribl-edge/60 ring-2 ring-cribl-edge/25'
+                      : 'border-cribl-border/80',
+                  ].join(' ')}
+                >
+                  <span className="text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                    Fleet · sub-fleet eligible
+                  </span>
+                  <span className="block w-full truncate text-[13px] font-semibold text-cribl-ink">
+                    {label}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

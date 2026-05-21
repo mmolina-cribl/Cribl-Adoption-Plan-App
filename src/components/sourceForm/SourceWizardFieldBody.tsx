@@ -1,14 +1,14 @@
-import { inputData, securityDataTypes } from '../../data/referenceData'
+import { inputData, securityDataTypes, sourceTileSearchAliases } from '../../data/referenceData'
 import type { SourceSummaryRow } from '../../types/planTypes'
 import type { SourceSummaryFieldPatch } from './SourceFormPanels'
 import type { SourceWizardFieldKind } from './sourceFormWizardFieldCatalog'
 import {
   CheckboxLabeled,
+  ComboboxText,
   LabeledField,
   MultiComboboxChips,
   NumberWithSuffix,
   RetentionDials,
-  SelectOrCustom,
   SelectWithEmpty,
 } from '../FormControls'
 
@@ -63,13 +63,13 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
       return (
         <div className="mt-4">
           <LabeledField id={`w-${row.id}-tile`} label="Source tile">
-            <SelectOrCustom
+            <ComboboxText
               id={`w-${row.id}-tile`}
               value={row.sourceTile}
               onChange={(v) => s('sourceTile', v)}
               options={inputData.techTiles}
-              placeholder="Select a tile…"
-              customPlaceholder="Type a custom source tile"
+              optionAliases={sourceTileSearchAliases}
+              placeholder="Type to search source tiles…"
             />
           </LabeledField>
         </div>
@@ -99,8 +99,9 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               value={row.destinations}
               onChange={(v) => s('destinations', v)}
               options={inputData.destTiles}
+              allowCustom={false}
               alwaysShowOptions
-              placeholder="e.g. SplunkHEC, AmazonS3"
+              placeholder="Search tiles, then pick from the list…"
             />
           </LabeledField>
         </div>

@@ -38,6 +38,10 @@ type Props = {
   /** Sum of avgDailyGb across the WG’s sources (parent already computes it). */
   totalVolumeGb: number
   /**
+   * Edge parent fleets: direct sub-fleets (`parentFleetId` → this fleet).
+   */
+  childFleets?: WorkerGroupRow[]
+  /**
    * Sources in the plan that aren't attached to any worker group yet.
    * Rendered in a dedicated "Unassigned sources" section beneath the
    * tree, each with a drag handle the user can drop onto the WG hub
@@ -62,6 +66,11 @@ type Props = {
    * where the user can choose the wizard or manual setup).
    */
   onAddSource?: () => void
+  /**
+   * Optional. When viewing a parent Edge fleet, open a sub-fleet from the
+   * resource map strip.
+   */
+  onOpenChildFleet?: (id: string) => void
   /** Extra classes appended to the outer card (e.g. `lg:col-span-2`). */
   className?: string
 }
@@ -94,11 +103,13 @@ export function WorkerGroupResourceMap({
   workerGroup,
   sources,
   totalVolumeGb,
+  childFleets = [],
   unassignedSources = [],
   onOpenSource,
   onUnassign,
   onAttach,
   onAddSource,
+  onOpenChildFleet,
   className,
 }: Props) {
   const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
@@ -467,6 +478,33 @@ export function WorkerGroupResourceMap({
           ) : null}
         </div>
       </div>
+
+      {isEdgeKind && childFleets.length > 0 ? (
+        <div className="mt-3 rounded-xl border border-cribl-edge/45 bg-cribl-edge-soft/50 px-3 py-2.5">
+          <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+            Sub-fleets
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {childFleets.map((c) => {
+              const nm = c.wg.trim() || 'Untitled fleet'
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onOpenChildFleet?.(c.id)}
+                  title={`Open ${nm}`}
+                  className="max-w-[14rem] rounded-lg border border-cribl-edge/40 bg-white px-2.5 py-2 text-left shadow-ctrl transition hover:border-cribl-edge hover:ring-2 hover:ring-cribl-edge/25"
+                >
+                  <span className="block text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                    Sub fleet
+                  </span>
+                  <span className="mt-0.5 block truncate text-[13px] font-semibold text-cribl-ink">{nm}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div ref={containerRef} className="relative mt-4">
         <svg

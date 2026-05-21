@@ -1,7 +1,7 @@
 {
   "name": "adoption-plan",
   "private": true,
-  "version": "2.0.2",
+  "version": "2.1.0",
   "description": "Field-facing planning tool for designing a customer's Cribl Stream and Edge adoption — model worker groups / fleets, sources, and projected daily volume; import/export Excel workbooks (gold v0.9.1 schema). Ships as a Cribl App Platform install (.tgz) and as a single self-contained HTML file for on-prem use.",
   "author": "Michael Molina (Cribl Sr. CSE)",
   "type": "module",
@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -33,6 +34,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "tailwindcss": "^4.2.4",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.10",

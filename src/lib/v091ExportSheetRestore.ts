@@ -67,6 +67,8 @@ import {
   V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
   V091_OVERVIEW_TABLE2_HEADER_ROW,
   V091_PER_WG_FIRST_DATA_ROW,
+  V091_UNASSIGNED_BUCKET_SHEET_NAME,
+  V091_UNASSIGNED_BUCKET_WG_ID,
 } from './planWorkbookLayout'
 import { resolveAllSheetNames } from './v091SheetNames'
 import {
@@ -813,8 +815,13 @@ function overviewBottomTableOverlay(
   bottomLastDataRow: number
 } {
   const overlay: OverlayMap = new Map()
-  const wgs = plan.workerGroups.filter((w) =>
-    kind === 'edge' ? w.kind === 'edge' : w.kind !== 'edge',
+  // Exclude the synthetic unassigned bucket — it is not a real capacity
+  // slot; mirror the same exclusion the exporter applies in
+  // `fillOverviewSheet` / `fixOverviewTableRefs` (see v091ExportWorkbook).
+  const wgs = plan.workerGroups.filter(
+    (w) =>
+      w.id !== V091_UNASSIGNED_BUCKET_WG_ID &&
+      (kind === 'edge' ? w.kind === 'edge' : w.kind !== 'edge'),
   )
 
   const slots =
@@ -1738,17 +1745,24 @@ async function restorePerWgSheets(
     zOut.file(outPath, patched)
   }
 
-  // Resolve each plan WG / fleet's expected output sheet name
-  // (mirrors the exporter's `resolveAllSheetNames` call), then
-  // restore that sheet from the matching scaffold. Track which
-  // output sheets we've already populated so the leftover-scaffold
-  // sweep below can't accidentally clobber them with an empty
-  // overlay — a plan WG named `default` resolves to `wg-default`,
-  // which is the same as the gold scaffold name.
-  const finalNames = resolveAllSheetNames(
-    plan.workerGroups,
-    PER_WG_RESERVED_STATIC_SHEET_NAMES,
+  // Resolve each plan WG / fleet's expected output sheet name (mirrors
+  // the exporter's `resolveExportSheetNames` call — real WGs run through
+  // `resolveAllSheetNames` with `wg-unassigned` pre-reserved; the
+  // synthetic unassigned bucket is hard-assigned to the bucket sheet
+  // name afterwards). Track which output sheets we've already populated
+  // so the leftover-scaffold sweep below can't accidentally clobber
+  // them with an empty overlay — a plan WG named `default` resolves to
+  // `wg-default`, which is the same as the gold scaffold name.
+  const realWgs = plan.workerGroups.filter(
+    (w) => w.id !== V091_UNASSIGNED_BUCKET_WG_ID,
   )
+  const finalNames = resolveAllSheetNames(
+    realWgs,
+    [...PER_WG_RESERVED_STATIC_SHEET_NAMES, V091_UNASSIGNED_BUCKET_SHEET_NAME],
+  )
+  if (plan.workerGroups.some((w) => w.id === V091_UNASSIGNED_BUCKET_WG_ID)) {
+    finalNames.set(V091_UNASSIGNED_BUCKET_WG_ID, V091_UNASSIGNED_BUCKET_SHEET_NAME)
+  }
   const restoredOutNames = new Set<string>()
   for (const wg of plan.workerGroups) {
     const sheetName = finalNames.get(wg.id)

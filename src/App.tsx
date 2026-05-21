@@ -17,6 +17,8 @@ import { ConfirmClearDialog } from './components/ConfirmClearDialog'
 import { ConfirmRemoveSourceDialog } from './components/ConfirmRemoveSourceDialog'
 import { ConfirmRemoveWorkerGroupDialog } from './components/ConfirmRemoveWorkerGroupDialog'
 import { defaultSourceRow, defaultWorkerGroupRow } from './lib/defaultState'
+import { applyEdgeFleetReorder } from './lib/fleetHierarchy'
+import type { DropPosition } from './lib/useDragReorder'
 import { deriveStreamOrEdge } from './lib/workerGroupIds'
 import type { MainView } from './components/navTypes'
 import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
@@ -240,6 +242,100 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     }))
   }
 
+  /**
+   * Move `fromId` to land before/after `toId` inside a typed array. Returns
+   * the original array if the move is a no-op (same id, missing id, or
+   * resulting position identical to the current one). Pure — caller wraps
+   * in `setPlan`.
+   */
+  const reorderById = <T extends { id: string }>(
+    arr: T[],
+    fromId: string,
+    toId: string,
+    position: 'before' | 'after',
+  ): T[] => {
+    if (fromId === toId) {
+      return arr
+    }
+    const fromIdx = arr.findIndex((r) => r.id === fromId)
+    const toIdx = arr.findIndex((r) => r.id === toId)
+    if (fromIdx < 0 || toIdx < 0) {
+      return arr
+    }
+    const next = arr.slice()
+    const [moved] = next.splice(fromIdx, 1)
+    if (!moved) {
+      return arr
+    }
+    // After splice, indices >= fromIdx have shifted by -1. Recompute the
+    // target's new index, then offset by `position`.
+    const adjustedTo = toIdx > fromIdx ? toIdx - 1 : toIdx
+    const insertAt = position === 'before' ? adjustedTo : adjustedTo + 1
+    if (insertAt === fromIdx) {
+      return arr
+    }
+    next.splice(insertAt, 0, moved)
+    return next
+  }
+
+  /**
+   * Reorder a source row in `plan.sourceSummary`. The new order also
+   * drives Excel export ordering (per-WG sheets read sources from
+   * `plan.sourceSummary.filter(...)` in plan order, and overview
+   * source rows follow the same order — see v091ExportWorkbook).
+   */
+  const reorderSources = (
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => {
+    if (position === 'nest') {
+      return
+    }
+    setPlan((p) => {
+      const next = reorderById(p.sourceSummary, fromId, toId, position)
+      return next === p.sourceSummary ? p : { ...p, sourceSummary: next }
+    })
+  }
+
+  /**
+   * Reorder a worker group / fleet row in `plan.workerGroups`. The
+   * caller (left nav) only allows drops within the same `kind`
+   * section, but we still defensively no-op cross-kind moves so a
+   * future caller can't shuffle Stream and Edge rows together. The
+   * new order drives `wg-*` / `fl-*` sheet/tab order and the
+   * Stream/Edge Overview bottom-table rows on export.
+   */
+  const reorderWorkerGroups = (
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => {
+    setPlan((p) => {
+      const from = p.workerGroups.find((w) => w.id === fromId)
+      const to = p.workerGroups.find((w) => w.id === toId)
+      if (!from || !to || from.kind !== to.kind) {
+        return p
+      }
+      if (from.kind === 'stream') {
+        if (position === 'nest') {
+          return p
+        }
+        const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+        const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+        const nextStreams = reorderById(streams, fromId, toId, position)
+        if (nextStreams === streams) {
+          return p
+        }
+        return { ...p, workerGroups: [...nextStreams, ...edges] }
+      }
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      const nextEdges = applyEdgeFleetReorder(edges, fromId, toId, position)
+      return { ...p, workerGroups: [...streams, ...nextEdges] }
+    })
+  }
+
   const addWorkerGroupWithName = (wg: string, kind: WorkerGroupKind = 'stream') => {
     const id = newId()
     setPlan((p) => {
@@ -260,7 +356,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
       if (!p.workerGroups.some((w) => w.id === id)) {
         return p
       }
-      const rest = p.workerGroups.filter((w) => w.id !== id)
+      const rest = p.workerGroups
+        .filter((w) => w.id !== id)
+        .map((w) => ((w.parentFleetId ?? '').trim() === id ? { ...w, parentFleetId: '' } : w))
       queueMicrotask(() => {
         setActiveWorkerGroupId((c) => (c === id ? (rest[0]?.id ?? null) : c))
       })
@@ -453,6 +551,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
                   onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
                   onUpdateWorkerGroupWg={updateWorkerGroupWg}
+                  onReorderWorkerGroups={reorderWorkerGroups}
                   onSelectSource={(id) => {
                     setActiveSourceId(id)
                     setMainView('source')
@@ -460,6 +559,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onAddSource={openAddSource}
                   onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
                   onRenameSource={updateSourceName}
+                  onReorderSources={reorderSources}
                   onSelectImport={() => setMainView('import')}
                   onSelectExport={() => setMainView('export')}
                   onClearPlan={() => setConfirmClearOpen(true)}
@@ -532,6 +632,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
               onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
               onUpdateWorkerGroupWg={updateWorkerGroupWg}
+              onReorderWorkerGroups={reorderWorkerGroups}
               onSelectSource={(id) => {
                 setActiveSourceId(id)
                 setMainView('source')
@@ -539,6 +640,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               onAddSource={openAddSource}
               onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
               onRenameSource={updateSourceName}
+              onReorderSources={reorderSources}
               onSelectImport={() => setMainView('import')}
               onSelectExport={() => setMainView('export')}
               onClearPlan={() => setConfirmClearOpen(true)}
@@ -643,6 +745,10 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setMainView('source')
                   }}
                   onAddSource={openAddSource}
+                  onSelectWorkerGroup={(wid) => {
+                    setActiveWorkerGroupId(wid)
+                    setMainView('workerGroup')
+                  }}
                 />
               )}
 

@@ -11,9 +11,10 @@
  * runtime resolver here so call sites don't need to care:
  *
  *   - **Cribl Apps build** (`npm run build`, served from inside the
- *     App Platform iframe): `fetch('/adoption-plan-empty.xlsx')` against
- *     the platform's static-asset host. Fast warm-cache hit on every
- *     subsequent export.
+ *     App Platform iframe): `fetch()` against the template URL from
+ *     {@link getAdoptionPlanEmptyTemplateUrl} (same folder as `index.html`,
+ *     e.g. `static/adoption-plan-empty.xlsx` — **not** site-root `/…`).
+ *     Warm-cache hit on every subsequent export.
  *
  *   - **Standalone HTML build** (`npm run build:standalone`, opened via
  *     `file://`): the .xlsx is **inlined into the bundled JS at build
@@ -43,6 +44,22 @@ export function getCachedAdoptionPlanEmptyBuffer(): ArrayBuffer | null {
 /** Set when preloading the shell in `App` (optional; see {@link fetchAdoptionPlanEmptyBufferIfMissing}). */
 export function setAdoptionPlanEmptyBuffer(b: ArrayBuffer | null) {
   cachedAdoptionPlanEmpty = b
+}
+
+/**
+ * Absolute URL for `adoption-plan-empty.xlsx`. Resolves next to the current
+ * HTML document (`document.baseURI`) so packaged apps work when the shell
+ * lives beside `index.html` under `static/`. Vite dev/preview still work
+ * (document at `/` or `/index.html` → `/adoption-plan-empty.xlsx` from
+ * `public/`). Non-browser fallbacks use Vite `import.meta.env.BASE_URL`.
+ */
+export function getAdoptionPlanEmptyTemplateUrl(): string {
+  if (typeof document !== 'undefined' && document.baseURI) {
+    return new URL('adoption-plan-empty.xlsx', document.baseURI).href
+  }
+  const base = import.meta.env.BASE_URL || '/'
+  const withSlash = base.endsWith('/') ? base : `${base}/`
+  return `${withSlash}adoption-plan-empty.xlsx`
 }
 
 /**
@@ -87,8 +104,8 @@ async function loadEmbeddedGoldTemplate(): Promise<ArrayBuffer | null> {
  * Loading order:
  *
  *   1. In-memory cache hit → return.
- *   2. `fetch('/adoption-plan-empty.xlsx')` — works inside Cribl Apps
- *      and against `vite preview`. Returns `null` on network/HTTP
+ *   2. `fetch(getAdoptionPlanEmptyTemplateUrl())` — correct path in Cribl
+ *      Apps (`static/…`) and `vite preview`. Returns `null` on network/HTTP
  *      failure rather than throwing.
  *   3. Build-time-embedded buffer (standalone build only). The runtime
  *      attempts this whenever the fetch returned `null`, which covers
@@ -106,7 +123,7 @@ export async function fetchAdoptionPlanEmptyBufferIfMissing(): Promise<ArrayBuff
     return cachedAdoptionPlanEmpty
   }
   try {
-    const r = await fetch('/adoption-plan-empty.xlsx')
+    const r = await fetch(getAdoptionPlanEmptyTemplateUrl())
     if (r.ok) {
       const b = await r.arrayBuffer()
       cachedAdoptionPlanEmpty = b

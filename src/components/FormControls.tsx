@@ -270,6 +270,7 @@ type ComboboxProps = {
   value: string
   onChange: (v: string) => void
   options: readonly string[] | string[]
+  optionAliases?: Partial<Record<string, readonly string[] | string[]>>
   placeholder?: string
   /** @deprecated not used; kept for call-site compatibility */
   listName?: string
@@ -281,7 +282,11 @@ type MultiComboboxProps = {
   onChange: (v: string) => void
   options: readonly string[] | string[]
   placeholder?: string
-  /** If true, user can type values not in `options`. */
+  /**
+   * If true (default), user can add arbitrary chips (including via Enter / comma).
+   * If false, only option labels from `options` can be added (list click, exact typed match,
+   * or Enter when exactly one option matches the current search).
+   */
   allowCustom?: boolean
   /** Separator used when serializing back to a string field. */
   joinWith?: string
@@ -363,6 +368,7 @@ export function ComboboxText({
   value,
   onChange,
   options,
+  optionAliases = {},
   placeholder = '',
 }: ComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -377,21 +383,27 @@ export function ComboboxText({
 
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase()
+    const matchesQuery = (item: string) => {
+      if (item.toLowerCase().includes(q)) return true
+      return (optionAliases[item] ?? []).some((alias) =>
+        String(alias).toLowerCase().includes(q),
+      )
+    }
     if (isLarge) {
       if (!q) {
         return []
       }
       return o
-        .filter((item) => item.toLowerCase().includes(q))
+        .filter(matchesQuery)
         .slice(0, MAX_SUGGESTIONS)
     }
     if (!q) {
       return o.slice(0, MAX_SUGGESTIONS)
     }
     return o
-      .filter((item) => item.toLowerCase().includes(q))
+      .filter(matchesQuery)
       .slice(0, MAX_SUGGESTIONS)
-  }, [isLarge, o, value])
+  }, [isLarge, o, optionAliases, value])
 
   const showTypeToSearch = open && isLarge && !value.trim() && filtered.length === 0
   const showNoMatches = open && isLarge && value.trim().length > 0 && filtered.length === 0
@@ -558,15 +570,30 @@ export function MultiComboboxChips({
 
   const addToken = useCallback(
     (raw: string) => {
-      const t = raw.trim()
-      if (!t) return
-      const k = t.toLowerCase()
+      const trimmed = raw.trim()
+      if (!trimmed) return
+
+      let token: string | null = null
+      if (allowCustom) {
+        token = trimmed
+      } else {
+        const exact = o.find((x) => x.trim().toLowerCase() === trimmed.toLowerCase())
+        if (exact) {
+          token = exact
+        } else if (filtered.length === 1) {
+          // One visible match (current search): Enter commits that option only.
+          token = filtered[0]!
+        }
+      }
+      if (!token) return
+
+      const k = token.toLowerCase()
       if (selectedSet.has(k)) return
-      onChange(serializeMultiValue([...selected, t], joinWith))
+      onChange(serializeMultiValue([...selected, token], joinWith))
       setQ('')
       queueMicrotask(() => inputRef.current?.focus())
     },
-    [joinWith, onChange, selected, selectedSet],
+    [allowCustom, filtered, joinWith, o, onChange, selected, selectedSet],
   )
 
   const removeToken = useCallback(
