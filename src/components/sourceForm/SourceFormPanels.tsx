@@ -130,6 +130,20 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
           placeholder="e.g. us-east-1, DC4 / Stockholm…"
         />
       </LabeledField>
+      <LabeledField
+        id={`s-${row.id}-cc`}
+        label="Current collection (optional)"
+        hint="Only if this data is already collected somewhere today (agents, forwarders, syslog). Skip for net-new feeds. Press Enter to bubble a value, or use commas. Column C on each v0.9.1 per-WG / per-Fleet sheet when populated."
+      >
+        <MultiComboboxChips
+          id={`s-${row.id}-cc`}
+          value={row.currentCollection}
+          onChange={(v) => s('currentCollection', v)}
+          options={[]}
+          showSuggestions={false}
+          placeholder="e.g. Splunk UF, syslog-ng, Datadog Agent"
+        />
+      </LabeledField>
       <LabeledField id={`s-${row.id}-tile`} label="Source tile">
         <ComboboxText
           id={`s-${row.id}-tile`}
@@ -137,7 +151,8 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
           onChange={(v) => s('sourceTile', v)}
           options={inputData.techTiles}
           optionAliases={sourceTileSearchAliases}
-          placeholder="Type to search source tiles…"
+          alwaysShowOptions
+          placeholder="Scroll the list or type to filter…"
         />
       </LabeledField>
       <LabeledField id={`s-${row.id}-pipe`} label="Pipeline usecase">

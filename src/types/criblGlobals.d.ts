@@ -6,6 +6,9 @@
 // (useful as a feature-detect for the local-dev fallback path).
 
 declare global {
+  /** Semantic version from `package.json`, injected at Vite build (`define`). */
+  const __APP_VERSION__: string
+
   interface Window {
     /** Base URL for all Cribl API calls. Example: `https://<tenant>.cribl-staging.cloud/api/v1` */
     CRIBL_API_URL?: string

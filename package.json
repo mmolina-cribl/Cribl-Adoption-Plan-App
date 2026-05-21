@@ -1,7 +1,7 @@
 {
   "name": "adoption-plan",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Field-facing planning tool for designing a customer's Cribl Stream and Edge adoption — model worker groups / fleets, sources, and projected daily volume; import/export Excel workbooks (gold v0.9.1 schema). Ships as a Cribl App Platform install (.tgz) and as a single self-contained HTML file for on-prem use.",
   "author": "Michael Molina (Cribl Sr. CSE)",
   "type": "module",

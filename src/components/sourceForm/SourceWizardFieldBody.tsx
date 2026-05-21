@@ -1,4 +1,4 @@
-import { inputData, securityDataTypes, sourceTileSearchAliases } from '../../data/referenceData'
+import { inputData, securityDataTypes, sourceTileSearchAliases, sourceTypes } from '../../data/referenceData'
 import type { SourceSummaryRow } from '../../types/planTypes'
 import type { SourceSummaryFieldPatch } from './SourceFormPanels'
 import type { SourceWizardFieldKind } from './sourceFormWizardFieldCatalog'
@@ -59,6 +59,22 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
         </div>
       )
 
+    case 'type':
+      return (
+        <div className="mt-4">
+          <LabeledField id={`w-${row.id}-type`} label="Type">
+            <SelectWithEmpty
+              id={`w-${row.id}-type`}
+              value={row.type}
+              onChange={(v) => s('type', v)}
+              options={[...sourceTypes] as string[]}
+              allowEmpty
+              placeholder="On-Prem or Cloud/Internet"
+            />
+          </LabeledField>
+        </div>
+      )
+
     case 'sourceTile':
       return (
         <div className="mt-4">
@@ -69,7 +85,8 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               onChange={(v) => s('sourceTile', v)}
               options={inputData.techTiles}
               optionAliases={sourceTileSearchAliases}
-              placeholder="Type to search source tiles…"
+              alwaysShowOptions
+              placeholder="Scroll the list or type to filter…"
             />
           </LabeledField>
         </div>
@@ -194,15 +211,16 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
         <div className="mt-4">
           <LabeledField
             id={`w-${row.id}-cc`}
-            label="Current Collection"
-            hint="The pre-Cribl ingestion path (e.g. Splunk UF, syslog-ng, Datadog Agent)."
+            label="Current collection (optional)"
+            hint="Skip if this is net-new or not collected yet. Otherwise list today’s path(s)—Enter to bubble, or commas. Same pattern as Physical locations."
           >
-            <input
+            <MultiComboboxChips
               id={`w-${row.id}-cc`}
-              className="field-strong"
               value={row.currentCollection}
-              onChange={(e) => s('currentCollection', e.target.value)}
-              placeholder="e.g. Splunk Heavy Forwarder"
+              onChange={(v) => s('currentCollection', v)}
+              options={[]}
+              showSuggestions={false}
+              placeholder="e.g. Splunk UF, syslog-ng, Datadog Agent"
             />
           </LabeledField>
         </div>

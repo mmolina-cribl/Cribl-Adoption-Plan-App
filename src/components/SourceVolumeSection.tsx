@@ -1,10 +1,10 @@
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { sourceTypes } from '../data/referenceData'
+import { inputData, sourceTypes } from '../data/referenceData'
 import { defaultVolumeRow } from '../lib/defaultState'
 import { sourceLinkOptionsFromPlan } from '../lib/inheritTopology'
 import type { PlanState, SourceVolumeRow } from '../types/planTypes'
 import { newId } from '../types/planTypes'
-import { LabeledField, SectionBox, SelectWithEmpty } from './FormControls'
+import { LabeledField, MultiComboboxChips, SectionBox, SelectWithEmpty } from './FormControls'
 
 type Props = {
   plan: PlanState
@@ -163,13 +163,16 @@ function VolumeRowCard({
       </LabeledField>
       <LabeledField
         id={`v-${r.id}-5`}
-        label="Current collection"
+        label="Current collection (optional)"
+        hint="Skip if not collected anywhere yet. Otherwise: Enter to bubble values, or use commas."
       >
-        <input
-          type="text"
+        <MultiComboboxChips
           id={`v-${r.id}-5`}
           value={r.currentCollection}
-          onChange={(e) => patch('currentCollection', e.target.value)}
+          onChange={(v) => patch('currentCollection', v)}
+          options={[]}
+          showSuggestions={false}
+          placeholder="e.g. Splunk UF, syslog-ng"
         />
       </LabeledField>
       <LabeledField
@@ -206,14 +209,19 @@ function VolumeRowCard({
         />
       </LabeledField>
       <LabeledField
+        className="md:col-span-2 lg:col-span-5"
         id={`v-${r.id}-9`}
         label="Destination(s)"
+        hint="Same destination tiles as detailed sources — search and pick from the list only."
       >
-        <input
-          type="text"
+        <MultiComboboxChips
           id={`v-${r.id}-9`}
           value={r.destinations}
-          onChange={(e) => patch('destinations', e.target.value)}
+          onChange={(v) => patch('destinations', v)}
+          options={inputData.destTiles}
+          allowCustom={false}
+          alwaysShowOptions
+          placeholder="Search tiles, then pick from the list…"
         />
       </LabeledField>
       <LabeledField

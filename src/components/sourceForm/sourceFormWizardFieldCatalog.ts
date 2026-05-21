@@ -20,6 +20,8 @@ export type SourceWizardFieldKind =
   | 'wrap'
   | 'securityOrObs'
   | 'physicalLocations'
+  | 'type'
+  | 'currentCollection'
   | 'sourceTile'
   | 'pipelineUsecase'
   | 'destinations'
@@ -28,7 +30,6 @@ export type SourceWizardFieldKind =
   | 'complianceRelated'
   | 'dataCriticality'
   | 'stakeholders'
-  | 'currentCollection'
   | 'isCurrent'
   | 'targetOnboardStart'
   | 'targetOnboardEnd'
@@ -83,6 +84,22 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     kind: 'physicalLocations',
   },
   {
+    id: 'type',
+    section: 'Primary data',
+    headline: 'On-prem or cloud?',
+    lede:
+      'Rough hosting context for this source: on-premises infrastructure vs cloud or internet-sourced telemetry. This is separate from the Cribl “source tile” (product/integration name). It matches the legacy Excel “Type” column when present; v0.9.1 per-WG sheets focus on physical location and collection path, but the app still stores this for planning and imports.',
+    kind: 'type',
+  },
+  {
+    id: 'currentCollection',
+    section: 'Primary data',
+    headline: 'Current collection (optional)',
+    lede:
+      'Only answer if this data is **already** being collected today (Splunk UF, a forwarder, syslog, an agent, etc.). Many net-new sources have no prior path—leave this blank. When you do fill it, use Enter to turn each phrase into a chip, or separate with commas (same as Physical locations). Maps to the "Current Collection" column on each v0.9.1 per-WG / per-Fleet sheet.',
+    kind: 'currentCollection',
+  },
+  {
     id: 'sourceTile',
     section: 'Primary data',
     headline: 'Source tile',
@@ -111,7 +128,7 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     section: 'Primary data',
     headline: 'Retention',
     lede:
-      'How long must the organization keep this data for policy, legal, or operational reasons? You can pick a common value or type a custom phrase (for example “90 days” or “7 years in archive”).',
+      'How long must the organization keep this data for policy, legal, or operational reasons? Set a number and choose days, months, or years.',
     kind: 'retention',
   },
   {
@@ -145,14 +162,6 @@ export const SOURCE_WIZARD_FIELD_STEPS: SourceWizardFieldStep[] = [
     lede:
       'Who owns this source, who is waiting on the outcome, and which app or line of business should stay in the loop. Names, teams, or org names are all fine.',
     kind: 'stakeholders',
-  },
-  {
-    id: 'currentCollection',
-    section: 'Phase & roadmap',
-    headline: 'Current collection',
-    lede:
-      'How is this data being collected today, before Cribl? For example "Splunk UF", "Heavy Forwarder", "syslog-ng", "Datadog Agent". This drives migration use cases and is new in v0.9.1.',
-    kind: 'currentCollection',
   },
   {
     id: 'isCurrent',

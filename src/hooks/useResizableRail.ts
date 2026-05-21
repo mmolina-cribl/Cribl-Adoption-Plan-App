@@ -4,9 +4,9 @@ import { kvGet, kvSet } from '../lib/kvStore'
 const W_KEY = 'prefs/rail/px'
 const C_KEY = 'prefs/rail/collapsed'
 
-const DEFAULT_W = 300
-const MIN_W = 200
-const MAX_W = 480
+const DEFAULT_W = 363
+const MIN_W = 242
+const MAX_W = 581
 
 function clampW(n: number) {
   return Math.min(MAX_W, Math.max(MIN_W, Math.round(n)))

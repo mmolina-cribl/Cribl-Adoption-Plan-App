@@ -11,6 +11,8 @@ type Props = {
   plan: PlanState
   setPlan: Dispatch<SetStateAction<PlanState>>
   onOpenSource: (id: string) => void
+  /** Same as left-nav + Add source — opens the new-source name dialog. */
+  onAddSource?: () => void
 }
 
 const NO_CHANGE = '__nochange__'
@@ -63,7 +65,7 @@ function parseDate(s: string | undefined): number {
   return Number.isFinite(t) ? t : Number.NaN
 }
 
-export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
+export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: Props) {
   const [q, setQ] = useState('')
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [onlyHighPriority, setOnlyHighPriority] = useState(false)
@@ -310,6 +312,18 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
+          {onAddSource ? (
+            <button
+              type="button"
+              onClick={onAddSource}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-cribl-primary/50 bg-cribl-primary px-3.5 text-sm font-semibold text-white shadow-ctrl transition hover:bg-cribl-primary-hover"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ＋
+              </span>
+              New source
+            </button>
+          ) : null}
           <SearchInput
             id="src-index-q"
             value={q}
@@ -622,7 +636,7 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource }: Props) {
 
       {sources.length === 0 ? (
         <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
-          No sources yet — use <strong>+ Add source</strong> in the left nav.
+          No sources yet — use <strong>New source</strong> above or <strong>+ Add source</strong> in the left nav.
         </p>
       ) : filtered.length === 0 ? (
         <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">

@@ -730,7 +730,11 @@ export function importAdoptionPlanXlsx(
   try {
     wb = XLSX.read(buf, { type: 'array', cellDates: true })
   } catch {
-    return { ok: false, error: 'The file is not a valid .xlsx workbook (read failed).' }
+    return {
+      ok: false,
+      error:
+        'Could not open this file as an Excel workbook (.xlsx). It may be corrupted, password-protected, or not actually an Excel file.',
+    }
   }
   const sn = (wb.SheetNames ?? []) as string[]
   const customerName =
@@ -806,8 +810,6 @@ export function importAdoptionPlanXlsx(
   return {
     ok: false,
     error:
-      'Could not identify this workbook as a supported adoption plan template. ' +
-      `Expected either a v0.9.1 file (with “${SHEET_STREAM_OVERVIEW_V091}” / “${SHEET_EDGE_OVERVIEW_V091}” or per-WG sheets) ` +
-      `or a v0.8.6 file (with “${SHEET_SOURCE_SUMMARY}”).`,
+      'This workbook is not a supported Adoption Plan file. Expected a current v0.9.1 export (Stream/Edge overview or per-WG `wg-*` / per-Fleet `fl-*` sheets, or `wg-unassigned`) or a legacy v0.8.6 file with a Source summary sheet. If you exported from another tool, open a template from this app or Cribl’s gold workbook and try again.',
   }
 }

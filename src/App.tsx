@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AddSourceDialog } from './components/AddSourceDialog'
 import { AddWorkerGroupDialog } from './components/AddWorkerGroupDialog'
+import { AddSubfleetDialog } from './components/AddSubfleetDialog'
 import { HeaderCustomerName } from './components/HeaderCustomerName'
 import { DataSourcesView } from './components/DataSourcesView'
 import { PostAddSourceChoiceDialog } from './components/PostAddSourceChoiceDialog'
@@ -11,15 +12,24 @@ import { PlanDataOverview } from './components/PlanDataOverview'
 import { WorkerGroupDetailView } from './components/WorkerGroupDetailView'
 import { WorkerGroupsIndexView } from './components/WorkerGroupsIndexView'
 import { SourcesIndexView } from './components/SourcesIndexView'
+import { APP_VERSION } from './appVersion'
 import { SettingsView } from './components/SettingsView'
 import { ActivationView } from './components/ActivationView'
 import { ConfirmClearDialog } from './components/ConfirmClearDialog'
 import { ConfirmRemoveSourceDialog } from './components/ConfirmRemoveSourceDialog'
 import { ConfirmRemoveWorkerGroupDialog } from './components/ConfirmRemoveWorkerGroupDialog'
 import { defaultSourceRow, defaultWorkerGroupRow } from './lib/defaultState'
-import { applyEdgeFleetReorder } from './lib/fleetHierarchy'
+import {
+  applyEdgeFleetReorder,
+  normalizeEdgeFleetOrder,
+  sortEdgeFleetsAlphabetically,
+  sortEdgeFleetsByIngest,
+  topLevelFleetIdForNewSubfleet,
+} from './lib/fleetHierarchy'
 import type { DropPosition } from './lib/useDragReorder'
 import { deriveStreamOrEdge } from './lib/workerGroupIds'
+import { parseGb } from './lib/formatRate'
+import { sumAvgDailyFromSourceSummaryForWg } from './lib/workerGroupRollup'
 import type { MainView } from './components/navTypes'
 import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
@@ -72,7 +82,7 @@ function App() {
 }
 
 function AppContent({ plan, setPlan, reset }: AppContentProps) {
-  const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail } =
+  const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail, minW } =
     useResizableRail()
   // First-load lands on the Plan dashboard — the topology + resource
   // map are the highest-density introduction to what a customer is
@@ -90,6 +100,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   // kind keeps the AddWorkerGroupDialog's copy / placeholder / next-id in
   // sync with which "+" the user clicked.
   const [addWorkerGroupOpen, setAddWorkerGroupOpen] = useState<null | WorkerGroupKind>(null)
+  const [addSubfleetOpen, setAddSubfleetOpen] = useState<null | { initialParentFleetId: string | null }>(null)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [confirmRemoveWorkerGroupId, setConfirmRemoveWorkerGroupId] = useState<string | null>(null)
   const [confirmRemoveSourceId, setConfirmRemoveSourceId] = useState<string | null>(null)
@@ -109,6 +120,10 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   // the placeholder less useful as soon as you have one of each kind.
   const streamCount = plan.workerGroups.filter((w) => w.kind === 'stream').length
   const fleetCount = plan.workerGroups.filter((w) => w.kind === 'edge').length
+  const subFleetCount = plan.workerGroups.filter(
+    (w) => w.kind === 'edge' && Boolean((w.parentFleetId ?? '').trim()),
+  ).length
+  const nextSubfleetPlaceholder = `Sub-fleet ${subFleetCount + 1}`
   const nextWorkerGroupPlaceholder =
     addWorkerGroupOpen === 'edge' ? `Fleet ${fleetCount + 1}` : `Worker group ${streamCount + 1}`
 
@@ -336,6 +351,131 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     })
   }
 
+  const sortSourcesAlphabetically = useCallback((order: 'asc' | 'desc') => {
+    setPlan((p) => {
+      if (p.sourceSummary.length <= 1) {
+        return p
+      }
+      const next = [...p.sourceSummary].sort((a, b) => {
+        const la = (a.source?.trim() || '').toLowerCase()
+        const lb = (b.source?.trim() || '').toLowerCase()
+        const c = la.localeCompare(lb, undefined, { sensitivity: 'base' })
+        const primary = order === 'asc' ? c : -c
+        if (primary !== 0) {
+          return primary > 0 ? 1 : -1
+        }
+        return a.id.localeCompare(b.id)
+      })
+      if (next.every((r, i) => r.id === p.sourceSummary[i]!.id)) {
+        return p
+      }
+      return { ...p, sourceSummary: next }
+    })
+  }, [setPlan])
+
+  const sortStreamWorkerGroupsAlphabetically = useCallback((order: 'asc' | 'desc') => {
+    setPlan((p) => {
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      if (streams.length <= 1) {
+        return p
+      }
+      const coll = (a: (typeof streams)[number], b: (typeof streams)[number]) => {
+        const la = (a.wg.trim() || a.id).toLowerCase()
+        const lb = (b.wg.trim() || b.id).toLowerCase()
+        const c = la.localeCompare(lb, undefined, { sensitivity: 'base' })
+        const primary = order === 'asc' ? c : -c
+        if (primary !== 0) {
+          return primary > 0 ? 1 : -1
+        }
+        return a.id.localeCompare(b.id)
+      }
+      const sorted = [...streams].sort(coll)
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      const next = [...sorted, ...edges]
+      if (next.every((r, i) => r.id === p.workerGroups[i]!.id)) {
+        return p
+      }
+      return { ...p, workerGroups: next }
+    })
+  }, [setPlan])
+
+  const sortEdgeFleetsAlphabeticallyInPlan = useCallback((order: 'asc' | 'desc') => {
+    setPlan((p) => {
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      if (edges.length <= 1) {
+        return p
+      }
+      const sorted = sortEdgeFleetsAlphabetically(edges, order)
+      if (sorted.every((r, i) => r.id === edges[i]!.id)) {
+        return p
+      }
+      return { ...p, workerGroups: [...streams, ...sorted] }
+    })
+  }, [setPlan])
+
+  const sortSourcesByIngest = useCallback((direction: 'desc' | 'asc') => {
+    setPlan((p) => {
+      if (p.sourceSummary.length <= 1) {
+        return p
+      }
+      const next = [...p.sourceSummary].sort((a, b) => {
+        const ga = parseGb(a.avgDailyGb)
+        const gb = parseGb(b.avgDailyGb)
+        const va = Number.isFinite(ga) && ga >= 0 ? ga : 0
+        const vb = Number.isFinite(gb) && gb >= 0 ? gb : 0
+        const primary = direction === 'desc' ? vb - va : va - vb
+        if (primary !== 0) {
+          return primary > 0 ? 1 : -1
+        }
+        return a.id.localeCompare(b.id)
+      })
+      if (next.every((r, i) => r.id === p.sourceSummary[i]!.id)) {
+        return p
+      }
+      return { ...p, sourceSummary: next }
+    })
+  }, [setPlan])
+
+  const sortStreamWorkerGroupsByIngest = useCallback((direction: 'desc' | 'asc') => {
+    setPlan((p) => {
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      if (streams.length <= 1) {
+        return p
+      }
+      const sorted = [...streams].sort((a, b) => {
+        const va = sumAvgDailyFromSourceSummaryForWg(p, a.id).sum
+        const vb = sumAvgDailyFromSourceSummaryForWg(p, b.id).sum
+        const primary = direction === 'desc' ? vb - va : va - vb
+        if (primary !== 0) {
+          return primary > 0 ? 1 : -1
+        }
+        return a.id.localeCompare(b.id)
+      })
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      const next = [...sorted, ...edges]
+      if (next.every((r, i) => r.id === p.workerGroups[i]!.id)) {
+        return p
+      }
+      return { ...p, workerGroups: next }
+    })
+  }, [setPlan])
+
+  const sortEdgeFleetsByIngestInPlan = useCallback((direction: 'desc' | 'asc') => {
+    setPlan((p) => {
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      if (edges.length <= 1) {
+        return p
+      }
+      const sorted = sortEdgeFleetsByIngest(edges, p, direction)
+      if (sorted.every((r, i) => r.id === edges[i]!.id)) {
+        return p
+      }
+      return { ...p, workerGroups: [...streams, ...sorted] }
+    })
+  }, [setPlan])
+
   const addWorkerGroupWithName = (wg: string, kind: WorkerGroupKind = 'stream') => {
     const id = newId()
     setPlan((p) => {
@@ -346,6 +486,26 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
         return { ...p, workerGroups: [...p.workerGroups, w] }
       }
       return { ...p, workerGroups: [w] }
+    })
+    setActiveWorkerGroupId(id)
+    setMainView('workerGroup')
+  }
+
+  const addSubfleetWithName = (name: string, topLevelParentId: string) => {
+    const parent = plan.workerGroups.find((e) => e.id === topLevelParentId)
+    if (!parent || parent.kind !== 'edge' || (parent.parentFleetId ?? '').trim()) {
+      return
+    }
+    const id = newId()
+    setPlan((p) => {
+      const streams = p.workerGroups.filter((w) => w.kind !== 'edge')
+      const edges = p.workerGroups.filter((w) => w.kind === 'edge')
+      const w = defaultWorkerGroupRow('edge')
+      w.id = id
+      w.wg = name
+      w.parentFleetId = topLevelParentId
+      const nextEdges = normalizeEdgeFleetOrder([...edges, w])
+      return { ...p, workerGroups: [...streams, ...nextEdges] }
     })
     setActiveWorkerGroupId(id)
     setMainView('workerGroup')
@@ -470,6 +630,18 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           }}
         />
       )}
+      {addSubfleetOpen && (
+        <AddSubfleetDialog
+          plan={plan}
+          initialParentFleetId={addSubfleetOpen.initialParentFleetId}
+          nextLabel={nextSubfleetPlaceholder}
+          onCancel={() => setAddSubfleetOpen(null)}
+          onConfirm={(name, parentId) => {
+            setAddSubfleetOpen(null)
+            addSubfleetWithName(name, parentId)
+          }}
+        />
+      )}
       <PostAddSourceChoiceDialog
         open={postAdd?.kind === 'choice'}
         sourceDisplayName={postAdd?.kind === 'choice' ? postAdd.sourceDisplayName : ''}
@@ -499,7 +671,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           style={
             railCollapsed
               ? { width: '2.75rem', minWidth: '2.75rem' }
-              : { width: railW, minWidth: 200 }
+              : { width: railW, minWidth: minW }
           }
           aria-label="Plan, Worker Groups, and Sources"
         >
@@ -560,6 +732,12 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
                   onRenameSource={updateSourceName}
                   onReorderSources={reorderSources}
+                  onSortSourcesAlphabetically={sortSourcesAlphabetically}
+                  onSortSourcesByIngest={sortSourcesByIngest}
+                  onSortStreamWorkerGroupsAlphabetically={sortStreamWorkerGroupsAlphabetically}
+                  onSortStreamWorkerGroupsByIngest={sortStreamWorkerGroupsByIngest}
+                  onSortFleetWorkerGroupsAlphabetically={sortEdgeFleetsAlphabeticallyInPlan}
+                  onSortFleetWorkerGroupsByIngest={sortEdgeFleetsByIngestInPlan}
                   onSelectImport={() => setMainView('import')}
                   onSelectExport={() => setMainView('export')}
                   onClearPlan={() => setConfirmClearOpen(true)}
@@ -584,16 +762,22 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
             <div className="w-full px-4 py-3 sm:px-6 sm:py-3.5">
               <div className="relative w-full min-h-14 sm:min-h-16 max-md:pb-0.5">
                 <div
-                  className="flex w-full max-md:justify-center
+                  className="flex w-full flex-col items-center max-md:justify-center
                     md:absolute md:left-1/2 md:top-1/2 md:z-0
-                    md:w-[min(100%-22rem,28rem)] md:max-w-[calc(100%-22.5rem)]
+                    md:w-[min(100%-26.675rem,28rem)] md:max-w-[calc(100%-27.225rem)]
                     md:-translate-x-1/2 md:-translate-y-1/2
                     md:items-center md:justify-center
                   "
                 >
-                  <h1 className="m-0 text-xl font-semibold tracking-wide text-cribl-ink sm:text-2xl md:text-3xl">
+                  <h1 className="m-0 text-center text-xl font-semibold tracking-wide text-cribl-ink sm:text-2xl md:text-3xl">
                     Adoption Plan
                   </h1>
+                  <p
+                    className="m-0 mt-0.5 text-center font-mono text-[10px] font-normal tracking-wide text-cribl-muted/45"
+                    title={`Version ${APP_VERSION}`}
+                  >
+                    v{APP_VERSION}
+                  </p>
                 </div>
                 <div
                   className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
@@ -684,6 +868,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')
                   }}
+                  onCreateTopLevel={() => setAddWorkerGroupOpen('stream')}
                 />
               )}
 
@@ -696,6 +881,13 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveWorkerGroupId(id)
                     setMainView('workerGroup')
                   }}
+                  onCreateTopLevel={() => setAddWorkerGroupOpen('edge')}
+                  onAddSubfleetFromCard={(edgeId) => {
+                    const tid = topLevelFleetIdForNewSubfleet(plan.workerGroups, edgeId)
+                    if (tid) {
+                      setAddSubfleetOpen({ initialParentFleetId: tid })
+                    }
+                  }}
                 />
               )}
 
@@ -707,6 +899,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveSourceId(id)
                     setMainView('source')
                   }}
+                  onAddSource={openAddSource}
                 />
               )}
 
@@ -749,6 +942,12 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                     setActiveWorkerGroupId(wid)
                     setMainView('workerGroup')
                   }}
+                  onRequestCreateSubfleet={() => {
+                    const tid = topLevelFleetIdForNewSubfleet(plan.workerGroups, activeWorkerGroupId ?? '')
+                    if (tid) {
+                      setAddSubfleetOpen({ initialParentFleetId: tid })
+                    }
+                  }}
                 />
               )}
 
@@ -765,6 +964,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               {mainView === 'export' && <ExportWorkbookView plan={plan} />}
               <footer className="mt-8 text-center text-xs text-cribl-muted/80">
                 <p className="m-0">Built for Cribl field adoption planning.</p>
+                <p className="m-0 mt-1 font-mono text-[10px] text-cribl-muted/50">Adoption Plan v{APP_VERSION}</p>
               </footer>
             </main>
           </div>

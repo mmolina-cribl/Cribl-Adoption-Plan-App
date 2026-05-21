@@ -8,7 +8,38 @@ contracts.
 
 For platform-level rules (fetch proxy, KV REST shape, `proxies.yml`),
 see [`AGENTS.md`](./AGENTS.md). For a feature-level overview, see
-[`README.md`](./README.md).
+[`README.md`](./README.md). For **standalone / on‑prem customer messaging**,
+see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md).
+
+---
+
+## Before tagging any release — Cribl product release notes
+
+Before you cut a build customers will treat as “current with Stream/Edge,” skim
+recent **Cribl product** release notes so you can decide whether this repo needs
+a follow-up change (new or renamed sources/destinations, deprecations, defaults
+that affect planning conversations):
+
+- [Cribl Stream release notes](https://docs.cribl.io/stream/release-notes/)
+- [Cribl Edge release notes](https://docs.cribl.io/edge/release-notes/)
+- [What’s New](https://docs.cribl.io/whats-new/) (cross-product highlights)
+
+If a release introduces tiles, destinations, or topology concepts you expect on
+adoption plans, update [`src/data/referenceData.ts`](./src/data/referenceData.ts)
+(and wizard or export copy if needed) in the same release or an immediate patch,
+then note it in `build/vX.Y.Z-release-notes.md`.
+
+---
+
+## Release checklist (Cribl App `.tgz`)
+
+Before tagging a release that ships **`npm run package`**:
+
+1. Run **`npm run package`** from a clean tree (or at least after `npm run build`).
+2. Install the `.tgz` on a tenant (or unpack `static/` locally) and open the app **without** importing a workbook.
+3. Use **File → Export** and confirm a **styled** `.xlsx` downloads (gold template **`adoption-plan-empty.xlsx`** must sit beside **`index.html`** under `static/`; the app resolves it relative to the document URL).
+4. **File → Import** a known-good v0.9.1 export from the previous release, make a small edit, export again, and spot-check key sheets.
+5. Record outcomes in **`build/vX.Y.Z-release-notes.md`**.
 
 ---
 

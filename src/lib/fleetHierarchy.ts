@@ -1,4 +1,5 @@
-import type { SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
+import type { PlanState, SourceSummaryRow, WorkerGroupRow } from '../types/planTypes'
+import { sumAvgDailyFromSourceSummaryForWg } from './workerGroupRollup'
 
 /**
  * Reorder a list by id (same semantics as `reorderById` in `App.tsx`).
@@ -32,9 +33,32 @@ function reorderById<T extends { id: string }>(
 }
 
 /**
- * Top-level Edge fleets with no sources and no sub-fleets yet — shown in
- * the plan resource map "Unassigned" bucket alongside loose sources.
+ * Edge hierarchy is single-level: every sub-fleet's `parentFleetId` must
+ * reference a **top-level** fleet (`kind === 'edge'` with an empty
+ * `parentFleetId`). Given any edge row id (fleet or sub-fleet), return the
+ * top-level fleet id new sub-fleets should attach under, or `null` if the
+ * row is missing or not Edge.
  */
+export function topLevelFleetIdForNewSubfleet(
+  workerGroups: WorkerGroupRow[],
+  edgeFleetOrSubfleetId: string,
+): string | null {
+  const w = workerGroups.find((x) => x.id === edgeFleetOrSubfleetId)
+  if (!w || w.kind !== 'edge') {
+    return null
+  }
+  const pid = (w.parentFleetId ?? '').trim()
+  if (!pid) {
+    return w.id
+  }
+  const parent = workerGroups.find((x) => x.id === pid)
+  if (!parent || parent.kind !== 'edge' || (parent.parentFleetId ?? '').trim()) {
+    return null
+  }
+  return parent.id
+}
+
+/** Top-level Edge fleets with no sources and no sub-fleets yet — "orphan" hubs in the plan map. */
 export function edgeFleetUnassignedOrphans(
   workerGroups: WorkerGroupRow[],
   sourceSummary: SourceSummaryRow[],
@@ -156,4 +180,106 @@ export function applyEdgeFleetReorder(
 
   next = next.map((w) => (w.id === fromId ? { ...w, parentFleetId } : w))
   return normalizeEdgeFleetOrder(next)
+}
+
+const wgLabelKey = (r: WorkerGroupRow) => (r.wg.trim() || r.id).toLowerCase()
+
+const collateFleetRows = (a: WorkerGroupRow, b: WorkerGroupRow) =>
+  wgLabelKey(a).localeCompare(wgLabelKey(b), undefined, { sensitivity: 'base' }) ||
+  a.id.localeCompare(b.id)
+
+function collateFleetRowsOrdered(direction: 'asc' | 'desc', a: WorkerGroupRow, b: WorkerGroupRow): number {
+  const c = collateFleetRows(a, b)
+  return direction === 'asc' ? c : -c
+}
+
+/**
+ * Sort **top-level** Edge fleets alphabetically and each parent’s **sub-fleets**
+ * among themselves, preserving parent → children export/nav grouping. Rows that
+ * still reference a missing parent are normalized like {@link normalizeEdgeFleetOrder}.
+ */
+export function sortEdgeFleetsAlphabetically(
+  edges: WorkerGroupRow[],
+  direction: 'asc' | 'desc' = 'asc',
+): WorkerGroupRow[] {
+  const norm = normalizeEdgeFleetOrder(edges)
+  if (norm.length <= 1) {
+    return norm
+  }
+
+  const roots = norm
+    .filter((e) => !(e.parentFleetId ?? '').trim())
+    .sort((a, b) => collateFleetRowsOrdered(direction, a, b))
+  const out: WorkerGroupRow[] = []
+  for (const r of roots) {
+    out.push(r)
+    const kids = norm
+      .filter((e) => (e.parentFleetId ?? '').trim() === r.id)
+      .sort((a, b) => collateFleetRowsOrdered(direction, a, b))
+    out.push(...kids)
+  }
+  const placed = new Set(out.map((x) => x.id))
+  for (const e of norm) {
+    if (!placed.has(e.id)) {
+      placed.add(e.id)
+      out.push({ ...e, parentFleetId: '' })
+    }
+  }
+  return normalizeEdgeFleetOrder(out)
+}
+
+function ingestGbForWgSort(plan: PlanState, workerGroupId: string): number {
+  const { sum } = sumAvgDailyFromSourceSummaryForWg(plan, workerGroupId)
+  return Number.isFinite(sum) && sum >= 0 ? sum : 0
+}
+
+function compareFleetRowsByIngest(
+  plan: PlanState,
+  direction: 'desc' | 'asc',
+  a: WorkerGroupRow,
+  b: WorkerGroupRow,
+): number {
+  const va = ingestGbForWgSort(plan, a.id)
+  const vb = ingestGbForWgSort(plan, b.id)
+  const primary = direction === 'desc' ? vb - va : va - vb
+  if (primary !== 0) {
+    return primary > 0 ? 1 : -1
+  }
+  return a.id.localeCompare(b.id)
+}
+
+/**
+ * Sort Edge fleets by summed **source-summary** ingest (GB/d) per row, same basis
+ * as the left-nav subtitle. Top-level fleets sort among themselves; sub-fleets
+ * sort within each parent. See {@link sortEdgeFleetsAlphabetically} for structure.
+ */
+export function sortEdgeFleetsByIngest(
+  edges: WorkerGroupRow[],
+  plan: PlanState,
+  direction: 'desc' | 'asc',
+): WorkerGroupRow[] {
+  const norm = normalizeEdgeFleetOrder(edges)
+  if (norm.length <= 1) {
+    return norm
+  }
+
+  const roots = norm
+    .filter((e) => !(e.parentFleetId ?? '').trim())
+    .sort((a, b) => compareFleetRowsByIngest(plan, direction, a, b))
+  const out: WorkerGroupRow[] = []
+  for (const r of roots) {
+    out.push(r)
+    const kids = norm
+      .filter((e) => (e.parentFleetId ?? '').trim() === r.id)
+      .sort((a, b) => compareFleetRowsByIngest(plan, direction, a, b))
+    out.push(...kids)
+  }
+  const placed = new Set(out.map((x) => x.id))
+  for (const e of norm) {
+    if (!placed.has(e.id)) {
+      placed.add(e.id)
+      out.push({ ...e, parentFleetId: '' })
+    }
+  }
+  return normalizeEdgeFleetOrder(out)
 }

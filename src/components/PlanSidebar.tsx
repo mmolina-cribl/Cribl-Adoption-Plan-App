@@ -50,6 +50,68 @@ function ChevronToggle({
   )
 }
 
+const navSectionSortBtnClass =
+  'inline-flex h-9 min-w-[2rem] shrink-0 items-center justify-center rounded-lg border border-cribl-border/80 bg-white/40 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-cribl-muted transition hover:border-cribl-border hover:bg-white/80 hover:text-cribl-ink'
+
+/** A–Z / Z–A plus ingest (GB↓ heaviest first, GB↑ lightest) for a rail section header. */
+function NavSectionSortButtons({
+  visible,
+  onAlphabetical,
+  alphaAscTitle,
+  alphaDescTitle,
+  onIngestDesc,
+  onIngestAsc,
+  ingestDescTitle = 'Sort by GB/d, heaviest first',
+  ingestAscTitle = 'Sort by GB/d, lightest first',
+}: {
+  visible: boolean
+  onAlphabetical?: (order: 'asc' | 'desc') => void
+  alphaAscTitle: string
+  alphaDescTitle: string
+  onIngestDesc?: () => void
+  onIngestAsc?: () => void
+  ingestDescTitle?: string
+  ingestAscTitle?: string
+}) {
+  if (!visible || (!onAlphabetical && !onIngestDesc && !onIngestAsc)) {
+    return null
+  }
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-0.5">
+      {onAlphabetical ? (
+        <button
+          type="button"
+          className={navSectionSortBtnClass}
+          onClick={() => onAlphabetical('asc')}
+          title={alphaAscTitle}
+        >
+          A–Z
+        </button>
+      ) : null}
+      {onAlphabetical ? (
+        <button
+          type="button"
+          className={navSectionSortBtnClass}
+          onClick={() => onAlphabetical('desc')}
+          title={alphaDescTitle}
+        >
+          Z–A
+        </button>
+      ) : null}
+      {onIngestDesc ? (
+        <button type="button" className={navSectionSortBtnClass} onClick={onIngestDesc} title={ingestDescTitle}>
+          GB↓
+        </button>
+      ) : null}
+      {onIngestAsc ? (
+        <button type="button" className={navSectionSortBtnClass} onClick={onIngestAsc} title={ingestAscTitle}>
+          GB↑
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 type Props = {
   plan: PlanState
   mainView: MainView
@@ -88,9 +150,11 @@ type Props = {
    * share the same `kind` (the sidebar restricts drag scope to within
    * a section, so the parent reducer can no-op cross-kind drops).
    *
-   * Both are optional — the mobile chip nav doesn't expose drag
-   * handles, so it just doesn't pass them. When omitted, the desktop
-   * rail still renders without grip handles.
+   * Optional **A–Z / Z–A** and **GB↓ / GB↑** sort callbacks within each rail section
+   * (Edge: roots and sub-fleets each sort among peers). Ingest uses summed
+   * **source summary** GB/d per row (same basis as the nav subtitle). Optional
+   * on mobile chip nav — desktop rail exposes grips (drag + **Alt+↑/↓** when the
+   * grip is focused) and sort buttons.
    */
   onReorderSources?: (fromId: string, toId: string, position: DropPosition) => void
   onReorderWorkerGroups?: (
@@ -98,6 +162,18 @@ type Props = {
     toId: string,
     position: DropPosition,
   ) => void
+  /** Sort `plan.sourceSummary` by source name: `asc` = A–Z, `desc` = Z–A. */
+  onSortSourcesAlphabetically?: (order: 'asc' | 'desc') => void
+  /** Sort sources by **Average daily volume (GB)** on each row. */
+  onSortSourcesByIngest?: (direction: 'desc' | 'asc') => void
+  /** Sort Stream worker groups by display name: `asc` = A–Z, `desc` = Z–A. */
+  onSortStreamWorkerGroupsAlphabetically?: (order: 'asc' | 'desc') => void
+  /** Sort Stream worker groups by summed source ingest (GB/d) per group. */
+  onSortStreamWorkerGroupsByIngest?: (direction: 'desc' | 'asc') => void
+  /** Sort Edge fleets by name among peers: `asc` = A–Z, `desc` = Z–A (roots, then sub-fleets per parent). */
+  onSortFleetWorkerGroupsAlphabetically?: (order: 'asc' | 'desc') => void
+  /** Sort Edge fleets by ingest among peers (roots, then sub-fleets per parent). */
+  onSortFleetWorkerGroupsByIngest?: (direction: 'desc' | 'asc') => void
   onSelectImport: () => void
   onSelectExport: () => void
   onClearPlan: () => void
@@ -187,35 +263,52 @@ function NavButton({
  * `canDropOn` predicate, so each section behaves like a stand-alone
  * sortable list.
  *
- * Mouse-only by design: native HTML5 D&D doesn't fire on iOS Safari
- * and is awkward on Android, so the mobile chip nav doesn't render
- * the grip at all. Touch users still have add / remove + edit
- * affordances, and a future enhancement (e.g. Pointer Events with a
- * polyfill, or a keyboard reorder shortcut) can layer on without
- * changing the data model.
+ * **Keyboard:** with focus on the grip, **Alt+↑** / **Alt+↓** moves the row
+ * one step (same semantics as drag-before / drag-after).
+ *
+ * **Touch:** `pointer-coarse:` widens the grip for finger/stylus hit targets.
+ * Native HTML5 D&D is still unreliable on **iOS Safari**; the mobile chip nav
+ * omits grips — use **A–Z** sort or edit there.
  */
 function GripHandle({
   draggable,
   onDragStart,
   onDragEnd,
+  onKeyboardStep,
   ariaLabel,
   className = '',
 }: {
   draggable: boolean
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: () => void
+  /** Alt+Arrow moves row up (−1) or down (+1) in its section list. */
+  onKeyboardStep?: (delta: -1 | 1) => void
   ariaLabel: string
   className?: string
 }) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (!onKeyboardStep || !draggable || !e.altKey) {
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      onKeyboardStep(-1)
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      onKeyboardStep(1)
+    }
+  }
+
   return (
     <span
       role="button"
       aria-label={ariaLabel}
       title={ariaLabel}
-      tabIndex={-1}
+      tabIndex={draggable ? 0 : -1}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onKeyDown={onKeyDown}
       className={[
         // The grip sits as a flush-left strip on the row. Its
         // background is transparent until hovered so the rounded
@@ -226,7 +319,9 @@ function GripHandle({
         // platform's own drag cursor takes over after `dragstart`.
         'flex w-5 shrink-0 items-center justify-center self-stretch border-0 border-r border-cribl-border/40 bg-transparent text-cribl-muted/60 transition',
         'cursor-grab hover:bg-cribl-elevate hover:text-cribl-ink',
-        'select-none',
+        'select-none touch-manipulation',
+        'focus-visible:z-[1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/35',
+        'pointer-coarse:min-h-11 pointer-coarse:min-w-8',
         className,
       ].join(' ')}
     >
@@ -290,6 +385,7 @@ function SourceRowRail({
   workerGroupName,
   workerGroupKind,
   drag,
+  onKeyboardStep,
   onSelect,
   onRemove,
   onRename,
@@ -316,6 +412,8 @@ function SourceRowRail({
    * simply omits the grip handle and drop targets.
    */
   drag?: DragReorder
+  /** Alt+↑ / Alt+↓ on the grip — same list semantics as drag reorder. */
+  onKeyboardStep?: (delta: -1 | 1) => void
   onSelect: () => void
   onRemove: () => void
   onRename: (name: string) => void
@@ -384,7 +482,8 @@ function SourceRowRail({
           draggable={handleProps.draggable}
           onDragStart={handleProps.onDragStart}
           onDragEnd={handleProps.onDragEnd}
-          ariaLabel={`Drag to reorder ${label}`}
+          onKeyboardStep={onKeyboardStep}
+          ariaLabel={`Reorder ${label}. Drag, or Alt+Up Arrow / Alt+Down Arrow to move.`}
         />
       ) : null}
       {editing ? (
@@ -486,6 +585,7 @@ function WorkerGroupRowRail({
   totalSourceIngestGb,
   sourceCount,
   drag,
+  onKeyboardStep,
   onSelect,
   onRemove,
   onUpdateWg,
@@ -504,6 +604,8 @@ function WorkerGroupRowRail({
    * skip it without touching the row component's internals.
    */
   drag?: DragReorder
+  /** Alt+↑ / Alt+↓ on the grip — same list semantics as drag reorder. */
+  onKeyboardStep?: (delta: -1 | 1) => void
   onSelect: () => void
   onRemove: () => void
   onUpdateWg: (wg: string) => void
@@ -563,8 +665,11 @@ function WorkerGroupRowRail({
           draggable={handleProps.draggable}
           onDragStart={handleProps.onDragStart}
           onDragEnd={handleProps.onDragEnd}
+          onKeyboardStep={onKeyboardStep}
           ariaLabel={
-            row.kind === 'edge' ? `Drag to reorder fleet ${label}` : `Drag to reorder worker group ${label}`
+            row.kind === 'edge'
+              ? `Reorder fleet ${label}. Drag, or Alt+Up Arrow / Alt+Down Arrow to move.`
+              : `Reorder worker group ${label}. Drag, or Alt+Up Arrow / Alt+Down Arrow to move.`
           }
         />
       ) : null}
@@ -662,6 +767,8 @@ function WorkerGroupKindSection({
   onRemoveWorkerGroup,
   onUpdateWorkerGroupWg,
   onReorderWorkerGroups,
+  onSortAlphabetically,
+  onSortByIngest,
 }: {
   kind: WorkerGroupKind
   plan: PlanState
@@ -681,6 +788,10 @@ function WorkerGroupKindSection({
     toId: string,
     position: DropPosition,
   ) => void
+  /** Sort this section by name among peers: `asc` = A–Z, `desc` = Z–A (Stream WGs or Edge fleets + sub-fleets). */
+  onSortAlphabetically?: (order: 'asc' | 'desc') => void
+  /** Sort this section by summed source ingest (GB/d) per row (`desc` = heaviest first). */
+  onSortByIngest?: (direction: 'desc' | 'asc') => void
 }) {
   const sectionTitle = kind === 'edge' ? 'Fleets' : 'Worker Groups'
   const indexView: MainView = kind === 'edge' ? 'fleets' : 'workerGroups'
@@ -712,6 +823,17 @@ function WorkerGroupKindSection({
         : undefined,
   })
   const dragForRows = onReorderWorkerGroups ? drag : undefined
+  const keyboardRowStep =
+    onReorderWorkerGroups &&
+    ((id: string, delta: -1 | 1) => {
+      const idx = rows.findIndex((x) => x.id === id)
+      const j = idx + delta
+      if (idx < 0 || j < 0 || j >= rows.length) {
+        return
+      }
+      const neighbor = rows[j]!
+      onReorderWorkerGroups(id, neighbor.id, delta === -1 ? 'before' : 'after')
+    })
   return (
     <>
       <div className="mt-3 flex items-center gap-1">
@@ -727,6 +849,24 @@ function WorkerGroupKindSection({
             ) : null}
           </span>
         </NavButton>
+        <NavSectionSortButtons
+          visible={rows.length > 1 && Boolean(onReorderWorkerGroups)}
+          onAlphabetical={onSortAlphabetically}
+          alphaAscTitle={`Sort ${sectionTitle} A–Z by name`}
+          alphaDescTitle={`Sort ${sectionTitle} Z–A by name`}
+          onIngestDesc={onSortByIngest ? () => onSortByIngest('desc') : undefined}
+          onIngestAsc={onSortByIngest ? () => onSortByIngest('asc') : undefined}
+          ingestDescTitle={
+            kind === 'edge'
+              ? 'Sort top-level fleets by summed ingest from sources on that fleet (GB/d), heaviest first; sub-fleets sort among siblings under each parent'
+              : 'Sort worker groups by summed ingest from sources attached to each group (GB/d), heaviest first'
+          }
+          ingestAscTitle={
+            kind === 'edge'
+              ? 'Sort top-level fleets by summed ingest (GB/d), lightest first; sub-fleets sort among siblings under each parent'
+              : 'Sort worker groups by summed ingest from attached sources (GB/d), lightest first'
+          }
+        />
         {rows.length > 0 ? (
           <ChevronToggle
             open={listOpen}
@@ -750,6 +890,7 @@ function WorkerGroupKindSection({
                 totalSourceIngestGb={sourceTotal.sum}
                 sourceCount={sourceTotal.count}
                 drag={dragForRows}
+                onKeyboardStep={keyboardRowStep ? (d) => keyboardRowStep(r.id, d) : undefined}
                 onSelect={() => onSelectWorkerGroup(r.id)}
                 onRemove={() => onRemoveWorkerGroup(r.id)}
                 onUpdateWg={(wg) => onUpdateWorkerGroupWg(r.id, wg)}
@@ -795,6 +936,12 @@ export function PlanSidebarRail({
   onRemoveSource,
   onRenameSource,
   onReorderSources,
+  onSortSourcesAlphabetically,
+  onSortSourcesByIngest,
+  onSortStreamWorkerGroupsAlphabetically,
+  onSortStreamWorkerGroupsByIngest,
+  onSortFleetWorkerGroupsAlphabetically,
+  onSortFleetWorkerGroupsByIngest,
   onSelectImport,
   onSelectExport,
   onClearPlan,
@@ -832,6 +979,17 @@ export function PlanSidebarRail({
     },
   })
   const sourceDragForRows = onReorderSources ? sourceDrag : undefined
+  const sourceKeyboardStep =
+    onReorderSources &&
+    ((id: string, delta: -1 | 1) => {
+      const idx = sources.findIndex((x) => x.id === id)
+      const j = idx + delta
+      if (idx < 0 || j < 0 || j >= sources.length) {
+        return
+      }
+      const neighbor = sources[j]!
+      onReorderSources(id, neighbor.id, delta === -1 ? 'before' : 'after')
+    })
 
   return (
     <nav
@@ -899,6 +1057,8 @@ export function PlanSidebarRail({
         onRemoveWorkerGroup={onRemoveWorkerGroup}
         onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
         onReorderWorkerGroups={onReorderWorkerGroups}
+        onSortAlphabetically={onSortStreamWorkerGroupsAlphabetically}
+        onSortByIngest={onSortStreamWorkerGroupsByIngest}
       />
 
       <WorkerGroupKindSection
@@ -916,6 +1076,8 @@ export function PlanSidebarRail({
         onRemoveWorkerGroup={onRemoveWorkerGroup}
         onUpdateWorkerGroupWg={onUpdateWorkerGroupWg}
         onReorderWorkerGroups={onReorderWorkerGroups}
+        onSortAlphabetically={onSortFleetWorkerGroupsAlphabetically}
+        onSortByIngest={onSortFleetWorkerGroupsByIngest}
       />
 
       <div className="mt-3 flex items-center gap-1">
@@ -931,6 +1093,16 @@ export function PlanSidebarRail({
             ) : null}
           </span>
         </NavButton>
+        <NavSectionSortButtons
+          visible={sources.length > 1 && Boolean(onReorderSources)}
+          onAlphabetical={onSortSourcesAlphabetically}
+          alphaAscTitle="Sort sources A–Z by name"
+          alphaDescTitle="Sort sources Z–A by name"
+          onIngestDesc={onSortSourcesByIngest ? () => onSortSourcesByIngest('desc') : undefined}
+          onIngestAsc={onSortSourcesByIngest ? () => onSortSourcesByIngest('asc') : undefined}
+          ingestDescTitle="Sort sources by average daily volume (GB) on each row, heaviest first"
+          ingestAscTitle="Sort sources by average daily volume (GB) on each row, lightest first"
+        />
         {sources.length > 0 ? (
           <ChevronToggle
             open={sourcesListOpen}
@@ -958,6 +1130,7 @@ export function PlanSidebarRail({
                 workerGroupName={wgName}
                 workerGroupKind={wgKind}
                 drag={sourceDragForRows}
+                onKeyboardStep={sourceKeyboardStep ? (d) => sourceKeyboardStep(r.id, d) : undefined}
                 onSelect={() => onSelectSource(r.id)}
                 onRemove={() => onRemoveSource(r.id)}
                 onRename={(name) => onRenameSource(r.id, name)}

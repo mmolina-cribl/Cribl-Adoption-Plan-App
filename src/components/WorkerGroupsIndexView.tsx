@@ -19,6 +19,13 @@ type Props = {
    * placeholder copy, and empty-state add hint change.
    */
   kind?: WorkerGroupKind
+  /** Opens the same flow as the left-nav + for a new Stream worker group. */
+  onCreateTopLevel?: () => void
+  /**
+   * Edge only: quick-add sub-fleet from a card; parent fleet is pre-filled from
+   * this fleet or sub-fleet row.
+   */
+  onAddSubfleetFromCard?: (edgeFleetOrSubfleetId: string) => void
 }
 
 const COPY: Record<WorkerGroupKind, {
@@ -43,7 +50,7 @@ const COPY: Record<WorkerGroupKind, {
     searchPlaceholder: 'Search worker groups…',
     searchAriaLabel: 'Search worker groups',
     unnamed: 'Unnamed worker group',
-    emptyState: 'No worker groups yet — use + Add Worker Group in the left nav.',
+    emptyState: 'No worker groups yet — use New worker group below or + Add Worker Group in the left nav.',
     noMatches: 'No worker groups match the current filters.',
     selectedNoun: (n) => `${n} selected`,
     bulkDeleteVerb: (n) => `Delete ${n}…`,
@@ -60,7 +67,7 @@ const COPY: Record<WorkerGroupKind, {
     searchPlaceholder: 'Search fleets…',
     searchAriaLabel: 'Search fleets',
     unnamed: 'Unnamed fleet',
-    emptyState: 'No fleets yet — use + Add Fleet in the left nav.',
+    emptyState: 'No fleets yet — use New fleet below or + Add Fleet in the left nav.',
     noMatches: 'No fleets match the current filters.',
     selectedNoun: (n) => `${n} selected`,
     bulkDeleteVerb: (n) => `Delete ${n}…`,
@@ -95,7 +102,14 @@ type WgIndexRow = {
   detail: string
 }
 
-export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stream' }: Props) {
+export function WorkerGroupsIndexView({
+  plan,
+  setPlan,
+  onOpenGroup,
+  kind = 'stream',
+  onCreateTopLevel,
+  onAddSubfleetFromCard,
+}: Props) {
   const copy = COPY[kind]
   const [q, setQ] = useState('')
   const [onlyWithSources, setOnlyWithSources] = useState(false)
@@ -326,6 +340,23 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stre
           <p className="m-0 mt-1.5 text-sm text-cribl-muted">{copy.pageDescription}</p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:shrink-0">
+          {onCreateTopLevel ? (
+            <button
+              type="button"
+              onClick={onCreateTopLevel}
+              className={[
+                'inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3.5 text-sm font-semibold text-white shadow-ctrl transition',
+                kind === 'edge'
+                  ? 'border-cribl-edge/50 bg-cribl-edge hover:bg-cribl-edge-hover'
+                  : 'border-cribl-primary/50 bg-cribl-primary hover:bg-cribl-primary-hover',
+              ].join(' ')}
+            >
+              <span aria-hidden className="text-base leading-none">
+                ＋
+              </span>
+              {kind === 'edge' ? 'New fleet' : 'New worker group'}
+            </button>
+          ) : null}
           <SearchInput
             id={kind === 'edge' ? 'fleet-index-q' : 'wg-index-q'}
             value={q}
@@ -550,9 +581,14 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stre
       {groups.length === 0 ? (
         <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
           {kind === 'edge' ? (
-            <>No fleets yet — use <strong>+ Add Fleet</strong> in the left nav.</>
+            <>
+              No fleets yet — use <strong>New fleet</strong> above or <strong>+ Add Fleet</strong> in the left nav.
+            </>
           ) : (
-            <>No worker groups yet — use <strong>+ Add Worker Group</strong> in the left nav.</>
+            <>
+              No worker groups yet — use <strong>New worker group</strong> above or{' '}
+              <strong>+ Add Worker Group</strong> in the left nav.
+            </>
           )}
         </p>
       ) : rows.length === 0 ? (
@@ -624,13 +660,32 @@ export function WorkerGroupsIndexView({ plan, setPlan, onOpenGroup, kind = 'stre
                         {g.name}
                       </h3>
                     </div>
-                    {g.nSources > 0 ? (
-                      <span className="shrink-0 rounded-lg bg-cribl-primary-soft px-2.5 py-1 text-sm font-medium text-cribl-primary-ink">
-                        {g.nSources} source{g.nSources === 1 ? '' : 's'}
-                      </span>
-                    ) : (
-                      <span className="shrink-0 text-sm text-cribl-muted">No sources</span>
-                    )}
+                    <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center">
+                      {kind === 'edge' && onAddSubfleetFromCard ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onAddSubfleetFromCard(g.id)
+                          }}
+                          title="Add a sub-fleet under this fleet"
+                          aria-label={`Add Subfleet for ${g.name}`}
+                          className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-cribl-edge/45 bg-white px-2.5 text-xs font-semibold text-cribl-edge shadow-ctrl transition hover:border-cribl-edge hover:bg-cribl-edge-soft/70"
+                        >
+                          <span aria-hidden className="text-sm leading-none">
+                            ＋
+                          </span>
+                          <span>Add Subfleet</span>
+                        </button>
+                      ) : null}
+                      {g.nSources > 0 ? (
+                        <span className="shrink-0 rounded-lg bg-cribl-primary-soft px-2.5 py-1 text-sm font-medium text-cribl-primary-ink">
+                          {g.nSources} source{g.nSources === 1 ? '' : 's'}
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-sm text-cribl-muted">No sources</span>
+                      )}
+                    </div>
                   </div>
                   {maxSources > 0 && g.nSources > 0 ? (
                     <div
