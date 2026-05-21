@@ -53,8 +53,8 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
         } else {
           setOkMsg('Plan loaded. Your current in-browser data was replaced; Export uses the current v0.9.1 workbook format.')
         }
-      } catch {
-        setError('Could not read that file.')
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not read that file.')
       } finally {
         setBusy(false)
       }
@@ -138,8 +138,8 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
                 return
               }
               runImport(bytes)
-            } catch {
-              setError('Could not read that file.')
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Could not read that file.')
             }
           }}
         />
@@ -156,11 +156,7 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
         </label>
       </div>
       <p className="m-0 max-w-lg text-xs leading-relaxed text-cribl-muted">
-        Import runs entirely in your browser. For automation, run{' '}
-        <code className="rounded bg-cribl-elevate px-1 py-0.5 text-cribl-ink/90">npm run import-api</code> and POST
-        multipart <code className="rounded bg-cribl-elevate px-1 py-0.5">file</code> to{' '}
-        <code className="rounded bg-cribl-elevate px-1 py-0.5">/api/plan/import</code> (see{' '}
-        <code className="rounded bg-cribl-elevate px-1 py-0.5">server/planImportApi.ts</code>).
+        Import runs entirely in your browser — the file is not uploaded to a server for this step.
       </p>
     </div>
   )

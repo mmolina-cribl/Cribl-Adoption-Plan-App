@@ -272,6 +272,11 @@ type ComboboxProps = {
   options: readonly string[] | string[]
   optionAliases?: Partial<Record<string, readonly string[] | string[]>>
   placeholder?: string
+  /**
+   * When the option list is long, the default is “type to search” with an empty panel until you type.
+   * Set true to show every option in a scrollable list when the query is empty (e.g. Source tile).
+   */
+  alwaysShowOptions?: boolean
   /** @deprecated not used; kept for call-site compatibility */
   listName?: string
 }
@@ -360,8 +365,9 @@ function serializeMultiValue(parts: string[], joinWith: string): string {
 
 /**
  * Combobox: type with suggestions. Long lists (integrations, destinations, etc.) use “type to search”
- * instead of a huge scroll. The suggestion panel is portaled to `document.body` and positioned with
- * `position: fixed` so it is not clipped inside modals or scroll regions.
+ * instead of a huge scroll—unless `alwaysShowOptions` is set, in which case the full list opens when
+ * the query is empty (still visually capped with max-height + scroll). The suggestion panel is portaled
+ * to `document.body` and positioned with `position: fixed` so it is not clipped inside modals or scroll regions.
  */
 export function ComboboxText({
   id,
@@ -370,6 +376,7 @@ export function ComboboxText({
   options,
   optionAliases = {},
   placeholder = '',
+  alwaysShowOptions = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false)
   const listId = useId()
@@ -391,6 +398,9 @@ export function ComboboxText({
     }
     if (isLarge) {
       if (!q) {
+        if (alwaysShowOptions) {
+          return o
+        }
         return []
       }
       return o
@@ -403,7 +413,7 @@ export function ComboboxText({
     return o
       .filter(matchesQuery)
       .slice(0, MAX_SUGGESTIONS)
-  }, [isLarge, o, optionAliases, value])
+  }, [isLarge, o, optionAliases, value, alwaysShowOptions])
 
   const showTypeToSearch = open && isLarge && !value.trim() && filtered.length === 0
   const showNoMatches = open && isLarge && value.trim().length > 0 && filtered.length === 0

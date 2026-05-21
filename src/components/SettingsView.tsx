@@ -12,6 +12,7 @@ import {
   useAnimationsEnabled,
 } from '../lib/animationsPreference'
 import { useActivationCalloutDismissed } from '../lib/activationCalloutPreference'
+import { APP_VERSION } from '../appVersion'
 
 export function SettingsView() {
   const [value, setValue] = useState<'ask' | 'wizard' | 'manual'>('ask')
@@ -44,6 +45,17 @@ export function SettingsView() {
           Customize a few behaviors. More settings will land here over time.
         </p>
       </div>
+
+      <section className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
+        <h3 className="m-0 text-sm font-semibold text-cribl-ink">About this build</h3>
+        <p className="m-0 mt-1 text-sm text-cribl-muted">
+          Include this version when reporting bugs so we can match your issue to the right{' '}
+          <span className="font-mono text-cribl-ink/90">.tgz</span>, standalone HTML, or dev build.
+        </p>
+        <p className="m-0 mt-3 text-xs text-cribl-muted">
+          Build <span className="font-mono text-cribl-ink/70">v{APP_VERSION}</span>
+        </p>
+      </section>
 
       <section className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
         <h3 className="m-0 text-sm font-semibold text-cribl-ink">After adding a source</h3>

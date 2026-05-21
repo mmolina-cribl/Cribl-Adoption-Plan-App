@@ -163,6 +163,11 @@ type Props = {
   onAddSource: () => void
   /** Navigate to another worker group / fleet (used for sub-fleet chips). */
   onSelectWorkerGroup: (id: string) => void
+  /**
+   * Edge only: open the global new sub-fleet dialog scoped to this fleet’s
+   * top-level parent (resource map + hub actions).
+   */
+  onRequestCreateSubfleet?: () => void
 }
 
 export function WorkerGroupDetailView({
@@ -173,11 +178,21 @@ export function WorkerGroupDetailView({
   onSelectSource,
   onAddSource,
   onSelectWorkerGroup,
+  onRequestCreateSubfleet,
 }: Props) {
   const g = plan.workerGroups.find((x) => x.id === groupId) ?? null
   const s = usePatchWorkerGroup(setPlan, groupId)
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false)
   const expandByDefault = getWorkerGroupDetailCardsExpanded()
+  // Must run before any early return: after remove, `groupId` can briefly
+  // point at a deleted row while plan has already updated — same hook count
+  // every render avoids a Rules-of-Hooks crash (blank page).
+  const subFleets = useMemo(() => {
+    if (!g || g.kind !== 'edge') return []
+    return plan.workerGroups.filter(
+      (w) => w.kind === 'edge' && (w.parentFleetId ?? '').trim() === g.id,
+    )
+  }, [g, plan.workerGroups])
 
   if (!g) {
     return (
@@ -228,15 +243,6 @@ export function WorkerGroupDetailView({
   }
 
   const sources = sourceSummaryForWg(plan, g)
-  const subFleets = useMemo(
-    () =>
-      g.kind === 'edge'
-        ? plan.workerGroups.filter(
-            (w) => w.kind === 'edge' && (w.parentFleetId ?? '').trim() === g.id,
-          )
-        : [],
-    [g.kind, g.id, plan.workerGroups],
-  )
   const assignedCount = sources.length
   const sourcesWithIndex = sources.map((r) => ({
     row: r,
@@ -435,6 +441,7 @@ export function WorkerGroupDetailView({
           onAttach={assignSourceToThisGroup}
           onAddSource={onAddSource}
           onOpenChildFleet={onSelectWorkerGroup}
+          onRequestCreateSubfleet={g.kind === 'edge' ? onRequestCreateSubfleet : undefined}
         />
       </SectionBox>
 

@@ -71,6 +71,11 @@ type Props = {
    * resource map strip.
    */
   onOpenChildFleet?: (id: string) => void
+  /**
+   * Edge only: open the flow to add a new sub-fleet under the same top-level
+   * fleet as this map's worker group / fleet (parent passes the dialog opener).
+   */
+  onRequestCreateSubfleet?: () => void
   /** Extra classes appended to the outer card (e.g. `lg:col-span-2`). */
   className?: string
 }
@@ -110,6 +115,7 @@ export function WorkerGroupResourceMap({
   onAttach,
   onAddSource,
   onOpenChildFleet,
+  onRequestCreateSubfleet,
   className,
 }: Props) {
   const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
@@ -476,33 +482,66 @@ export function WorkerGroupResourceMap({
               <span>New source</span>
             </button>
           ) : null}
+          {isEdgeKind && onRequestCreateSubfleet ? (
+            <button
+              type="button"
+              onClick={onRequestCreateSubfleet}
+              title="Create a new sub-fleet under this fleet"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-cribl-edge/50 bg-cribl-edge px-2.5 text-[11px] font-semibold text-white shadow-ctrl transition hover:bg-cribl-edge-hover"
+            >
+              <span aria-hidden className="text-[13px] leading-none">
+                ＋
+              </span>
+              <span>Add Subfleet</span>
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {isEdgeKind && childFleets.length > 0 ? (
+      {isEdgeKind && (onRequestCreateSubfleet || childFleets.length > 0) ? (
         <div className="mt-3 rounded-xl border border-cribl-edge/45 bg-cribl-edge-soft/50 px-3 py-2.5">
-          <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
-            Sub-fleets
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {childFleets.map((c) => {
-              const nm = c.wg.trim() || 'Untitled fleet'
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => onOpenChildFleet?.(c.id)}
-                  title={`Open ${nm}`}
-                  className="max-w-[14rem] rounded-lg border border-cribl-edge/40 bg-white px-2.5 py-2 text-left shadow-ctrl transition hover:border-cribl-edge hover:ring-2 hover:ring-cribl-edge/25"
-                >
-                  <span className="block text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
-                    Sub fleet
-                  </span>
-                  <span className="mt-0.5 block truncate text-[13px] font-semibold text-cribl-ink">{nm}</span>
-                </button>
-              )
-            })}
-          </div>
+          <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-edge-ink">Sub-fleets</p>
+          {childFleets.length === 0 ? (
+            <p className="m-0 mt-2 text-xs text-cribl-muted">
+              No sub-fleets yet{onRequestCreateSubfleet ? ' — use Add Subfleet in the map header.' : '.'}
+            </p>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {childFleets.map((c) => {
+                const nm = c.wg.trim() || 'Untitled fleet'
+                return (
+                  <div key={c.id} className="flex max-w-[min(100%,16rem)] items-stretch gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onOpenChildFleet?.(c.id)}
+                      title={`Open ${nm}`}
+                      className="min-w-0 flex-1 rounded-lg border border-cribl-edge/40 bg-white px-2.5 py-2 text-left shadow-ctrl transition hover:border-cribl-edge hover:ring-2 hover:ring-cribl-edge/25"
+                    >
+                      <span className="block text-[9px] font-semibold uppercase tracking-wide text-cribl-edge-ink">
+                        Sub fleet
+                      </span>
+                      <span className="mt-0.5 block truncate text-[13px] font-semibold text-cribl-ink">{nm}</span>
+                    </button>
+                    {onRequestCreateSubfleet ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onRequestCreateSubfleet()
+                        }}
+                        title="Add another sub-fleet under this fleet"
+                        aria-label={`Add Subfleet next to ${nm}`}
+                        className="w-9 shrink-0 rounded-lg border border-cribl-edge/40 bg-white text-lg font-semibold leading-none text-cribl-edge shadow-ctrl transition hover:border-cribl-edge hover:bg-cribl-edge-soft/80"
+                      >
+                        <span aria-hidden>＋</span>
+                      </button>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       ) : null}
 

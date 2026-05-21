@@ -113,6 +113,9 @@ the way you'd hand them a PDF:
    `file://` and works immediately. No Node, no `npm`, no IT-side
    allowlist.
 
+For a **short customer-facing summary** (purpose, data boundaries, network),
+see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md).
+
 A few UX notes worth setting expectations on:
 
 - **`localStorage` is path-scoped under `file://`.** If a customer

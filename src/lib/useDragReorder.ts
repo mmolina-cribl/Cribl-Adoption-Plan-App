@@ -80,12 +80,12 @@ export type DragReorderOptions = {
 
 /**
  * Tiny native-HTML5 drag-and-drop coordinator for vertical lists in
- * the left navigation. We keep it deliberately small — no third-party
- * dependency, no abstract list virtualization — because the lists in
- * question (sources, worker groups, fleets) are short and exclusively
- * desktop-mouse driven. Touch devices fall back to the existing add /
- * remove buttons; HTML5 D&D doesn't fire on iOS Safari without extra
- * shimming, and the mobile chip nav has no equivalent affordance.
+ * the left navigation. Lists are short; the hook stays dependency-free.
+ * Callers may also wire **keyboard** moves (Alt+↑/↓ on the grip) and **A–Z**
+ * sort in `PlanSidebar` — those call the same `onReorder` contract.
+ *
+ * Touch: HTML5 D&D is still inconsistent on iOS Safari; coarse-pointer
+ * styling on the grip improves tablets that show this rail.
  *
  * The hook is intentionally type-erased over `string` ids: the caller
  * looks up the actual row by id when committing the move, so this hook

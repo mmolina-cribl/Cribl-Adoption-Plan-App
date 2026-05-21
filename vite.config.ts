@@ -7,6 +7,15 @@ import tailwindcss from '@tailwindcss/vite'
 // @ts-ignore
 import { servePackageTgz } from './scripts/pkgutil.mjs'
 
+function readPackageVersion(): string {
+  try {
+    const j = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string }
+    return String(j.version ?? '0.0.0')
+  } catch {
+    return '0.0.0'
+  }
+}
+
 /**
  * No-op stub for the `virtual:embedded-gold-template` module that the
  * standalone build (`vite.standalone.config.ts`) registers as a
@@ -102,6 +111,9 @@ const injectScriptFromQueryPlugin = () => {
 };
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(readPackageVersion()),
+  },
   plugins: [
     react(),
     tailwindcss(),
