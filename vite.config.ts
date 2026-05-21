@@ -12,8 +12,9 @@ import { servePackageTgz } from './scripts/pkgutil.mjs'
  * standalone build (`vite.standalone.config.ts`) registers as a
  * base64-inlined copy of `public/adoption-plan-empty.xlsx`.
  *
- * In the Cribl-Apps build the gold template is fetched at runtime from
- * the platform's static host (`/adoption-plan-empty.xlsx`), so this
+ * In the Cribl-Apps build the gold template is fetched at runtime next to
+ * `index.html` (see `getAdoptionPlanEmptyTemplateUrl` in adoptionPlanTemplateExport.ts),
+ * so this
  * stub just returns `hasEmbeddedGoldTemplate: false` — the runtime
  * resolver in `src/lib/adoptionPlanTemplateExport.ts` then short-
  * circuits past the embedded path and uses the fetch result. Adds

@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useState, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { WorkerGroupEditor } from './WorkerGroupEditor'
 import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
 import { sourceLabel, type PlanState } from '../types/planTypes'
@@ -161,6 +161,8 @@ type Props = {
    * directly from the worker-group page.
    */
   onAddSource: () => void
+  /** Navigate to another worker group / fleet (used for sub-fleet chips). */
+  onSelectWorkerGroup: (id: string) => void
 }
 
 export function WorkerGroupDetailView({
@@ -170,6 +172,7 @@ export function WorkerGroupDetailView({
   onRemoveGroup,
   onSelectSource,
   onAddSource,
+  onSelectWorkerGroup,
 }: Props) {
   const g = plan.workerGroups.find((x) => x.id === groupId) ?? null
   const s = usePatchWorkerGroup(setPlan, groupId)
@@ -225,6 +228,15 @@ export function WorkerGroupDetailView({
   }
 
   const sources = sourceSummaryForWg(plan, g)
+  const subFleets = useMemo(
+    () =>
+      g.kind === 'edge'
+        ? plan.workerGroups.filter(
+            (w) => w.kind === 'edge' && (w.parentFleetId ?? '').trim() === g.id,
+          )
+        : [],
+    [g.kind, g.id, plan.workerGroups],
+  )
   const assignedCount = sources.length
   const sourcesWithIndex = sources.map((r) => ({
     row: r,
@@ -416,11 +428,13 @@ export function WorkerGroupDetailView({
           workerGroup={g}
           sources={sources}
           totalVolumeGb={totalVol}
+          childFleets={subFleets}
           unassignedSources={plan.sourceSummary.filter((r) => !r.workerGroupId)}
           onOpenSource={onSelectSource}
           onUnassign={unassignSource}
           onAttach={assignSourceToThisGroup}
           onAddSource={onAddSource}
+          onOpenChildFleet={onSelectWorkerGroup}
         />
       </SectionBox>
 

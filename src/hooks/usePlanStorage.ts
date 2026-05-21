@@ -53,13 +53,16 @@ function normalizePlan(raw: unknown): PlanState {
     }),
     workerGroups: (p.workerGroups ?? []).map((w) => {
       const x = w as Partial<WorkerGroupRow>
+      const kind: WorkerGroupRow['kind'] = x.kind === 'edge' ? 'edge' : 'stream'
       return {
         ...w,
         // v2.0: every WG row is now either 'stream' or 'edge'. Plans saved
         // before v2.0 default to 'stream' (the only kind that existed).
-        kind: x.kind === 'edge' ? 'edge' : 'stream',
+        kind,
         throughputGbd: x.throughputGbd ?? '',
         diskOneDayGb: x.diskOneDayGb ?? '',
+        parentFleetId:
+          kind === 'edge' ? String(x.parentFleetId ?? '').trim() : '',
       } as WorkerGroupRow
     }),
     // v2.0 PR C: every PlanState now carries an `activation` block

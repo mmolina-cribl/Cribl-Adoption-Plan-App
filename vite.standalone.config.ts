@@ -27,7 +27,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
  *      `virtual:embedded-gold-template` to a base64 string of
  *      `public/adoption-plan-empty.xlsx`. The runtime code in
  *      `src/lib/adoptionPlanTemplateExport.ts` imports it lazily and
- *      uses it as the fallback when `fetch('/adoption-plan-empty.xlsx')`
+ *      uses it as the fallback when `fetch(getAdoptionPlanEmptyTemplateUrl())`
  *      fails (which it always does under `file://` — browsers block
  *      cross-origin file fetches by default).
  *

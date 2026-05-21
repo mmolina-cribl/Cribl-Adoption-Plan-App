@@ -9,6 +9,7 @@ import {
   SHEET_STREAM_OVERVIEW_V091,
   V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
   V091_OVERVIEW_TABLE2_HEADER_ROW,
+  V091_UNASSIGNED_BUCKET_SHEET_NAME,
 } from './planWorkbookLayout'
 import {
   PS_BASE_SCOPE_ITEMS,
@@ -353,6 +354,7 @@ function parseCopySourcesWg(
       workerCount: strCell(row, colW('Worker Count')),
       workerDetail: strCell(row, colW('Worker Detail')),
       diskOneDayGb: cellToNumStr(cellAt(row, colW("Disk Req'd For 1 Day Storage"))),
+      parentFleetId: '',
     })
   }
   return {
@@ -551,6 +553,25 @@ function parseV091Workbook(
   const sourceSummary: SourceSummaryRow[] = []
 
   for (const name of sheetNames) {
+    // v0.9.1 reserves the literal `wg-unassigned` sheet for sources the
+    // customer has not yet attached to a real worker group / fleet. The
+    // exporter synthesizes this sheet on save; on import we parse the
+    // source rows from it but DO NOT create a corresponding `WorkerGroupRow`
+    // — the rows come back as unassigned (workerGroupId = '') so they
+    // resurface in the in-app "Unassigned" navigation bucket. Any user
+    // who really named a Stream WG "unassigned" round-trips as
+    // "unassigned-2" (the export-time disambiguation), preserving this
+    // bucket-sheet contract.
+    if (name === V091_UNASSIGNED_BUCKET_SHEET_NAME) {
+      const sheet = wb.Sheets[name]
+      if (!sheet) {
+        continue
+      }
+      const aoa = aoaFromSheet(sheet)
+      const rows = parseSourceSummarySheet(aoa, warnings, '')
+      sourceSummary.push(...rows)
+      continue
+    }
     const cls = classifyV091SheetName(name)
     if (!cls) {
       continue
@@ -567,6 +588,7 @@ function parseV091Workbook(
       workerCount: '',
       workerDetail: '',
       diskOneDayGb: '',
+      parentFleetId: '',
     })
     const sheet = wb.Sheets[name]
     if (!sheet) {
@@ -581,9 +603,13 @@ function parseV091Workbook(
     sourceSummary.push(...rows)
   }
 
-  if (workerGroups.length === 0) {
+  // A workbook that contains only the unassigned bucket sheet is still
+  // a valid import — sources land in PlanState with `workerGroupId = ''`
+  // and surface in the in-app "Unassigned" navigation bucket. Only warn
+  // when nothing at all came through.
+  if (workerGroups.length === 0 && sourceSummary.length === 0) {
     warnings.push(
-      'v0.9.1 workbook detected but no per-WG (`wg*`) or per-Fleet (`fl*_fleet`) sheets were found; nothing imported.',
+      'v0.9.1 workbook detected but no per-WG (`wg-*`), per-Fleet (`fl-*`), or `wg-unassigned` sheets were found; nothing imported.',
     )
   }
 

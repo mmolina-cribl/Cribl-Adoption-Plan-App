@@ -115,6 +115,11 @@ export type WorkerGroupRow = {
    * Disk required for 1 day storage (GB) — if empty, derived from egress ÷ 8 in UI / Excel.
    */
   diskOneDayGb: string
+  /**
+   * Edge only: when set, this fleet is a sub-fleet of the parent top-level fleet
+   * (`kind === 'edge'` and `parentFleetId` empty). Stream rows ignore this field.
+   */
+  parentFleetId: string
 }
 
 /**

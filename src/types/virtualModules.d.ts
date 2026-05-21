@@ -2,7 +2,7 @@
 //
 //   - In the Cribl-Apps build (`vite.config.ts`):
 //     `virtualGoldTemplateStubPlugin` returns hasEmbeddedGoldTemplate=false
-//     so the runtime resolver falls through to the `/adoption-plan-empty.xlsx`
+//     so the runtime resolver falls through to `getAdoptionPlanEmptyTemplateUrl()`
 //     fetch.
 //
 //   - In the standalone build (`vite.standalone.config.ts`):

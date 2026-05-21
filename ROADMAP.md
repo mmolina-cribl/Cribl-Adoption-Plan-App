@@ -18,6 +18,12 @@ new product/UX direction belongs here first.
   across `.tgz`, standalone HTML, and locally running builds.
 - Improve validation and user-facing error messages when import/export detects
   an unsupported, malformed, or partially migrated workbook.
+- Add drag-and-drop reordering in the left navigation for sources, Stream
+  worker groups, and Edge fleets. The user-defined order should persist in the
+  plan and drive Excel export order as well: left-nav source order maps to
+  per-sheet source rows / overview source rows, worker-group order maps to
+  `wg-*` sheet/tab order and Stream Overview rows, and fleet order maps to
+  `fl-*` sheet/tab order and Edge Overview rows.
 
 ## Planned Exploration
 

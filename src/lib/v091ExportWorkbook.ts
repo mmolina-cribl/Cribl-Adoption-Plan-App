@@ -59,6 +59,8 @@ import {
   V091_PER_WG_DEFAULT_DATA_ROW_SLOTS,
   V091_PER_WG_FIRST_DATA_ROW,
   V091_PER_WG_HEADERS_BASE,
+  V091_UNASSIGNED_BUCKET_SHEET_NAME,
+  V091_UNASSIGNED_BUCKET_WG_ID,
   V091_WG_SHEET_PREFIX,
 } from './planWorkbookLayout'
 import {
@@ -111,6 +113,106 @@ const RESERVED_STATIC_SHEET_NAMES: readonly string[] = [
   SHEET_EDGE_OVERVIEW_V091,
   SHEET_INPUT_DATA,
 ] as const
+
+/**
+ * Reserved-name set used when resolving real worker-group sheet names.
+ * Adds {@link V091_UNASSIGNED_BUCKET_SHEET_NAME} to the static set so a
+ * user-named WG can never collide with the synthetic unassigned bucket;
+ * the bucket sheet name is then assigned manually after disambiguation.
+ */
+const RESERVED_REAL_WG_SHEET_NAMES: readonly string[] = [
+  ...RESERVED_STATIC_SHEET_NAMES,
+  V091_UNASSIGNED_BUCKET_SHEET_NAME,
+] as const
+
+/**
+ * Build the export-only plan that an exporter pipeline should consume.
+ *
+ * If any source row has no `workerGroupId` (or points at a stale id no
+ * longer present in `plan.workerGroups`), append a synthetic Stream-kind
+ * worker-group row keyed on {@link V091_UNASSIGNED_BUCKET_WG_ID} and
+ * rewrite every orphaned source's `workerGroupId` to that id. The
+ * synthetic WG produces the {@link V091_UNASSIGNED_BUCKET_SHEET_NAME}
+ * sheet at fill time using the standard Stream per-WG template — the
+ * bucket is just a regular Stream WG sheet from the export pipeline's
+ * perspective, with two carve-outs:
+ *
+ *   - The Stream Overview rollup tables MUST exclude it from both the
+ *     top "Sources, Volume, Region" table and the bottom "Worker Groups
+ *     & Specs" table (it is not a real worker group capacity-wise; it
+ *     is just a parking lot for un-attached sources).
+ *
+ *   - Sheet-name resolution MUST hard-assign the bucket sheet name
+ *     rather than running the synthetic WG through `resolveSheetNameFor`
+ *     — otherwise a real WG that happens to be named "unassigned" would
+ *     win the bare {@link V091_UNASSIGNED_BUCKET_SHEET_NAME} slot and
+ *     the synthetic would land on `wg-unassigned-2`.
+ *
+ * If every source is already attached to a real WG, the input plan is
+ * returned unchanged and `hasUnassigned` is `false`.
+ */
+function buildExportPlanWithUnassignedBucket(plan: PlanState): {
+  planForExport: PlanState
+  hasUnassigned: boolean
+} {
+  const realWgIds = new Set(plan.workerGroups.map((w) => w.id))
+  const hasUnassigned = plan.sourceSummary.some(
+    (s) => !s.workerGroupId || !realWgIds.has(s.workerGroupId),
+  )
+  if (!hasUnassigned) {
+    return { planForExport: plan, hasUnassigned: false }
+  }
+  const syntheticWg: WorkerGroupRow = {
+    id: V091_UNASSIGNED_BUCKET_WG_ID,
+    kind: 'stream',
+    wg: 'unassigned',
+    ingestGbd: '',
+    egressGbd: '',
+    throughputGbd: '',
+    workerHosting: '',
+    workerCount: '',
+    workerDetail: '',
+    diskOneDayGb: '',
+    parentFleetId: '',
+  }
+  const remappedSources = plan.sourceSummary.map((s) =>
+    !s.workerGroupId || !realWgIds.has(s.workerGroupId)
+      ? { ...s, workerGroupId: V091_UNASSIGNED_BUCKET_WG_ID }
+      : s,
+  )
+  return {
+    planForExport: {
+      ...plan,
+      // Append synthetic at the end of the worker-group list so it lands
+      // on the last cloned Stream scaffold (i.e. the rightmost `wg-*`
+      // tab in the workbook), keeping real WGs in their natural order.
+      workerGroups: [...plan.workerGroups, syntheticWg],
+      sourceSummary: remappedSources,
+    },
+    hasUnassigned: true,
+  }
+}
+
+/**
+ * Resolve every plan WG / fleet row to its final v0.9.1 sheet name,
+ * with the synthetic unassigned bucket (if present) hard-assigned to
+ * {@link V091_UNASSIGNED_BUCKET_SHEET_NAME}. Real WGs run through the
+ * normal `resolveAllSheetNames` path, with the bucket name pre-reserved
+ * so they can't take it.
+ */
+function resolveExportSheetNames(plan: PlanState): Map<string, string> {
+  const realWgs = plan.workerGroups.filter(
+    (w) => w.id !== V091_UNASSIGNED_BUCKET_WG_ID,
+  )
+  const finalNames = resolveAllSheetNames(realWgs, RESERVED_REAL_WG_SHEET_NAMES)
+  const synthetic = plan.workerGroups.find(
+    (w) => w.id === V091_UNASSIGNED_BUCKET_WG_ID,
+  )
+  if (synthetic) {
+    finalNames.set(V091_UNASSIGNED_BUCKET_WG_ID, V091_UNASSIGNED_BUCKET_SHEET_NAME)
+  }
+  return finalNames
+}
 
 /**
  * Cheap probe for "is this buffer a v0.9.1 adoption plan shell?" Used by
@@ -455,15 +557,40 @@ function fillPerWgSheet(
   }
 }
 
-function planScopedSources(plan: PlanState, kind: WorkerGroupKind): SourceSummaryRow[] {
-  const wgIds = new Set(
-    plan.workerGroups.filter((w) => (kind === 'edge' ? w.kind === 'edge' : w.kind !== 'edge')).map((w) => w.id),
-  )
-  return plan.sourceSummary.filter((s) => wgIds.has(s.workerGroupId))
-}
-
+/**
+ * Stream/Edge worker groups, including the synthetic unassigned bucket
+ * (when present and `kind === 'stream'`). Used by the per-WG fill /
+ * scaffold-pairing path so the bucket sheet gets cloned and filled like
+ * any other Stream WG.
+ */
 function planScopedWorkerGroups(plan: PlanState, kind: WorkerGroupKind): WorkerGroupRow[] {
   return plan.workerGroups.filter((w) => (kind === 'edge' ? w.kind === 'edge' : w.kind !== 'edge'))
+}
+
+/**
+ * Real-only Stream/Edge worker groups, with the synthetic unassigned
+ * bucket filtered out. Used by the Stream/Edge Overview rollup tables —
+ * the bucket is intentionally not a "real" capacity slot, so it should
+ * never appear in the WGs/FLs spec table or contribute sources to the
+ * top "Sources, Volume, Region" table.
+ */
+function planScopedRealWorkerGroups(plan: PlanState, kind: WorkerGroupKind): WorkerGroupRow[] {
+  return planScopedWorkerGroups(plan, kind).filter(
+    (w) => w.id !== V091_UNASSIGNED_BUCKET_WG_ID,
+  )
+}
+
+/**
+ * Sources scoped to a kind, with bucket-parked sources excluded. Used by
+ * the Stream/Edge Overview rollup tables for the same reason as
+ * {@link planScopedRealWorkerGroups}. The per-WG fill path does not need
+ * a separate "include bucket" helper — it filters by the specific WG's
+ * id ({@link fillPerWgSheet}), which naturally picks up the synthetic
+ * bucket WG's sources via `s.workerGroupId === V091_UNASSIGNED_BUCKET_WG_ID`.
+ */
+function planScopedRealSources(plan: PlanState, kind: WorkerGroupKind): SourceSummaryRow[] {
+  const wgIds = new Set(planScopedRealWorkerGroups(plan, kind).map((w) => w.id))
+  return plan.sourceSummary.filter((s) => wgIds.has(s.workerGroupId))
 }
 
 function parseNumber(s: string | undefined): number | '' {
@@ -494,8 +621,13 @@ function fillOverviewSheet(
   plan: PlanState,
   sheetNameByWgId: Map<string, string>,
 ): void {
-  const sources = planScopedSources(plan, kind)
-  const wgs = planScopedWorkerGroups(plan, kind)
+  // Overview tables are intentionally bucket-free: the synthetic
+  // "wg-unassigned" WG is not a real capacity slot and its sources are
+  // not committed to a Stream WG yet, so they don't belong in either
+  // the Stream Overview top "Sources, Volume, Region" table or the
+  // bottom "Worker Groups & Specs" table.
+  const sources = planScopedRealSources(plan, kind)
+  const wgs = planScopedRealWorkerGroups(plan, kind)
 
   // Top table: rows 3..14 in the gold (12 slots). We blank every gold-
   // shipped row first so a shrink doesn't leave phantoms; if the plan
@@ -565,7 +697,7 @@ async function fillContentInShell(plan: PlanState, expandedShell: ArrayBuffer): 
   wb.title = titleForAdoptionPlanExport(plan)
   wb.subject = plan.customerName.trim() || ''
 
-  const finalSheetNames = resolveAllSheetNames(plan.workerGroups, RESERVED_STATIC_SHEET_NAMES)
+  const finalSheetNames = resolveExportSheetNames(plan)
 
   const streamScaffolds: ExcelJS.Worksheet[] = []
   const edgeScaffolds: ExcelJS.Worksheet[] = []
@@ -719,10 +851,12 @@ const STYLE_PARTS_TO_RESTORE: readonly string[] = [
  */
 async function fixOverviewTableRefs(zOut: JSZip, plan: PlanState): Promise<void> {
   const tableFiles = Object.keys(zOut.files).filter((p) => /^xl\/tables\/table\d+\.xml$/.test(p))
-  const streamSrcCount = planScopedSources(plan, 'stream').length
-  const edgeSrcCount = planScopedSources(plan, 'edge').length
-  const streamWgCount = planScopedWorkerGroups(plan, 'stream').length
-  const edgeWgCount = planScopedWorkerGroups(plan, 'edge').length
+  // Overview table refs cover real WGs only — the unassigned bucket is
+  // not part of either overview's data range. See `fillOverviewSheet`.
+  const streamSrcCount = planScopedRealSources(plan, 'stream').length
+  const edgeSrcCount = planScopedRealSources(plan, 'edge').length
+  const streamWgCount = planScopedRealWorkerGroups(plan, 'stream').length
+  const edgeWgCount = planScopedRealWorkerGroups(plan, 'edge').length
 
   for (const path of tableFiles) {
     const xml = await zOut.file(path)!.async('string')
@@ -909,8 +1043,15 @@ async function restoreV091Styles(
  * without touching the others.
  */
 export async function planToBlobV091(plan: PlanState, shellBuf: ArrayBuffer): Promise<ArrayBuffer> {
-  const expanded = await expandShellScaffolds(shellBuf, plan)
-  const filled = await fillContentInShell(plan, expanded)
-  const final = await restoreV091Styles(filled, expanded, plan)
+  // If the plan has any source rows that are not currently attached to a
+  // real worker group / fleet, synthesize a Stream-kind "wg-unassigned"
+  // bucket so those rows ride through the standard per-WG cloning + fill
+  // + style-restore pipeline. The bucket is purely an export artifact —
+  // the importer special-cases its sheet name and strips the synthetic
+  // id back to '' so PlanState never sees it.
+  const { planForExport } = buildExportPlanWithUnassignedBucket(plan)
+  const expanded = await expandShellScaffolds(shellBuf, planForExport)
+  const filled = await fillContentInShell(planForExport, expanded)
+  const final = await restoreV091Styles(filled, expanded, planForExport)
   return final
 }

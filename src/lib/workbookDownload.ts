@@ -71,7 +71,7 @@ export async function planToBlobAsync(plan: PlanState): Promise<ArrayBuffer> {
   const base =
     'Cribl-styled export is not available. After the page loads, import your “Copy of Adoption plan” .xlsx again, or wait a few seconds and retry. '
   const detail =
-    lastError instanceof Error ? `(${lastError.message})` : lastError != null ? '(export failed — check the console.)' : '(no import shell in memory and /adoption-plan-empty.xlsx did not load.)'
+    lastError instanceof Error ? `(${lastError.message})` : lastError != null ? '(export failed — check the console.)' : '(no import shell in memory and adoption-plan-empty.xlsx did not load.)'
   throw new ExportShellUnavailableError(
     `${base}Plain unstyled .xlsx files are not offered here; they are much larger and lack Cribl colors and table styles. ${detail}`,
     lastError,

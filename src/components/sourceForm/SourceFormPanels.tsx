@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { inputData, securityDataTypes, sourceTypes } from '../../data/referenceData'
+import {
+  inputData,
+  securityDataTypes,
+  sourceTileSearchAliases,
+  sourceTypes,
+} from '../../data/referenceData'
 import { PencilIcon } from '../PencilIcon'
 import { sourceLabel, type PlanState, type SourceSummaryRow } from '../../types/planTypes'
 import {
   CheckboxLabeled,
+  ComboboxText,
   LabeledField,
   MultiComboboxChips,
   NumberWithSuffix,
   RetentionDials,
   SectionBox,
-  SelectOrCustom,
   SelectWithEmpty,
 } from '../FormControls'
 import { getSourceDetailCardsExpanded } from '../../lib/detailCardsPreference'
@@ -126,13 +131,13 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
         />
       </LabeledField>
       <LabeledField id={`s-${row.id}-tile`} label="Source tile">
-        <SelectOrCustom
+        <ComboboxText
           id={`s-${row.id}-tile`}
           value={row.sourceTile}
           onChange={(v) => s('sourceTile', v)}
           options={inputData.techTiles}
-          placeholder="Select a tile…"
-          customPlaceholder="Type a custom source tile"
+          optionAliases={sourceTileSearchAliases}
+          placeholder="Type to search source tiles…"
         />
       </LabeledField>
       <LabeledField id={`s-${row.id}-pipe`} label="Pipeline usecase">
@@ -150,8 +155,9 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
           value={row.destinations}
           onChange={(v) => s('destinations', v)}
           options={inputData.destTiles}
+          allowCustom={false}
           alwaysShowOptions
-          placeholder="e.g. SplunkHEC, AmazonS3"
+          placeholder="Search tiles, then pick from the list…"
         />
       </LabeledField>
       <LabeledField
