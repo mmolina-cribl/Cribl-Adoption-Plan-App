@@ -46,6 +46,23 @@ Before tagging a release that ships **`npm run package`**:
 
 ---
 
+## Release checklist (GitHub — on‑prem standalone HTML)
+
+On‑prem customers use the **single-file** build from GitHub, not the App Platform
+`.tgz`. Every **public GitHub release** they might hand to a customer **must**
+include the standalone artifact on the release page:
+
+1. From a clean tree at the tagged commit, run **`npm run build:standalone`**
+   (output: **`dist-standalone/cribl-adoption-plan.html`** — see [`README.md`](./README.md#standalone-deployment)).
+2. Upload it to the GitHub release, for example:
+   `gh release upload vX.Y.Z dist-standalone/cribl-adoption-plan.html --repo <owner>/<repo>`
+   (use the same tag as the release).
+
+`dist-standalone/` is gitignored; the HTML is **not** committed — it is only a
+build artifact and a **release asset**.
+
+---
+
 ## Decision 1 — KV hydration strategy
 
 **Problem.** The Cribl App Platform's KV store is a remote service. A
