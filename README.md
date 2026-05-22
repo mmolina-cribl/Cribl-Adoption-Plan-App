@@ -61,6 +61,20 @@ The app ships in **two flavors from the same codebase**:
 - **Animations preference** — Subtle entry animations on bars, donuts,
   and connector lines, with a Settings toggle (and automatic respect for
   OS-level `prefers-reduced-motion`).
+- **Import from live tenant** — When running inside the Cribl App Platform,
+  **File → Import** can bootstrap worker groups / fleets and **configured sources**
+  from Leader APIs (`/master/groups` and per-group **`/m/{group}/system/inputs`**).
+  After a successful run, expand **Import debug** for per-group input counts, an
+  **Imported sources** table (labels, collector types, WG), harvest warnings, and
+  copyable JSON. Routing (pipelines / destinations) is **not** imported—fill that in the plan or Excel as usual.
+  For a full **Leader vs plan** field matrix (what can be pulled, what we use, what we ignore), see
+  [`docs/tenant-import-leader-data.md`](./docs/tenant-import-leader-data.md).
+- **Activation** (Plan nav) — In-app **PS Use Case Worksheet** (tier, base scope, use-case overview, per-use-case parameters) aligned to the Excel sheet of the same name.
+- **Summary** (Plan nav) — **executive summary**: stakeholder narrative, provenance, and the **full**
+  worker-group and source inventory; **Download summary (.md)** and **Download workbook (.xlsx)** on the page.
+- **AI ASSISTANT (right rail)** — Optional BYOL OpenAI (`gpt-4o-mini`) using
+  `config/proxies.yml` + KV per AGENTS.md; sends a compact JSON plan digest for
+  grounded suggestions. On large screens, drag the rail’s **left** edge to resize (width is persisted like the plan sidebar).
 
 ## Quick start
 
@@ -116,6 +130,11 @@ the way you'd hand them a PDF:
 For a **short customer-facing summary** (purpose, data boundaries, network),
 see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md).
 
+For **Cribl Copilot / Cribl AI** vs **BYOL** options from an App Platform iframe,
+see [`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md)
+(public-doc summary, APM reference protocol, `/ai/*` verification snippet, and
+internal stakeholder questions).
+
 A few UX notes worth setting expectations on:
 
 - **`localStorage` is path-scoped under `file://`.** If a customer
@@ -130,6 +149,17 @@ A few UX notes worth setting expectations on:
 - **Same UI, same code paths.** The KV helper detects
   `window.CRIBL_API_URL === undefined` and routes every read/write to
   `localStorage` — there is no separate "lite mode."
+
+## Cribl Apps `__local__` dev shell (known limitation)
+
+The platform’s **`__local__`** shell is for engineering only — **customers use a
+deployed installed pack**, which has pack KV and reliable plan persistence.
+
+In **`__local__`**, plan state (including after **Import from live tenant**) **may
+not survive a full page reload**: there is no pack KV, and browser storage can be
+unavailable or unreliable inside the sandboxed iframe. For QA, use a **deployed**
+app, or download **Export** / **Summary → Download workbook** as your snapshot.
+Details: [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) (*Known issue — plan persistence in the `__local__` shell*).
 
 ## Running outside the Cribl iframe (dev only)
 
@@ -161,7 +191,7 @@ mistake for a real export.
 
 ## Exporting
 
-`File → Export` produces a file named:
+Use **Export** in the sidebar (below **Import**), or open **Summary** under **Plan** and use **Download workbook**, to download a file named:
 
 ```
 <customer name> Adoption Plan - MM-DD-YYYY.xlsx
@@ -186,7 +216,7 @@ src/
     SearchInput.tsx          Reusable search field with leading magnifier + clear ×
     AnimatedBar.tsx          Reusable progress-bar entry animation
     HeaderCustomerName.tsx   Top-right customer name (click-to-edit pencil)
-    SettingsView.tsx         User preferences (animations, etc.)
+    SettingsView.tsx         User preferences (animations, OpenAI API key for assistant, etc.)
     …                        Add/Confirm dialogs, form controls, etc.
   hooks/
     usePlanStorage.ts        KV-backed plan state hook (gates UI on initial read)

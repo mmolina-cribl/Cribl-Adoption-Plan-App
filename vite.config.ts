@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-// @ts-ignore
+// @ts-expect-error pkgutil is plain JS without types
 import { servePackageTgz } from './scripts/pkgutil.mjs'
 
 function readPackageVersion(): string {
@@ -64,10 +64,25 @@ const packageEndpointPlugin = () => ({
   },
 })
 
-const injectScriptFromQueryPlugin = () => {
-  let initScriptUrl: string | null = null;
+/** Dev/preview: forward docs.cribl.io llms.txt fetches same-origin (avoids browser CORS). */
+const criblDocsLlmsProxy = {
+  target: 'https://docs.cribl.io',
+  changeOrigin: true,
+  secure: true,
+  rewrite: (path: string) => path.replace(/^\/__cribl_docs__/, '') || '/',
+} as const
+
+/**
+ * Dev / `vite preview` only. Must not run on `vite build`: the injected
+ * `window.CRIBL_APP_ID = '__dev__…'` assignment can throw if the Cribl App
+ * shell has already defined a non-writable `CRIBL_APP_ID`, which prevents
+ * the ES module bundle from loading and leaves the iframe blank.
+ */
+const injectScriptFromQueryPlugin = (): Plugin => {
+  let initScriptUrl: string | null = null
   return {
     name: 'inject-script-from-query',
+    apply: 'serve',
     configureServer(server: ViteDevServer) {
       const root = server.config.root;
       server.watcher.add([
@@ -80,35 +95,42 @@ const injectScriptFromQueryPlugin = () => {
         }
       });
     },
-    transformIndexHtml(html: string, ctx: IndexHtmlTransformContext): IndexHtmlTransformResult{
-      const url = new URL(ctx.originalUrl ?? '/', 'https://localhost');
-      initScriptUrl = initScriptUrl || url.searchParams.get('init');
-      const root = process.cwd();
-      let appName;
+    transformIndexHtml(html: string, ctx: IndexHtmlTransformContext): IndexHtmlTransformResult {
+      const url = new URL(ctx.originalUrl ?? '/', 'https://localhost')
+      const initFromCribl = url.searchParams.get('init')
+      initScriptUrl = initScriptUrl || initFromCribl
+      const root = process.cwd()
+      let appName
       try {
-        const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { name?: string };
-        appName = pkg.name;
+        const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { name?: string }
+        appName = pkg.name
       } catch {
         /* ignore missing or invalid package.json */
       }
-      appName = appName || 'unknown';
-      const tags: Array<{ tag: string; attrs?: Record<string, string>; children?: string; injectTo: 'head-prepend' }> = [];
-      tags.push({
-        tag: 'script',
-        children: `window.CRIBL_APP_ID = '__dev__${appName}';`,
-        injectTo: 'head-prepend' as const,
-      });
+      appName = appName || 'unknown'
+      const tags: Array<{ tag: string; attrs?: Record<string, string>; children?: string; injectTo: 'head-prepend' }> =
+        []
+      // When `?init=` loads Cribl's init.js, it sets `CRIBL_APP_ID` / `CRIBL_API_URL`.
+      // Do not assign `__dev__…` here — it breaks KV URLs (wrong app id) and can
+      // race with the platform shell.
+      if (!initFromCribl) {
+        tags.push({
+          tag: 'script',
+          children: `window.CRIBL_APP_ID = '__dev__${appName}';`,
+          injectTo: 'head-prepend' as const,
+        })
+      }
       if (initScriptUrl) {
         tags.push({
           tag: 'script',
           attrs: { src: initScriptUrl, type: 'text/javascript' },
           injectTo: 'head-prepend' as const,
-        });
+        })
       }
-      return { html, tags };
+      return { html, tags }
     },
-  };
-};
+  }
+}
 
 export default defineConfig({
   define: {
@@ -124,6 +146,14 @@ export default defineConfig({
   base: './',
   server: {
     cors: true,
+    proxy: {
+      '^/__cribl_docs__/.*': criblDocsLlmsProxy,
+    },
+  },
+  preview: {
+    proxy: {
+      '^/__cribl_docs__/.*': criblDocsLlmsProxy,
+    },
   },
   build: {
     outDir: 'dist',

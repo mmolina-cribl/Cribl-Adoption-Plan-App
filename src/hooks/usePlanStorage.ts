@@ -6,13 +6,15 @@ import { kvGet, kvSet } from '../lib/kvStore'
 import { assignWorkerGroupIds } from '../lib/workerGroupIds'
 import type {
   Activation,
+  PlanProvenance,
   PlanState,
   SourceSummaryRow,
   SourceVolumeRow,
   WorkerGroupRow,
 } from '../types/planTypes'
 
-const KEY = 'plan'
+/** Logical KV / localStorage key for the main plan blob (namespaced per user in KV). */
+export const PLAN_STORAGE_KEY = 'plan' as const
 
 /**
  * Normalize a raw value (typically the JSON-parsed body from KV) into a valid
@@ -72,6 +74,7 @@ function normalizePlan(raw: unknown): PlanState {
     // and fills in any missing sub-arrays / rows / fields without
     // dropping data the user has already entered.
     activation: backfillActivation((p as Partial<PlanState>).activation as Activation | undefined),
+    planProvenance: ((p as Partial<PlanState>).planProvenance ?? { kind: 'scratch' as const }) as PlanProvenance,
   }
   return assignWorkerGroupIds(backfillSourceSummaryTypePhysicalLocation(merged))
 }
@@ -149,14 +152,19 @@ function backfillSourceSummaryTypePhysicalLocation(plan: PlanState): PlanState {
  * we don't waste a round-trip (and, critically, so that on a brand-new
  * tenant where KV had no `plan` key, we don't silently create one with the
  * empty plan on first ever app open).
+ *
+ * Persists are **awaited on a serial queue** (`persistChainRef`). Previously
+ * we fired `kvSet` without awaiting; a quick refresh could abort the in-flight
+ * PUT (especially after a large tenant import) so the next load saw empty KV.
  */
 export function usePlanStorage() {
   const [plan, setPlan] = useState<PlanState | null>(null)
   const lastSavedRef = useRef<PlanState | null>(null)
+  const persistChainRef = useRef(Promise.resolve())
 
   useEffect(() => {
     void (async () => {
-      const raw = await kvGet<unknown>(KEY, null)
+      const raw = await kvGet<unknown>(PLAN_STORAGE_KEY, null)
       const loaded = raw === null ? createEmptyPlan() : normalizePlan(raw)
       lastSavedRef.current = loaded
       setPlan(loaded)
@@ -171,7 +179,12 @@ export function usePlanStorage() {
       return
     }
     lastSavedRef.current = plan
-    void kvSet(KEY, plan)
+    const snapshot = plan
+    persistChainRef.current = persistChainRef.current
+      .then(() => kvSet(PLAN_STORAGE_KEY, snapshot))
+      .catch(() => {
+        /* kvSet logs failures */
+      })
   }, [plan])
 
   const reset = () => {

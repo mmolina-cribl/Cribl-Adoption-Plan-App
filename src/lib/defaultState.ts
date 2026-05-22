@@ -141,6 +141,7 @@ export function createEmptyPlan(): PlanState {
     sourceVolume: [],
     workerGroups: [],
     activation: defaultActivation(),
+    planProvenance: { kind: 'scratch' },
   }
 }
 

@@ -16,7 +16,7 @@ declare global {
     /** The base path your app is mounted at. Example: `/app-ui/adoption-plan` */
     CRIBL_BASE_PATH?: string
 
-    /** The app ID. In dev: `__dev__<name>`; in prod: `<name>`. */
+    /** The app ID. In prod: pack name; dev: `__dev__<name>`; local shell: `__local__` (no pack KV). */
     CRIBL_APP_ID?: string
   }
 }

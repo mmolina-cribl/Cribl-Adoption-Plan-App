@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type KeyboardEvent,
@@ -9,13 +10,13 @@ import {
   type SetStateAction,
 } from 'react'
 import { AnimatedCollapse } from './AnimatedCollapse'
-import { TierPickerDialog } from './TierPickerDialog'
 import {
   PS_BASE_SCOPE_ITEMS,
   PS_BASE_SCOPE_WORKSHEET_LABELS,
   PS_PARAMETERS_PER_USE_CASE,
   PS_PARAMETER_NUMBERS,
   PS_STATUS_OPTIONS,
+  PS_TIER_OPTIONS,
   PS_USE_CASE_COUNT,
   PS_USE_CASE_KIND_OPTIONS,
   PS_USE_CASE_OVERVIEW_NUMBERS,
@@ -23,6 +24,7 @@ import {
   TIER_PALETTE,
   getBaseScopeDeliverableDescription,
   getUseCaseKindDescription,
+  activationTierScopeSummary,
   tierPalette,
   unlockedUseCaseCountForTier,
   useCaseHeaderLabel,
@@ -65,8 +67,8 @@ const TABS: ReadonlyArray<{
 
 /**
  * The Activation page — a 1-to-1 interactive view of the gold's
- * `PS Use Case Worksheet` sheet plus a soft tier picker. Three tabs
- * mirror the gold's three banner-separated blocks; only one tab's
+ * `PS Use Case Worksheet` sheet plus a PS tier control in the header.
+ * Three tabs mirror the gold's three banner-separated blocks; only one tab's
  * content renders at a time so each block has the full content width
  * for writing and selections.
  *
@@ -82,31 +84,6 @@ export function ActivationView({ plan, setPlan }: Props) {
   const tier = activation.tier
 
   const [activeTab, setActiveTab] = useState<ActivationTabId>('base-scope')
-
-  /**
-   * Has the user ever seen the tier picker on this device this
-   * session? `false` on first mount, then `true` after the picker
-   * has been opened (or auto-opened) once. Prevents the auto-open
-   * from triggering again if the user dismisses with "I'll pick
-   * later" — they'd find that re-popping every time the page is
-   * revisited annoying.
-   */
-  const [tierPickerSeen, setTierPickerSeen] = useState(false)
-  /** Force-open from clicking the tier chip in the header. */
-  const [tierPickerForced, setTierPickerForced] = useState(false)
-
-  /**
-   * On mount, if the user has never picked a tier and hasn't seen
-   * the picker yet this session, auto-open the modal. The flag flips
-   * to `true` immediately so a subsequent dismiss-and-skip persists
-   * the user's "not now" preference for the session.
-   */
-  useEffect(() => {
-    if (tier === null && !tierPickerSeen) {
-      setTierPickerSeen(true)
-      setTierPickerForced(true)
-    }
-  }, [tier, tierPickerSeen])
 
   const setActivation = (next: Activation) => {
     setPlan((p) => ({ ...p, activation: next }))
@@ -125,7 +102,7 @@ export function ActivationView({ plan, setPlan }: Props) {
         id="activation-header"
         className="flex min-w-0 flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between"
       >
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-cribl-primary">
             Activation
           </p>
@@ -134,11 +111,12 @@ export function ActivationView({ plan, setPlan }: Props) {
           </h1>
           <p className="m-0 mt-1 max-w-2xl text-sm text-cribl-muted">
             Track {customerName}'s Cribl Professional Services activation — base-scope deliverables,
-            use-case selections, and per-use-case parameters with Status and Notes. Round-trips to
-            the <span className="text-cribl-ink/80">PS Use Case Worksheet</span> tab on export.
+            use-case selections, and per-use-case parameters with Status and Notes.
           </p>
         </div>
-        <TierChip tier={tier} onClick={() => setTierPickerForced(true)} />
+        <div className="min-w-0 w-full max-w-full shrink sm:w-auto sm:max-w-[min(24rem,100%)]">
+          <TierHeaderSelect tier={tier} onChange={setTier} />
+        </div>
       </header>
 
       <ActivationTabBar activeTab={activeTab} onChange={setActiveTab} />
@@ -163,19 +141,6 @@ export function ActivationView({ plan, setPlan }: Props) {
           <UseCaseWorksheetTab activation={activation} setActivation={setActivation} />
         ) : null}
       </div>
-
-      {tierPickerForced ? (
-        <TierPickerDialog
-          current={tier}
-          onSelect={(t) => {
-            setTier(t)
-            setTierPickerForced(false)
-          }}
-          onSkip={() => {
-            setTierPickerForced(false)
-          }}
-        />
-      ) : null}
     </div>
   )
 }
@@ -241,49 +206,176 @@ function ActivationTabBar({
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Sticky tier chip (re-opens the picker)
+// PS tier (header): compact listbox — colored dot per tier (native <option> cannot)
 // ────────────────────────────────────────────────────────────────────
 
-function TierChip({ tier, onClick }: { tier: ActivationTier | null; onClick: () => void }) {
+function TierHeaderSelect({
+  tier,
+  onChange,
+}: {
+  tier: ActivationTier | null
+  onChange: (t: ActivationTier | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
+  const summaryId = useId()
   const palette = tierPalette(tier)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const pick = (next: ActivationTier | null) => {
+    onChange(next)
+    setOpen(false)
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="Change PS tier"
-      className={[
-        'inline-flex h-9 shrink-0 items-center gap-2 self-start rounded-lg border bg-white px-3 text-sm font-medium shadow-ctrl transition sm:self-end',
-        palette
-          ? // Echo the tier color on the chip border / hover so the
-            // sticky header reads the tier at a glance — same palette
-            // as the picker cards and the left-nav pill.
-            [palette.chip, 'hover:brightness-95'].join(' ')
-          : 'border-cribl-border text-cribl-ink hover:border-cribl-primary/50 hover:bg-cribl-primary-soft',
-      ].join(' ')}
-    >
-      {palette ? (
-        <span aria-hidden className={['h-2 w-2 rounded-full', palette.dot].join(' ')} />
-      ) : null}
-      <span
-        className={[
-          'text-[10px] font-semibold uppercase tracking-wider',
-          palette ? palette.accentText : 'text-cribl-muted',
-        ].join(' ')}
+    <div className="flex min-w-0 max-w-full flex-col items-stretch gap-2 sm:max-w-sm sm:items-end">
+      <div ref={rootRef} className="relative w-full min-w-0 max-w-full self-start sm:self-end">
+        <div
+          className={[
+            'flex w-full min-w-0 shrink flex-nowrap items-center gap-x-3 self-start rounded-lg border px-3 py-2 shadow-ctrl sm:max-w-full sm:self-end',
+            palette
+              ? [palette.chip, 'transition hover:brightness-[0.98]'].join(' ')
+              : 'border-cribl-border bg-white text-cribl-ink transition hover:border-cribl-primary/45 hover:bg-cribl-primary-soft/35',
+          ].join(' ')}
+        >
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
+            {palette ? (
+              <span aria-hidden className={['h-2 w-2 shrink-0 rounded-full ring-2 ring-white', palette.dot].join(' ')} />
+            ) : (
+              <span
+                aria-hidden
+                className="h-2 w-2 shrink-0 rounded-full border-2 border-cribl-border/80 bg-white ring-2 ring-white"
+              />
+            )}
+            <span
+              className={[
+                'text-[10px] font-semibold uppercase tracking-wider',
+                palette ? palette.accentText : 'text-cribl-muted',
+              ].join(' ')}
+            >
+              PS tier
+            </span>
+          </div>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-haspopup="listbox"
+            aria-controls={open ? listId : undefined}
+            aria-describedby={summaryId}
+            aria-label="Cribl Professional Services tier for this activation"
+            onClick={() => setOpen((v) => !v)}
+            className={[
+              'ml-auto flex min-w-0 flex-1 shrink items-center justify-between gap-2 rounded-md border border-transparent px-0.5 py-0.5 text-left',
+              'text-sm font-semibold tracking-tight text-inherit outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/50',
+            ].join(' ')}
+          >
+            <span className="inline-block min-w-0 max-w-full flex-1 truncate sm:min-w-[9rem]">
+              {tier ?? 'Pick tier…'}
+            </span>
+            <svg
+              viewBox="0 0 20 20"
+              className={[
+                'h-4 w-4 shrink-0 transition-transform',
+                open ? '-rotate-180' : '',
+                palette ? palette.accentText : 'text-cribl-muted',
+              ].join(' ')}
+              aria-hidden
+            >
+              <path
+                fill="currentColor"
+                d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {open ? (
+          <ul
+            id={listId}
+            role="listbox"
+            className="absolute right-0 top-full z-50 mt-1 min-w-full rounded-lg border border-cribl-border bg-white py-1 shadow-[0_8px_28px_rgba(10,22,40,0.14)] sm:min-w-[12.5rem]"
+          >
+            <li className="list-none" role="none">
+              <button
+                type="button"
+                role="option"
+                aria-selected={tier === null}
+                onClick={() => pick(null)}
+                className={[
+                  'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm font-medium',
+                  tier === null ? 'bg-cribl-primary-soft/50 text-cribl-ink' : 'text-cribl-ink hover:bg-cribl-canvas',
+                ].join(' ')}
+              >
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-cribl-border/80 bg-white ring-2 ring-white"
+                />
+                <span>Pick tier…</span>
+              </button>
+            </li>
+            {PS_TIER_OPTIONS.map((t) => {
+              const p = TIER_PALETTE[t]
+              const selected = tier === t
+              return (
+                <li key={t} className="list-none" role="none">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => pick(t)}
+                    className={[
+                      'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm font-medium',
+                      selected ? 'bg-cribl-primary-soft/50 text-cribl-ink' : 'text-cribl-ink hover:bg-cribl-canvas',
+                    ].join(' ')}
+                  >
+                    <span
+                      aria-hidden
+                      className={['h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white', p.dot].join(' ')}
+                    />
+                    <span>{t}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
+      </div>
+
+      <p
+        id={summaryId}
+        className="m-0 min-h-[3rem] max-w-full text-xs leading-snug text-cribl-muted sm:max-w-sm sm:text-right"
       >
-        PS Tier
-      </span>
-      <span className={palette ? '' : 'text-cribl-ink'}>{tier ?? 'Pick…'}</span>
-      <svg
-        viewBox="0 0 20 20"
-        className={['h-3.5 w-3.5', palette ? palette.accentText : 'text-cribl-muted'].join(' ')}
-        aria-hidden
-      >
-        <path
-          fill="currentColor"
-          d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
-        />
-      </svg>
-    </button>
+        {tier ? (
+          activationTierScopeSummary(tier)
+        ) : (
+          <span className="text-cribl-muted/80">
+            Choose a tier to see how many of the five PS use-case worksheet slots are in scope.
+          </span>
+        )}
+      </p>
+    </div>
   )
 }
 

@@ -7,6 +7,7 @@
  */
 export type MainView =
   | 'overview'
+  | 'execBrief'
   | 'workerGroups'
   | 'fleets'
   | 'sources'

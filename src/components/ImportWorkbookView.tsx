@@ -4,6 +4,7 @@ import { setImportShellFromBytes } from '../lib/importShellStore'
 import { importAdoptionPlanXlsx } from '../lib/importWorkbook'
 import { xlsxSheets } from '../data/planDataMap'
 import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
+import { TenantImportSection } from './TenantImportSection'
 
 type Props = {
   plan: PlanState
@@ -45,7 +46,11 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
           setError(result.error)
           return
         }
-        setPlan(result.plan)
+        const capturedAt = new Date().toISOString()
+        setPlan({
+          ...result.plan,
+          planProvenance: { kind: 'xlsx', capturedAt },
+        })
         setImportShellFromBytes(bytes)
         setWarnings(result.warnings)
         if (result.warnings.length) {
@@ -80,11 +85,21 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
         }}
       />
       <div>
-        <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Import a plan from Excel</h2>
+        <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Import a plan</h2>
+        <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
+          Load from an Excel workbook or bootstrap topology from your Cribl tenant when running inside the App
+          Platform.
+        </p>
+      </div>
+
+      <TenantImportSection setPlan={setPlan} hasExistingPlanData={hasAnyPlanData(plan)} />
+
+      <div className="border-t border-cribl-border pt-6">
+        <h3 className="m-0 text-base font-semibold text-cribl-ink">Import from Excel</h3>
         <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
           Load an <span className="text-cribl-ink/90">.xlsx</span> adoption plan in either the current v0.9.1 format
           or the older v0.8.6 Excel-only format. Older imports hydrate the GUI, but{' '}
-          <span className="text-cribl-ink/80">File → Export</span> always writes the current v0.9.1 workbook layout.
+          <span className="text-cribl-ink/80">Export</span> in the sidebar (or Summary → Download workbook) always writes the current v0.9.1 workbook layout.
         </p>
       </div>
 

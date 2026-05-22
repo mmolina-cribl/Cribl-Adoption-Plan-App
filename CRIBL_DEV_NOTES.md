@@ -3,13 +3,16 @@
 Companion document to inline `// see CRIBL_DEV_NOTES.md` references in the
 codebase. Captures the decisions and platform realities behind the
 non-obvious bits — KV hydration strategy, the user-identity gap inside
-the iframe, the Excel round-trip approach, and a few smaller display
-contracts.
+the iframe, the Excel round-trip approach, Vite + Cribl `?init=` /
+`localStorage` sandbox pitfalls, and a few smaller display contracts.
 
 For platform-level rules (fetch proxy, KV REST shape, `proxies.yml`),
 see [`AGENTS.md`](./AGENTS.md). For a feature-level overview, see
 [`README.md`](./README.md). For **standalone / on‑prem customer messaging**,
-see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md).
+see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md). For
+**Cribl Copilot / Cribl AI integration research** (APM reference, `/ai/*` spike
+snippet, internal questions for platform/AI), see
+[`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md).
 
 ---
 
@@ -37,7 +40,7 @@ Before tagging a release that ships **`npm run package`**:
 
 1. Run **`npm run package`** from a clean tree (or at least after `npm run build`).
 2. Install the `.tgz` on a tenant (or unpack `static/` locally) and open the app **without** importing a workbook.
-3. Use **File → Export** and confirm a **styled** `.xlsx` downloads (gold template **`adoption-plan-empty.xlsx`** must sit beside **`index.html`** under `static/`; the app resolves it relative to the document URL).
+3. Use **Export** in the sidebar (or **Summary → Download workbook**) and confirm a **styled** `.xlsx` downloads (gold template **`adoption-plan-empty.xlsx`** must sit beside **`index.html`** under `static/`; the app resolves it relative to the document URL).
 4. **File → Import** a known-good v0.9.1 export from the previous release, make a small edit, export again, and spot-check key sheets.
 5. Record outcomes in **`build/vX.Y.Z-release-notes.md`**.
 
@@ -107,7 +110,7 @@ each other's draft.
 **Mitigation.** Every key is silently namespaced by
 [`src/lib/kvStore.ts`](./src/lib/kvStore.ts) as
 `users/<userId>/<logical-key>`. Call sites pass `plan`,
-`prefs/rail/px`, etc. and don't see the prefix. This means the moment
+`prefs/rail/px`, `prefs/aiRail/px`, etc. and don't see the prefix. This means the moment
 we *can* identify the user, we flip a single function and all reads
 and writes route correctly without changing any caller.
 
@@ -701,12 +704,11 @@ unconditionally regardless of how many WGs / Fleets the plan has.
   trims older saved plans to the canonical shape on KV hydrate.
 - Left-nav **Activation** entry (desktop rail + mobile chip bar) that
   surfaces the picked tier as a small badge.
-- Dedicated `ActivationView` page with three `SectionBox`-wrapped blocks
-  (base scope, use-case overview, use-case worksheet), modal-first
-  `TierPickerDialog` that auto-opens once when `tier === null`, and a
-  sticky `PS Tier: <tier> ▾` chip in the page header that re-opens the
-  picker any time. Out-of-scope use case cards fade to ~50% opacity with
-  an "Out of scope" pill but stay fully editable.
+- Dedicated `ActivationView` page with three tabbed blocks (base scope,
+  use-case overview, use-case worksheet), a native **PS tier** `<select>` in
+  the page header (Silver / Gold / Platinum), and soft-gating: out-of-scope
+  use case cards fade to ~50% opacity with an "Out of scope" pill but stay
+  fully editable.
 - Importer + exporter for the `PS Use Case Worksheet` sheet that
   round-trip every editable cell while leaving every static label /
   banner / header / dropdown / conditional-formatting block verbatim.
@@ -1008,3 +1010,126 @@ namespacing it uses inside the iframe. This means:
   fallback on 404, HTTP errors, network errors, or JSON parse errors,
   and only `console.warn` on failure. KV is treated as a cache — losing
   it never crashes the app.
+
+---
+
+## Vite dev + Cribl `?init=`, `localStorage`, and production HTML
+
+This section exists so we do not regress into a **blank UI** or **wrong
+KV app id** when mixing local Vite with the Cribl staging shell.
+
+### `?init=` — do not inject `window.CRIBL_APP_ID` (`__dev__…`)
+
+The Cribl local-dev flow loads the app as
+`http://localhost:5173/?init=https://…/app-ui/__local__/init.js?…`.
+That **`init.js`** sets `window.CRIBL_API_URL`, the real **`CRIBL_APP_ID`**
+for the tenant, and other globals.
+
+**Failure mode we hit:** [`vite.config.ts`](./vite.config.ts) used to
+prepend **every** HTML response (including production `vite build`) with
+`window.CRIBL_APP_ID = '__dev__<package-name>'` for convenience on
+pure localhost. That collides with the platform in two ways:
+
+1. **`?init=` present:** our assignment ran **before** the real id was
+   established, so `fetch` rewrote KV URLs to
+   `/api/v1/a/__dev__adoption-plan/kvstore/…` — wrong app, confusing 404s,
+   and broken state vs. the installed pack.
+2. **Read-only globals:** the shell may define `CRIBL_APP_ID` as
+   non-writable. A synchronous assignment in an inline `<script>` throws
+   **before** the ES module bundle loads → **entire iframe stays blank**.
+
+**Rules (wired in `vite.config.ts`):**
+
+| Mode | `inject-script-from-query` plugin | `CRIBL_APP_ID` inline tag |
+|---|---|---|
+| `vite` / `vite preview` (`apply: 'serve'`) | Runs | Injected **only when the URL has no `?init=`** query param (pure local dev). |
+| `vite build` | Plugin **not** applied | No inline assignment; packaged `dist/index.html` is clean. |
+
+When `?init=` is present, **only** the external `init.js` `<script src=…>`
+tag is injected; the platform owns app identity.
+
+### `localStorage` — sandbox `SecurityError` (must not crash React)
+
+Some dev shells embed Vite in an iframe whose sandbox **omits
+`allow-same-origin`**. In that environment **reading**
+`window.localStorage` throws **`SecurityError`**, including for idioms
+like `typeof localStorage === 'undefined'` (the engine still touches the
+`localStorage` getter on `Window`).
+
+**Failure mode we hit:** assistant chat persistence and rail-collapse
+prefs touched `localStorage` inside a `useEffect`. The exception was
+**uncaught** → React tore down the tree → blank app, while pure
+localhost (no sandbox) kept working.
+
+**Rule:** Never read or write `localStorage` directly in new code. Use
+[`src/lib/safeLocalStorage.ts`](./src/lib/safeLocalStorage.ts)
+`getSafeLocalStorage()` (try/catch around `window.localStorage`, returns
+`null` when unusable). Existing call sites to update when touching prefs:
+[`src/lib/kvStore.ts`](./src/lib/kvStore.ts) localStorage fallback,
+[`src/lib/aiAssistantChatStorage.ts`](./src/lib/aiAssistantChatStorage.ts),
+and any component-local prefs.
+
+When storage is unavailable, features degrade gracefully (no chat
+thread persistence, no local KV mirror) — **they must not throw**.
+
+### Expected console noise (not bugs by themselves)
+
+- **KV `GET …/kvstore/… 404`:** first open on a key that was never written
+  (prefs, import shell, etc.). [`kvStore.ts`](./src/lib/kvStore.ts) treats
+  404 as “use fallback”.
+- **Mixed content warnings** if the **parent** page is **HTTPS** but Vite
+  serves **HTTP** on `localhost:5173` — the browser flags subresources;
+  use the packaged `.tgz` on the tenant or match schemes when debugging.
+
+### Gold template `403` via `…/proxy/localhost:5173/…`
+
+If `document.baseURI` or resolved template URLs point at `localhost`
+through the tenant **proxy** while the pack is not allowed to reach your
+machine, gold pre-fetch can return **403**. That is a **dev wiring**
+issue (base URL / proxy), separate from the `localStorage` /
+`CRIBL_APP_ID` failures above — track the actual failing URL in DevTools
+→ Network when debugging exports on hybrid dev setups.
+
+### Pack KV `openaiKey` — store the **raw** secret (no JSON quotes)
+
+`proxies.yml` injects `Authorization: 'Bearer ' + kv.openaiKey`. The pack KV
+value must be the **plain** `sk-…` string. If the app (or admin UI) writes
+`JSON.stringify(key)` into KV, the stored body includes literal `"` characters
+and OpenAI responds with **401** (“Incorrect API key”) while echoing the key
+with extra quotes.
+
+[`src/lib/kvStore.ts`](./src/lib/kvStore.ts) `kvSetOpenAiKey` writes **`body:
+trimmed`** (raw) for iframe PUTs; `probeOpenAiKeyPresent` /
+`getOpenAiKeyForLocalDevOnly` use `normalizeOpenAiSecretFromKvPayload` so **legacy**
+JSON-quoted values still read correctly until the user re-saves the key.
+
+### `__local__` shell — BYOL OpenAI disabled
+
+When `CRIBL_APP_ID` is `__local__` or the page URL references `__local__` (e.g.
+`?init=…/__local__/init.js`), the Cribl Apps shell is the **`__local__`** dev
+context. Pack KV for `openaiKey` is not available (`Unknown App "__local__"`), and
+outbound OpenAI via the platform proxy is not reliable there. The app sets
+**`isCriblLocalShell()`** in [`kvStore.ts`](./src/lib/kvStore.ts): **Settings** does
+not offer saving a BYOL key, and the right-rail assistant is disabled with copy
+pointing to a **deployed** installed pack. Plain **`npm run dev` on localhost**
+(without that shell) is unchanged: browser `openaiKey` + direct `fetch` to OpenAI
+still work for local assistant dev.
+
+Hybrid dev **without** `__local__` in the URL may still set a tab-local
+**`sessionStorage`** hint after KV returns `Unknown App "__local__"` so browser
+storage is used for `openaiKey` until you open a real installed pack (hint cleared).
+
+### Known issue — plan persistence in the `__local__` shell
+
+The **`__local__`** Cribl Apps dev shell has **no pack KV**. The app tries to
+mirror the plan (and other generic keys) to **`localStorage`** and to recover
+after KV **404** / errors for non–installed-pack iframe contexts, but **a full
+reload may still show an empty plan** in practice: the host iframe may omit
+**`allow-same-origin`** (so `localStorage` throws or is opaque), **`CRIBL_APP_ID`**
+can arrive after the first hydration read, or a very large tenant import can hit
+**quota** limits. **Customers are not expected to use `__local__`.**
+
+**What to do:** validate tenant import and refresh behavior on a **deployed**
+installed pack (pack KV). For `__local__` QA only, treat **Export (.xlsx)** or
+**Summary → Download workbook** as the durable snapshot until you switch to a
+deployed app.

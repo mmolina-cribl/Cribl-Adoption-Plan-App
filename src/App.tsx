@@ -7,6 +7,8 @@ import { DataSourcesView } from './components/DataSourcesView'
 import { PostAddSourceChoiceDialog } from './components/PostAddSourceChoiceDialog'
 import { SourceFormWizardDialog } from './components/sourceForm/SourceFormWizardDialog'
 import { ExportWorkbookView } from './components/ExportWorkbookView'
+import { ExecutiveReadoutView } from './components/ExecutiveReadoutView'
+import { AiAssistantPanel } from './components/AiAssistantPanel'
 import { ImportWorkbookView } from './components/ImportWorkbookView'
 import { PlanDataOverview } from './components/PlanDataOverview'
 import { WorkerGroupDetailView } from './components/WorkerGroupDetailView'
@@ -561,7 +563,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   )
 
   return (
-    <div className="relative flex h-svh min-h-0 flex-col overflow-hidden text-cribl-ink">
+    <div className="adoption-app-shell relative flex h-svh min-h-0 flex-col overflow-hidden text-cribl-ink">
       <ConfirmClearDialog
         open={confirmClearOpen}
         onCancel={() => setConfirmClearOpen(false)}
@@ -667,10 +669,10 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
 
       <div className="flex min-h-0 flex-1">
         <aside
-          className="group/rail relative hidden min-h-0 shrink-0 self-stretch flex-col border-r border-cribl-border/90 bg-cribl-rail lg:flex"
+          className="group/rail relative hidden min-h-0 shrink-0 self-stretch flex-col border-r border-cribl-border/90 bg-cribl-rail print:hidden lg:flex"
           style={
             railCollapsed
-              ? { width: '2.75rem', minWidth: '2.75rem' }
+              ? { width: '2.2rem', minWidth: '2.2rem' }
               : { width: railW, minWidth: minW }
           }
           aria-label="Plan, Worker Groups, and Sources"
@@ -685,7 +687,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cribl-border/80 bg-white/80 text-cribl-muted transition hover:border-cribl-border hover:text-cribl-ink"
                 aria-expanded="false"
               >
-                <span className="text-sm font-semibold" aria-hidden>
+                <span className="text-xs font-semibold" aria-hidden>
                   »
                 </span>
               </button>
@@ -715,6 +717,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onSelectFleets={() => setMainView('fleets')}
                   onSelectSources={() => setMainView('sources')}
                   onSelectActivation={() => setMainView('activation')}
+                  onSelectExecBrief={() => setMainView('execBrief')}
                   onSelectSettings={() => setMainView('settings')}
                   onSelectWorkerGroup={(id) => {
                     setActiveWorkerGroupId(id)
@@ -756,83 +759,85 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           )}
         </aside>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-cribl-canvas">
-          <header className="relative z-30 w-full shrink-0 border-b border-cribl-border bg-white">
-            {/* Full width of main (not the overview max-w) so Customer aligns to the true top-right of this panel. */}
-            <div className="w-full px-4 py-3 sm:px-6 sm:py-3.5">
-              <div className="relative w-full min-h-14 sm:min-h-16 max-md:pb-0.5">
-                <div
-                  className="flex w-full flex-col items-center max-md:justify-center
+        <div className="adoption-app-main-column flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-cribl-canvas">
+          {/* overflow-x-hidden: wide headers (e.g. Activation PS tier) must not paint under the AI rail */}
+          <div className="adoption-app-main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+            <header className="relative z-30 w-full border-b border-cribl-border bg-white">
+              {/* Full width of main (not the overview max-w) so Customer aligns to the true top-right of this panel. */}
+              <div className="w-full px-4 py-3 sm:px-6 sm:py-3.5">
+                <div className="relative w-full min-h-14 sm:min-h-16 max-md:pb-0.5">
+                  <div
+                    className="flex w-full flex-col items-center max-md:justify-center
                     md:absolute md:left-1/2 md:top-1/2 md:z-0
                     md:w-[min(100%-26.675rem,28rem)] md:max-w-[calc(100%-27.225rem)]
                     md:-translate-x-1/2 md:-translate-y-1/2
                     md:items-center md:justify-center
                   "
-                >
-                  <h1 className="m-0 text-center text-xl font-semibold tracking-wide text-cribl-ink sm:text-2xl md:text-3xl">
-                    Adoption Plan
-                  </h1>
-                  <p
-                    className="m-0 mt-0.5 text-center font-mono text-[10px] font-normal tracking-wide text-cribl-muted/45"
-                    title={`Version ${APP_VERSION}`}
                   >
-                    v{APP_VERSION}
-                  </p>
-                </div>
-                <div
-                  className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
+                    <h1 className="m-0 text-center text-xl font-semibold tracking-wide text-cribl-ink sm:text-2xl md:text-3xl">
+                      Adoption Plan
+                    </h1>
+                    <p
+                      className="m-0 mt-0.5 text-center font-mono text-[10px] font-normal tracking-wide text-cribl-muted/45"
+                      title={`Version ${APP_VERSION}`}
+                    >
+                      v{APP_VERSION}
+                    </p>
+                  </div>
+                  <div
+                    className="mt-2.5 w-full min-[480px]:mt-0 min-[480px]:flex min-[480px]:justify-end
                     md:mt-0
                     md:absolute md:right-4 md:top-1/2 md:z-10 md:mt-0 lg:right-8
                     md:w-80 md:max-w-full
                     md:-translate-y-1/2
                   "
-                >
-                  <HeaderCustomerName
-                    className="min-w-0 w-full max-w-full"
-                    value={plan.customerName}
-                    onChange={(v) => setPlan((p) => ({ ...p, customerName: v }))}
-                  />
+                  >
+                    <HeaderCustomerName
+                      className="min-w-0 w-full max-w-full"
+                      value={plan.customerName}
+                      onChange={(v) => setPlan((p) => ({ ...p, customerName: v }))}
+                    />
+                  </div>
                 </div>
               </div>
+            </header>
+
+            <div className="adoption-app-mobile-nav sticky top-0 z-40 border-b border-cribl-border bg-cribl-canvas print:hidden lg:hidden">
+              <PlanNavMobile
+                plan={plan}
+                mainView={mainView}
+                activeSourceId={activeSourceId}
+                activeWorkerGroupId={activeWorkerGroupId}
+                onSelectOverview={() => setMainView('overview')}
+                onSelectWorkerGroups={() => setMainView('workerGroups')}
+                onSelectFleets={() => setMainView('fleets')}
+                onSelectSources={() => setMainView('sources')}
+                onSelectActivation={() => setMainView('activation')}
+                onSelectExecBrief={() => setMainView('execBrief')}
+                onSelectSettings={() => setMainView('settings')}
+                onSelectWorkerGroup={(id) => {
+                  setActiveWorkerGroupId(id)
+                  setMainView('workerGroup')
+                }}
+                onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
+                onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
+                onUpdateWorkerGroupWg={updateWorkerGroupWg}
+                onReorderWorkerGroups={reorderWorkerGroups}
+                onSelectSource={(id) => {
+                  setActiveSourceId(id)
+                  setMainView('source')
+                }}
+                onAddSource={openAddSource}
+                onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
+                onRenameSource={updateSourceName}
+                onReorderSources={reorderSources}
+                onSelectImport={() => setMainView('import')}
+                onSelectExport={() => setMainView('export')}
+                onClearPlan={() => setConfirmClearOpen(true)}
+              />
             </div>
-          </header>
 
-          <div className="lg:hidden">
-            <PlanNavMobile
-              plan={plan}
-              mainView={mainView}
-              activeSourceId={activeSourceId}
-              activeWorkerGroupId={activeWorkerGroupId}
-              onSelectOverview={() => setMainView('overview')}
-              onSelectWorkerGroups={() => setMainView('workerGroups')}
-              onSelectFleets={() => setMainView('fleets')}
-              onSelectSources={() => setMainView('sources')}
-              onSelectActivation={() => setMainView('activation')}
-              onSelectSettings={() => setMainView('settings')}
-              onSelectWorkerGroup={(id) => {
-                setActiveWorkerGroupId(id)
-                setMainView('workerGroup')
-              }}
-              onAddWorkerGroup={(kind) => openAddWorkerGroup(kind ?? 'stream')}
-              onRemoveWorkerGroup={(id) => setConfirmRemoveWorkerGroupId(id)}
-              onUpdateWorkerGroupWg={updateWorkerGroupWg}
-              onReorderWorkerGroups={reorderWorkerGroups}
-              onSelectSource={(id) => {
-                setActiveSourceId(id)
-                setMainView('source')
-              }}
-              onAddSource={openAddSource}
-              onRemoveSource={(id) => setConfirmRemoveSourceId(id)}
-              onRenameSource={updateSourceName}
-              onReorderSources={reorderSources}
-              onSelectImport={() => setMainView('import')}
-              onSelectExport={() => setMainView('export')}
-              onClearPlan={() => setConfirmClearOpen(true)}
-            />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <main className="mx-auto w-full max-w-[min(100%,80rem)] px-4 py-5 sm:px-8 sm:py-7">
+            <main className="mx-auto min-w-0 w-full max-w-[min(100%,80rem)] overflow-x-hidden px-4 py-5 sm:px-8 sm:py-7">
               {mainView === 'overview' && (
                 <PlanDataOverview
                   plan={plan}
@@ -858,6 +863,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onChangeCustomerName={(v) => setPlan((p) => ({ ...p, customerName: v }))}
                 />
               )}
+
+              {mainView === 'execBrief' && <ExecutiveReadoutView plan={plan} />}
 
               {mainView === 'workerGroups' && (
                 <WorkerGroupsIndexView
@@ -970,6 +977,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           </div>
         </div>
 
+        <AiAssistantPanel plan={plan} />
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ import {
   sourceTypes,
 } from '../../data/referenceData'
 import { PencilIcon } from '../PencilIcon'
+import { AssistantMessageRich } from '../AssistantMessageRich'
 import { sourceLabel, type PlanState, type SourceSummaryRow } from '../../types/planTypes'
 import {
   CheckboxLabeled,
@@ -446,8 +447,13 @@ export function InitiativeValueLeversBlock({ row, s }: Base) {
  * notes-style fields elsewhere in the form.
  */
 export function AdditionalNotesBlock({ row, s }: Base) {
+  const preview = row.additionalNotes.trim()
   return (
-    <LabeledField id={`s-${row.id}-an`} label="Additional notes">
+    <LabeledField
+      id={`s-${row.id}-an`}
+      label="Additional notes"
+      hint="`https://…` links and `[label](https://…)` markdown render as clickable links in the preview below."
+    >
       <textarea
         id={`s-${row.id}-an`}
         className="field-strong min-h-20 resize-y"
@@ -456,6 +462,14 @@ export function AdditionalNotesBlock({ row, s }: Base) {
         rows={3}
         placeholder="Anything else worth noting about this source — vendor contacts, ticket links, ad-hoc compliance carve-outs, etc."
       />
+      {preview !== '' && (
+        <div className="mt-2 space-y-1">
+          <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-muted">Link preview</p>
+          <div className="max-h-48 overflow-y-auto rounded-md border border-cribl-border/70 bg-cribl-canvas/40 px-2 py-1.5 text-xs leading-relaxed text-cribl-ink">
+            <AssistantMessageRich text={row.additionalNotes} linkifyPlainUrls className="m-0" />
+          </div>
+        </div>
+      )}
     </LabeledField>
   )
 }

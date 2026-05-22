@@ -14,7 +14,7 @@ type IconProps = { className?: string } & Omit<ImgHTMLAttributes<HTMLImageElemen
  *     bumped above this file's ~4 KB size, so the asset is folded
  *     into the bundle and survives `file://` deployment.
  *
- * Currently only consumed by `AiAgentPlaceholderPanel`, which is dead
+ * Currently consumed by `AiAssistantPanel` (right-rail BYOL assistant).
  * code in the current product (the AI rail was removed pending a future
  * revisit). Kept here so the panel still type-checks; if the AI rail
  * comes back, this is already wired up correctly.

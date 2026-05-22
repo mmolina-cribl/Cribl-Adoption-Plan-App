@@ -22,7 +22,7 @@ A **browser-only** planning workbook for designing a Cribl **Stream** and **Edge
 ## Data storage and boundaries
 
 - **Plan content** (sources, groups, activation, etc.) is stored in the browser’s **`localStorage`**, scoped to the **exact `file://` path** of the HTML file.
-- If someone **moves or copies** the `.html` to another folder, **saved state does not follow** automatically. Treat **File → Export (.xlsx)** as the durable save and share path; use **File → Import** to load it again.
+- If someone **moves or copies** the `.html` to another folder, **saved state does not follow** automatically. Treat **Export (.xlsx)** in the sidebar (or the Summary page’s workbook download) as the durable save and share path; use **Import** in the sidebar to load it again.
 - **Import / Export** of `.xlsx` runs **entirely in the browser**. Generated files are **not uploaded** to Cribl unless you separately email or upload them.
 
 ---

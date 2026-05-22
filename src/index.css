@@ -91,10 +91,115 @@
     box-shadow: 0 1px 0 rgba(10, 22, 40, 0.05);
   }
 
+  /** AI assistant “Thinking…” — staggered dot pulse */
+  .ai-thinking-dots {
+    display: inline-flex;
+    gap: 0.06em;
+    margin-left: 0.06em;
+  }
+
+  .ai-thinking-dots > span {
+    display: inline-block;
+    min-width: 0.28em;
+    text-align: center;
+    animation: ai-thinking-dot 1.05s ease-in-out infinite;
+  }
+
+  .ai-thinking-dots > span:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+
+  .ai-thinking-dots > span:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+
   .field-strong {
     @apply bg-white rounded-lg border border-cribl-border/90 px-2.5 py-1.5;
     box-shadow:
       0 1px 0 rgba(10, 22, 40, 0.06),
       0 0 0 1px rgba(226, 229, 234, 0.55) inset;
+  }
+}
+
+@keyframes ai-thinking-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-0.08em);
+  }
+}
+
+/* Summary + general app print: overflow-hidden + h-svh clip scroll regions in Chrome/Safari */
+@media print {
+  @page {
+    margin: 0.55in;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .adoption-app-shell {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Flatten the main flex row so the center column can grow to full content height */
+  .adoption-app-shell > .flex.min-h-0.flex-1 {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .adoption-app-main-column {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  .adoption-app-main-scroll {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  .adoption-app-main-scroll main {
+    overflow: visible !important;
+    max-width: none !important;
+  }
+
+  /* Executive readout article */
+  .exec-readout-print {
+    max-width: none !important;
+    padding: 0 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  .exec-readout-print .no-print,
+  .exec-readout-print .print\:hidden {
+    display: none !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  .exec-readout-print tr {
+    break-inside: avoid;
   }
 }

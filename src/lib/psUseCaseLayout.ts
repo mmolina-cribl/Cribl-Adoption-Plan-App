@@ -292,6 +292,59 @@ export function unlockedUseCaseCountForTier(tier: ActivationTier | null): number
 }
 
 /**
+ * Plain-language summary of what the selected PS tier means in-app:
+ * how many of the five use-case worksheet slots are in scope (see
+ * {@link unlockedUseCaseCountForTier}). Shown under the Activation
+ * header tier picker so users do not rely on the dropdown alone.
+ */
+export function activationTierScopeSummary(tier: ActivationTier): string {
+  const inScope = unlockedUseCaseCountForTier(tier)
+  if (inScope >= PS_USE_CASE_COUNT) {
+    return `All ${PS_USE_CASE_COUNT} use-case slots on the PS worksheet are in scope for this engagement.`
+  }
+  const outOfScope = PS_USE_CASE_COUNT - inScope
+  return `The first ${inScope} of ${PS_USE_CASE_COUNT} use-case slots are in scope; ${outOfScope} ${outOfScope === 1 ? 'slot stays' : 'slots stay'} out of scope until you pick a higher tier.`
+}
+
+/**
+ * Long-form static copy for the BYOL assistant system prompt: PS Base Scope
+ * deliverables, Use Case Overview kinds, worksheet anchor rows, and tier
+ * reminder — all derived from the same constants as the Activation UI.
+ */
+export function buildAdoptionAssistantPsWorksheetStaticReference(): string {
+  const baseScope = PS_BASE_SCOPE_ITEMS.map((row, i) => {
+    const blurb = PS_BASE_SCOPE_DELIVERABLE_DESCRIPTIONS[row.item] ?? ''
+    return `${i + 1}. **${row.item}** — *${row.deliverable}*\n   ${blurb}`
+  }).join('\n\n')
+
+  const kinds = PS_USE_CASE_KIND_OPTIONS.map((k) => {
+    const blurb = PS_USE_CASE_KIND_DESCRIPTIONS[k]
+    return `- **${k}:** ${blurb}`
+  }).join('\n')
+
+  const anchors = PS_BASE_SCOPE_WORKSHEET_LABELS.map((l) => `- ${l}`).join('\n')
+
+  return [
+    '### PS Use Case Worksheet — static canonical copy (Adoption Plan app / v0.9.1 gold)',
+    '',
+    'This section is **not** customer-specific. The JSON plan digest only carries **counts** for base scope (how many rows marked Complete) and **tier / slot scope** — it does **not** duplicate the text below. When the user asks what the five deliverables are, what each use-case **kind** means, or how the worksheet is structured, **answer from here** — do not say the information is missing or ask them to contact the account team for definitions that already appear here. (Commercial packaging beyond this template is still account-team territory.)',
+    '',
+    '#### Base Scope (Activation → Base Scope tab; five checklist rows — included for every PS tier)',
+    baseScope,
+    '',
+    '#### Use Case Worksheet — three “Base Scope” anchor rows (block 3, before the five numbered use cases)',
+    anchors,
+    'Then **Use Case #1 … #5** blocks; each block has **five parameter rows** (gold uses labels `1.0`–`5.0` in column B) plus **Parameters**, **Status**, and **Notes** columns.',
+    '',
+    '#### Use Case Overview — kind pick-list (one per numbered slot; same vocabulary as Excel column B)',
+    kinds,
+    '',
+    '#### Tier vs worksheet slots (in-app soft gating)',
+    '**Silver:** first **2** use-case slots in scope. **Gold:** first **3**. **Platinum:** all **5**. Tier does **not** remove any of the five Base Scope checklist rows.',
+  ].join('\n')
+}
+
+/**
  * The full column-A header label for a use-case slot, e.g.
  * `'Use Case #1 (Silver)'`. The exporter writes this verbatim into
  * the first row of each use-case's 5-row sub-block (rows 22, 27, 32,

@@ -11,6 +11,7 @@ import {
   RetentionDials,
   SelectWithEmpty,
 } from '../FormControls'
+import { AssistantMessageRich } from '../AssistantMessageRich'
 
 type FieldBodyProps = {
   kind: SourceWizardFieldKind
@@ -453,10 +454,15 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
         </div>
       )
 
-    case 'additionalNotes':
+    case 'additionalNotes': {
+      const preview = row.additionalNotes.trim()
       return (
         <div className="mt-4">
-          <LabeledField id={`w-${row.id}-an`} label="Additional notes">
+          <LabeledField
+            id={`w-${row.id}-an`}
+            label="Additional notes"
+            hint="`https://…` links and `[label](https://…)` markdown render as clickable links in the preview below."
+          >
             <textarea
               id={`w-${row.id}-an`}
               className="field-strong min-h-20 resize-y"
@@ -465,9 +471,18 @@ export function SourceWizardFieldBody({ kind, row, s }: FieldBodyProps) {
               rows={3}
               placeholder="Vendor contacts, ticket links, ad-hoc compliance carve-outs, etc."
             />
+            {preview !== '' && (
+              <div className="mt-2 space-y-1">
+                <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-muted">Link preview</p>
+                <div className="max-h-48 overflow-y-auto rounded-md border border-cribl-border/70 bg-cribl-canvas/40 px-2 py-1.5 text-xs leading-relaxed text-cribl-ink">
+                  <AssistantMessageRich text={row.additionalNotes} linkifyPlainUrls className="m-0" />
+                </div>
+              </div>
+            )}
           </LabeledField>
         </div>
       )
+    }
 
     default:
       return null

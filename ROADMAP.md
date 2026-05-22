@@ -30,6 +30,25 @@ clearer errors), not a single “workbooks finished” milestone.
 
 ## Recently delivered
 
+### v2.2.0 (`build/v2.2.0-release-notes.md`)
+
+- **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when
+  embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.
+- **Summary** under Plan nav — **executive summary**: stakeholder narrative + inventory snapshot + caveats for tenant-derived plans.
+- **Right-rail AI ASSISTANT** (BYOL OpenAI via `proxies.yml` + KV `openaiKey`) with plan digest context; expanded-rail title sizing;
+  clear-chat confirm scoped to the rail; client-side reply reveal fixes (**bold** chunking, persistence strips stream metadata).
+- **Settings:** **OpenAI API key**; **Feedback & app support** (`mmolina@cribl.io`); **About this build** and feedback at the bottom of the page.
+
+### v2.1.2 (`build/v2.1.2-release-notes.md`)
+
+- **Copilot / Cribl AI research:** [`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md)
+  — APM-style `/ai/*` agent pattern, verification steps, stakeholder questions, BYOL path.
+- **Docs cross-links:** [`README.md`](./README.md) and [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md)
+  point to the research note.
+- **Product boundary:** [`ROADMAP.md`](./ROADMAP.md) **`Explicit non-goals`** — no
+  customer-facing hosted SaaS for this tool; distribution stays App Platform pack,
+  standalone HTML, and workbook handoffs.
+
 ### v2.1.0 (`build/v2.1.0-release-notes.md`)
 
 - **Nested Edge fleets:** `parentFleetId` on worker-group rows, hierarchy
@@ -176,8 +195,18 @@ with a **regression fixture** so the same workbook shape stays supported.
   addition to Stream/Edge product docs, and document the mapping where names
   differ.
 
+## Explicit non-goals
+
+These are **permanent product boundaries**, not backlog items that might be
+revisited later.
+
+- **Customer-facing hosted SaaS:** this tool is not offered and will not be
+  offered as a standalone multi-tenant web product for customers. Distribution
+  stays **Cribl App Platform packaged app**, **standalone/on‑prem HTML**, and
+  **workbook handoffs**—not a Cribl-operated consumer-facing service for the
+  adoption plan UI itself.
+
 ## Not Currently Planned
 
 - Replacing the Adoption Plan Excel workbook as the handoff artifact.
 - Multi-user collaboration inside the standalone HTML build.
-- A customer-facing hosted service/SaaS version.

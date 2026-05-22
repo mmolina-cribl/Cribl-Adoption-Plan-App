@@ -25,3 +25,48 @@ api.example.com:
   # endpoints. Set to `false` only when targeting trusted internal endpoints
   # that present self-signed or otherwise untrusted certificates.
   rejectUnauthorized: true
+
+# BYOL assistant (right rail). Set `openaiKey` in pack KV (in-app Settings, or
+# admin KV UI) as the **raw** secret string (no JSON quotes); see AGENTS.md.
+# Header injection below concatenates `Bearer ` + that value.
+api.openai.com:
+  timeout: 60000
+  paths:
+    allowlist:
+      - /v1/chat/completions
+      - /v1/models
+  headers:
+    inject:
+      Authorization: "'Bearer ' + kv.openaiKey"
+
+# Assistant: search community packs (GitHub REST). No KV secrets required.
+api.github.com:
+  timeout: 30000
+  paths:
+    allowlist:
+      - /search/repositories
+  rejectUnauthorized: true
+
+# Assistant: Cribl official doc indexes (llms.txt markdown link lists only).
+docs.cribl.io:
+  timeout: 45000
+  paths:
+    allowlist:
+      - /llms.txt
+      - /stream/llms.txt
+      - /edge/llms.txt
+      - /search/llms.txt
+      - /lake/llms.txt
+      - /insights/llms.txt
+      - /copilot/llms.txt
+      - /guard/llms.txt
+      - /iam/llms.txt
+      - /cribl-as-code/llms.txt
+      - /reference-architectures/llms.txt
+      - /llm-observability/llms.txt
+      - /use-cases/llms.txt
+      - /fedramp/llms.txt
+      - /billing-licensing/llms.txt
+      - /llms-known-issues.txt
+      - /apps/llms.txt
+  rejectUnauthorized: true

@@ -6,7 +6,7 @@ import { downloadXlsxForPlan } from '../lib/exportWorkbook'
 type Props = { plan: PlanState }
 
 /**
- * File → Export: download a packaged plan file for sharing.
+ * Download a packaged plan file for sharing (same action as sidebar **Export**).
  */
 export function ExportWorkbookView({ plan }: Props) {
   const [exportError, setExportError] = useState<string | null>(null)

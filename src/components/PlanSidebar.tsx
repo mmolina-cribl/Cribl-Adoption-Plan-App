@@ -124,6 +124,8 @@ type Props = {
   onSelectSources: () => void
   /** v2.0 PR C: navigate to the Activation page (PS Use Case Worksheet). */
   onSelectActivation: () => void
+  /** Customer summary (executive readout, derived, read-only). */
+  onSelectExecBrief: () => void
   onSelectSettings: () => void
   onSelectWorkerGroup: (id: string) => void
   /**
@@ -925,6 +927,7 @@ export function PlanSidebarRail({
   onSelectFleets,
   onSelectSources,
   onSelectActivation,
+  onSelectExecBrief,
   onSelectSettings,
   onSelectWorkerGroup,
   onAddWorkerGroup,
@@ -960,11 +963,11 @@ export function PlanSidebarRail({
   const [wgListOpen, setWgListOpen] = useState(true)
   const [fleetListOpen, setFleetListOpen] = useState(true)
   const [sourcesListOpen, setSourcesListOpen] = useState(true)
-  /** Desktop rail: when false, the indented Activation entry under Plan is hidden. */
+  /** Desktop rail: when false, the indented Plan sub-items (Activation, Summary) are hidden. */
   const [planSectionOpen, setPlanSectionOpen] = useState(true)
 
   useEffect(() => {
-    if (mainView === 'activation') {
+    if (mainView === 'activation' || mainView === 'execBrief') {
       setPlanSectionOpen(true)
     }
   }, [mainView])
@@ -1038,6 +1041,14 @@ export function PlanSidebarRail({
                 })()
               ) : null}
             </span>
+          </NavButton>
+          <NavButton
+            active={mainView === 'execBrief'}
+            onClick={onSelectExecBrief}
+            title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
+            className="mt-0.5"
+          >
+            Summary
           </NavButton>
         </div>
       </AnimatedCollapse>
@@ -1173,7 +1184,7 @@ export function PlanSidebarRail({
         onClick={onSelectSettings}
         className="mt-3"
       >
-        Preferences
+        Settings
       </NavButton>
 
       <NavButton
@@ -1406,6 +1417,7 @@ export function PlanNavMobile({
   onSelectFleets: _onSelectFleets,
   onSelectSources: _onSelectSources,
   onSelectActivation: _onSelectActivation,
+  onSelectExecBrief: _onSelectExecBrief,
   onSelectSettings: _onSelectSettings,
   onSelectWorkerGroup,
   onAddWorkerGroup,
@@ -1441,11 +1453,9 @@ export function PlanNavMobile({
       className={`flex items-stretch gap-1.5 overflow-x-auto border-b border-cribl-border bg-white px-2 py-1.5 ${className}`}
     >
       {/*
-       * Mobile chip order mirrors the desktop rail: Plan first, then
-       * Activation directly after as its sub-step. Keeping them adjacent
-       * (rather than reusing the desktop's indent, which doesn't translate
-       * to a horizontal scroller) preserves the "plan first, activate
-       * after" framing on both layouts.
+       * Mobile chip order mirrors the desktop rail: Overview (Plan), then
+       * Activation, then Summary under Plan. Keeping the same order as the
+       * desktop indent preserves parity between layouts.
        */}
       <button
         type="button"
@@ -1473,6 +1483,14 @@ export function PlanNavMobile({
               )
             })()
           : null}
+      </button>
+      <button
+        type="button"
+        className={chip(mainView === 'execBrief')}
+        onClick={_onSelectExecBrief}
+        title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
+      >
+        Summary
       </button>
       <button type="button" className={chip(mainView === 'workerGroups')} onClick={_onSelectWorkerGroups}>
         Worker Groups

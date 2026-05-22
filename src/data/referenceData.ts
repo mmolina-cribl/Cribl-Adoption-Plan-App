@@ -66,6 +66,7 @@ export const inputData = {
     'AmazonSecurityLake',
     'AmazonSQS',
     'AnthropicCompliance',
+    'AppScope',
     'AzureBlob',
     'AzureEventHub',
     'AzureEventHubsAMQP',
@@ -302,6 +303,7 @@ export const inputData = {
  */
 export const sourceTileSearchAliases = {
   AnthropicCompliance: ['Anthropic', 'Claude', 'Claude Compliance', 'Anthropic Compliance API'],
+  AppScope: ['App Scope', 'Cribl AppScope', 'Scope'],
   AzureEventHubsAMQP: ['Azure Event Hubs AMQP', 'Event Hubs AMQP', 'AMQP'],
   Cloudflare: ['Cloudflare HEC', 'Cloudflare NSS'],
   Datagen: ['Data gen'],

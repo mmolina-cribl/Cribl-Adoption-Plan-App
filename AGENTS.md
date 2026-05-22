@@ -108,10 +108,11 @@ api.openai.com:
 
 **Header injection expressions** support:
 - String literals: `"'my-static-value'"`
-- KV store lookups: `kv.mySecretKey` (resolves encrypted KV values at request time)
+- KV store lookups: `kv.mySecretKey` (platform resolves the stored value when building the outbound request; backing storage may be encrypted at rest)
 - Concatenation: `"'Bearer ' + kv.apiToken"`
 
 **Security notes:**
+- **KV admin visibility:** Pack KV is often readable in **plaintext in the Cribl Apps KV UI** to anyone with permission to manage that app’s KV. That is separate from at-rest encryption (which protects persisted bytes, not what a privileged admin screen shows). Treat `openaiKey` like any shared credential: restrict roles, rotate on compromise, and prefer org policy over expecting the console to mask values.
 - Sensitive headers (`cookie`, `authorization`, `proxy-authorization`, `host`, `connection`, `transfer-encoding`) are always stripped from the original request before forwarding — use `headers.inject` to set auth headers instead
 - The platform validates target domains against SSRF protections (private/reserved IPs are blocked)
 - Requests are rate-limited per app (100 requests/minute)
@@ -152,6 +153,14 @@ hooks.slack.com:
 ```
 
 **How it connects to fetch:** When your app calls `fetch('https://api.openai.com/v1/chat/completions', ...)`, the platform rewrites this to `/api/v1/a/{yourAppId}/proxy/api.openai.com/v1/chat/completions`, looks up `api.openai.com` in your `proxies.yml`, validates the path, injects headers, and forwards the request.
+
+**In-app BYOL key:** Users with KV write access can save the pack key `openaiKey` from **Settings** in the Adoption Plan app (same key path as `kv.openaiKey` in `proxies.yml`). Plan and UI preferences continue to use per-user namespaced keys via `kvGet` / `kvSet`.
+
+**Local dev (`npm run dev` / `vite preview` on localhost):** Without `CRIBL_API_URL`, the Cribl platform does not rewrite external `fetch`. The Adoption Plan app: (1) reads `openaiKey` from **Settings** (localStorage) and sends `Authorization: Bearer …` to **OpenAI** from the browser (use only on a trusted machine); (2) rewrites **docs.cribl.io** llms fetches to **`/__cribl_docs__/…`**, which Vite proxies to the CDN (see `vite.config.ts`) so **browser CORS does not block** index reads. In the Cribl iframe, use real `https://docs.cribl.io/...` URLs — the platform proxy applies. **GitHub** pack search uses `api.github.com`, which sends permissive CORS for the search API.
+
+**Hybrid dev (`?init=` from Cribl Cloud / staging into Vite):** When the URL includes `?init=https://…/app-ui/__local__/init.js…`, the platform’s `init.js` owns `CRIBL_API_URL` and the real app id. Do not ship or inject a conflicting `window.CRIBL_APP_ID = '__dev__…'` in that mode — KV requests will target the wrong app id (`/api/v1/a/__dev__…/`). **BYOL OpenAI** (Settings `openaiKey` + right-rail assistant) is **disabled** when `__local__` is detected (`isCriblLocalShell()`); use a **deployed** installed pack for that. Some shells sandbox the iframe without `allow-same-origin`, so **`localStorage` can throw `SecurityError`**; all storage access must go through `getSafeLocalStorage()` and fail soft (see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) section *Vite dev + Cribl `?init=`, `localStorage`, and production HTML*).
+
+**Assistant tools (packaged app in Cribl):** Declare **`api.github.com`** (`/search/repositories`) and **`docs.cribl.io`** (the `llms.txt` paths in this repo’s `config/proxies.yml`, including `/llms-known-issues.txt` and `/apps/llms.txt`) so the assistant’s tools work behind the platform proxy.
 
 ## React Router
 

@@ -1,34 +1,29 @@
 import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { kvGet, kvSet } from '../lib/kvStore'
 
-const W_KEY = 'prefs/rail/px'
-const C_KEY = 'prefs/rail/collapsed'
+const W_KEY = 'prefs/aiRail/px'
 
-/** Desktop plan rail width (px). Tuned ~20% narrower than the prior generation. */
-const DEFAULT_W = 290
-const MIN_W = 194
-const MAX_W = 465
+/** Default matches the prior fixed `20rem` rail. */
+const DEFAULT_W = 320
+const MIN_W = 260
+const MAX_W = 520
 
 function clampW(n: number) {
   return Math.min(MAX_W, Math.max(MIN_W, Math.round(n)))
 }
 
-export function useResizableRail() {
+/**
+ * Persisted width (px) for the desktop **AI ASSISTANT** right rail, with drag-to-resize
+ * on the rail’s **left** edge (same interaction model as the plan sidebar’s right edge).
+ */
+export function useResizableAiRailWidth() {
   const [width, setWidth] = useState(DEFAULT_W)
-  const [collapsed, setCollapsed] = useState(false)
-  // Gate writes until the initial KV read completes. Without this, the write
-  // effects below would fire on first render with the default values, racing
-  // (and potentially overwriting) the read of the persisted value.
   const [hasHydrated, setHasHydrated] = useState(false)
 
   useEffect(() => {
     void (async () => {
-      const [w, c] = await Promise.all([
-        kvGet<number>(W_KEY, DEFAULT_W),
-        kvGet<boolean>(C_KEY, false),
-      ])
+      const w = await kvGet<number>(W_KEY, DEFAULT_W)
       setWidth(clampW(typeof w === 'number' ? w : DEFAULT_W))
-      setCollapsed(Boolean(c))
       setHasHydrated(true)
     })()
   }, [])
@@ -40,32 +35,18 @@ export function useResizableRail() {
     void kvSet(W_KEY, width)
   }, [width, hasHydrated])
 
-  useEffect(() => {
-    if (!hasHydrated) {
-      return
-    }
-    void kvSet(C_KEY, collapsed)
-  }, [collapsed, hasHydrated])
-
-  const toggleCollapse = useCallback(() => {
-    setCollapsed((c) => !c)
-  }, [])
-
   const setWidthClamped = useCallback((n: number) => {
     setWidth(clampW(n))
   }, [])
 
-  /** Drag the right edge of the rail. No-op when collapsed. */
+  /** Drag the **left** edge of the rail toward the viewport center to widen. */
   const beginResize = useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
-      if (collapsed) {
-        return
-      }
       e.preventDefault()
       const startX = e.clientX
       const startW = width
       const move = (ev: PointerEvent) => {
-        setWidth(clampW(startW + (ev.clientX - startX)))
+        setWidth(clampW(startW - (ev.clientX - startX)))
       }
       const up = () => {
         document.removeEventListener('pointermove', move)
@@ -76,15 +57,12 @@ export function useResizableRail() {
       document.addEventListener('pointerup', up)
       document.addEventListener('pointercancel', up)
     },
-    [collapsed, width, setWidth],
+    [width],
   )
 
   return {
     width,
     setWidth: setWidthClamped,
-    collapsed,
-    setCollapsed,
-    toggleCollapse,
     minW: MIN_W,
     maxW: MAX_W,
     beginResize,

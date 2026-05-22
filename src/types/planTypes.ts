@@ -205,6 +205,21 @@ export type Activation = {
   useCases: ActivationUseCase[]
 }
 
+export type PlanProvenanceKind = 'scratch' | 'xlsx' | 'tenant'
+
+/**
+ * Where the current plan body came from — used by the executive readout and
+ * the AI digest so stakeholders know whether topology was bootstrapped from
+ * the live tenant vs an Excel import.
+ */
+export type PlanProvenance = {
+  kind: PlanProvenanceKind
+  /** ISO 8601 when import or tenant harvest completed */
+  capturedAt?: string
+  /** Optional short note (e.g. harvest warnings) */
+  note?: string
+}
+
 export type PlanState = {
   version: 1
   customerName: string
@@ -220,6 +235,11 @@ export type PlanState = {
    * the rest of the app can rely on its shape.
    */
   activation: Activation
+  /**
+   * Optional import/bootstrap provenance. Older KV blobs omit this field;
+   * `usePlanStorage` normalizes to `{ kind: 'scratch' }`.
+   */
+  planProvenance?: PlanProvenance
 }
 
 export function newId(): string {
