@@ -2,6 +2,12 @@ import { ADOPTION_APP_REFERENCE } from './adoptionAssistantAppContext'
 import { getOpenAiKeyForLocalDevOnly, isCriblLocalShell } from './kvStore'
 import { searchCriblPacksOnGitHub } from './criblPacksGitHubSearch'
 import { searchCriblDocsLlms } from './criblDocsLlmsSearch'
+import {
+  postProcessExecutiveSummaryAiMarkdown,
+  type ExecutiveSummaryAiBoldContext,
+} from './executiveSummaryAiMarkdownPost'
+import { validatePlanPatchProposal, type PlanPatchProposal } from './planPatchApply'
+import type { PlanState } from '../types/planTypes'
 
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions'
 
@@ -50,6 +56,7 @@ Rules:
   - Documentation links exactly as they appear inside \`markdown_line\` strings from \`search_cribl_docs_llms\` (those lines are copied from Cribl's published llms.txt indexes at docs.cribl.io).
   For any other product URL, only use text the user pasted in chat.
 - When the user asks about **community packs**, **criblpacks**, or GitHub packs, call \`search_cribl_packs_github\` with focused keywords. When they ask about **product behavior**, **sources**, **destinations**, **Stream/Edge** setup, **release notes**, **known issues**, **App Platform** / packaged apps, or **official docs**, call \`search_cribl_docs_llms\` with keywords (and optional \`doc_areas\` — include \`known-issues\` or \`apps\` when relevant). The doc tool always loads the global docs index plus matching product indexes. You may call each tool multiple times with different queries.
+- **Plan edits:** When the user explicitly asks you to update workbook fields (blockers, notes, pipeline use case text, per-source GB/day, etc.), you may call \`propose_plan_patch\` with a short \`summary\` and an \`operations\` array. Only use allowlisted operations the tool schema describes. The app **never** applies changes automatically — the user must click **Apply** in the UI. If you are unsure or the request is out of scope, answer in prose instead of proposing a patch.
 - Distinguish **built-in source types** (in the digest) from **optional community packs**; packs are not guaranteed to exist for every source.
 - Suggest next steps (workbook fields, Stream validation, questions for the customer) rather than generic filler.`
 
@@ -102,6 +109,33 @@ const CRIBL_DOCS_TOOL = {
   },
 }
 
+const PROPOSE_PLAN_PATCH_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'propose_plan_patch',
+    description:
+      'Propose allowlisted edits to the in-browser adoption plan (sources blockers/notes/pipeline use case/avg daily GB, or plan notes). The user must confirm in the UI — nothing applies automatically. Use only when the user asked for concrete plan updates you can express as patch operations.',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: {
+          type: 'string',
+          description: 'One or two sentences describing the change (shown above Apply/Dismiss).',
+        },
+        operations: {
+          type: 'array',
+          description:
+            'Each item: { op: "updateSourceField", sourceId, field, value } with field one of blockers | avgDailyGb | additionalNotes | pipelineUsecase; or { op: "updateCseNotes", value } for the plan-wide notes field.',
+          items: { type: 'object', additionalProperties: true },
+        },
+      },
+      required: ['summary', 'operations'],
+    },
+  },
+}
+
+const ASSISTANT_TOOLS = [CRIBL_PACKS_TOOL, CRIBL_DOCS_TOOL, PROPOSE_PLAN_PATCH_TOOL] as const
+
 type ToolCall = {
   id: string
   type: string
@@ -132,7 +166,7 @@ async function chatCompletion(messages: ChatMessage[]): Promise<{
     temperature: 0.25,
     parallel_tool_calls: false,
     messages,
-    tools: [CRIBL_PACKS_TOOL, CRIBL_DOCS_TOOL],
+    tools: [...ASSISTANT_TOOLS],
     tool_choice: 'auto' as const,
   }
   const r = await fetch(OPENAI_CHAT_URL, {
@@ -157,7 +191,106 @@ async function chatCompletion(messages: ChatMessage[]): Promise<{
   }
 }
 
+/** Narrow system prompt for the Summary tab — no tools; JSON context only. */
+const EXECUTIVE_SUMMARY_AI_SYSTEM = `You help prepare a short executive readout for the Cribl Stream/Edge adoption plan described in the JSON. The reader may be an internal team or the customer organization — keep tone professional and inclusive.
+
+Output rules:
+- Output **Markdown only**. Use exactly these top-level section headings (use ##): ## Talking points, ## Questions to validate, ## Suggested next steps
+- Under each section: 3–6 concise bullets unless the data is very sparse (then fewer). Use "- " bullet lines.
+- Ground every bullet in the JSON: customer name, atAGlance counts, worker group names, sourceInventorySample, blockers in sample, PS Activation tier / scope fields, planNotesSnippet (free-text plan notes from the workbook, if any), provenance. Never invent product versions, live tenant facts, or sources not implied by the JSON.
+- **Customer name in bullets:** Whenever you refer to this account by name, use the exact characters from JSON field \`customerName\` wrapped in Markdown bold (e.g. **Acme Corp**). Use that form even when \`customerName\` is the placeholder "Customer". Do not bold product phrases such as "Cribl Stream/Edge" as a whole—only bold the \`customerName\` token when it names the customer organization (e.g. write **Cribl** for the account, but "Cribl Stream/Edge" for the product line without bolding the product words).
+- **Other salient tokens:** Also bold (Markdown \`**…**\`) when they appear in bullets: each **exact** worker group / fleet name from \`workerGroups\` (spelling must match JSON), the PS Activation tier word from \`atAGlance.psActivationTier\` when set (Silver / Gold / Platinum only), and numeric counts from \`atAGlance\` (stream worker groups, edge fleets, source rows) when you cite those numbers — do not bold unrelated numbers.
+- If omittedSourcesCount is greater than 0, state clearly that the JSON lists only a **sample** of sources and the full count is atAGlance.sourceRowsInPlan — do not claim you listed every source; do not enumerate omitted rows.
+- Never fabricate URLs. Plain language suitable for executives.
+
+If a field is empty or null, say it is unset briefly rather than guessing.`
+
+const MAX_EXEC_SUMMARY_CONTEXT_CHARS = 14_000
+
+async function chatCompletionNoTools(messages: ChatMessage[]): Promise<{
+  finish_reason: string
+  message: { content?: string | null }
+}> {
+  const body = {
+    model: 'gpt-4o-mini',
+    temperature: 0.3,
+    messages,
+  }
+  const r = await fetch(OPENAI_CHAT_URL, {
+    method: 'POST',
+    headers: openAiHeaders(),
+    body: JSON.stringify(body),
+  })
+  const text = await r.text()
+  if (!r.ok) {
+    throw new Error(`OpenAI error (${r.status}): ${text.slice(0, 400)}`)
+  }
+  const j = JSON.parse(text) as {
+    choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }>
+  }
+  const choice = j.choices?.[0]
+  if (!choice?.message) {
+    throw new Error('OpenAI returned no message.')
+  }
+  return {
+    finish_reason: choice.finish_reason ?? 'stop',
+    message: choice.message,
+  }
+}
+
 const MAX_TOOL_ROUNDS = 8
+
+export type AdoptionAssistantMode =
+  | 'plan'
+  | 'research'
+  | 'activation'
+  | 'sources'
+  | 'executive'
+  | 'edge_topology'
+  | 'export_gold'
+  | 'patch_coach'
+
+/** Appended to the system message (after digest) for non-`plan` session modes. */
+export function adoptionAssistantSessionModeAppend(mode: AdoptionAssistantMode | undefined): string {
+  const m = mode ?? 'plan'
+  if (m === 'plan') {
+    return ''
+  }
+  if (m === 'research') {
+    return `\n\n**Session mode — Product research:** The user may ask general Cribl Stream/Edge, pipeline, pack, sizing, or best-practice questions beyond their workbook snapshot. Prefer calling \`search_cribl_docs_llms\` and \`search_cribl_packs_github\` with concrete keywords. Still never fabricate URLs; keep citing only tool-returned links.`
+  }
+  if (m === 'activation') {
+    return `\n\n**Session mode — Activation & PS:** Focus on the Adoption Planner **Activation** area: PS tier (Silver/Gold/Platinum or unset), base-scope progress counts, unlocked use-case slots, and how in-app scope maps to the worksheet. Use the **PS Use Case Worksheet — static canonical copy** and **App UI reference** in the system prompt for deliverable names, use-case kind definitions, and tab structure — do not claim those definitions are missing from context. Prefer digest fields for **customer-specific** progress; call doc tools only for **Cribl product PS packaging** beyond this template. Stay concise; suggest next fields to fill in the app.`
+  }
+  if (m === 'sources') {
+    return `\n\n**Session mode — Sources & ingest:** Prioritize the digest **sources** rows and **sourceVolumeSample** / ingest footprint: ranking by \`avgDailyGb\`, blockers, destinations, Stream vs Edge column, collection paths, and questions for the customer. Stress practical follow-ups and validation in Stream/Edge rather than generic product essays. Use pack/doc tools when the user needs external evidence; never fabricate URLs.`
+  }
+  if (m === 'executive') {
+    return `\n\n**Session mode — Executive narrative:** Produce **short, customer-ready bullets** (headlines + tight sub-bullets). Use digest facts only for quantities and topology — no large markdown tables in chat, no invented metrics. If something is not in the digest, say it is unknown or suggest what to capture in the workbook. Complements the Executive tab; keep tone appropriate for CIO/IT leadership readouts.`
+  }
+  if (m === 'edge_topology') {
+    return `\n\n**Session mode — Edge vs Stream topology:** Explain **worker groups** from the digest (\`workerGroups\`, kinds stream vs edge), fleet vs worker-group language, how sources attach (\`sourceRowsByWorkerKind\`), and when Edge file/fleet patterns vs Stream worker groups are appropriate. Ground every structural claim in digest JSON; use docs/packs for **product pattern** backup with tool-returned links only.`
+  }
+  if (m === 'export_gold') {
+    return `\n\n**Session mode — Import, export & gold template:** Explain **plan provenance**, import/export behavior, gold template parity, and what re-export is for — using the in-prompt **Adoption Plan — detailed user guide** and digest \`planProvenance\` / \`digestCoverage\`. Help the user explain round-trip Excel to customers. Defer live tenant truth to the customer; do not claim you changed files.`
+  }
+  if (m === 'patch_coach') {
+    return `\n\n**Session mode — Plan patch coach:** The user wants **controlled workbook edits**. After they clearly confirm **what** should change (which sources, which fields), prefer a single \`propose_plan_patch\` call with allowlisted operations and a short summary. If the request is ambiguous or out of scope for the tool schema, answer in prose and ask clarifying questions — do not guess patch ops. Remind them nothing applies until they click **Apply** in the UI.`
+  }
+  return ''
+}
+
+export type AdoptionAssistantChatOptions = {
+  /** Max chars of plan digest JSON embedded in system message (default 12000, max 20000). */
+  digestMaxChars?: number
+  /** Session steering mode (default `plan`). Each mode appends a short system suffix after the digest. */
+  mode?: AdoptionAssistantMode
+}
+
+export type AdoptionAssistantChatResult = {
+  text: string
+  pendingPlanPatch?: PlanPatchProposal
+}
 
 async function runTool(name: string, argumentsJson: string): Promise<string> {
   if (name === 'search_cribl_packs_github') {
@@ -182,21 +315,34 @@ async function runTool(name: string, argumentsJson: string): Promise<string> {
       return JSON.stringify({ error: 'bad_tool_arguments', raw: argumentsJson.slice(0, 200) })
     }
   }
+  if (name === 'propose_plan_patch') {
+    return JSON.stringify({
+      error: 'propose_plan_patch must be the only tool call in its assistant turn; retry as a single function call.',
+    })
+  }
   return JSON.stringify({ error: 'unknown_tool', name })
 }
 
 /**
  * Single user turn: may perform multiple OpenAI rounds (tool calls to GitHub
  * and docs.cribl.io indexes, then final natural-language reply).
+ * When the model proposes a valid `propose_plan_patch` alone, returns `pendingPlanPatch` for UI Apply/Dismiss.
  */
-export async function runAdoptionAssistantChat(userText: string, planDigest: string): Promise<string> {
+export async function runAdoptionAssistantChat(
+  userText: string,
+  planDigest: string,
+  plan: PlanState,
+  options?: AdoptionAssistantChatOptions,
+): Promise<AdoptionAssistantChatResult> {
   if (isCriblLocalShell()) {
     throw new Error(
       'OpenAI assistant is not available in the Cribl `__local__` shell. Use a deployed installed app (Settings → pack KV `openaiKey`).',
     )
   }
 
-  const systemContent = `${ADOPTION_ASSISTANT_SYSTEM}\n\nPlan digest (JSON):\n${planDigest.slice(0, 12000)}`
+  const digestMaxChars = Math.min(20_000, Math.max(4000, options?.digestMaxChars ?? 12_000))
+  let systemContent = `${ADOPTION_ASSISTANT_SYSTEM}\n\nPlan digest (JSON):\n${planDigest.slice(0, digestMaxChars)}`
+  systemContent += adoptionAssistantSessionModeAppend(options?.mode)
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemContent },
@@ -207,6 +353,50 @@ export async function runAdoptionAssistantChat(userText: string, planDigest: str
     const { message } = await chatCompletion(messages)
 
     if (message.tool_calls?.length) {
+      const calls = message.tool_calls
+      if (
+        calls.length === 1 &&
+        calls[0]!.type === 'function' &&
+        calls[0]!.function.name === 'propose_plan_patch'
+      ) {
+        const tc = calls[0]!
+        let args: { summary?: unknown; operations?: unknown }
+        try {
+          args = JSON.parse(tc.function.arguments || '{}') as { summary?: unknown; operations?: unknown }
+        } catch {
+          messages.push({
+            role: 'assistant',
+            content: message.content ?? null,
+            tool_calls: message.tool_calls,
+          })
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify({ error: 'invalid_json_arguments' }),
+          })
+          continue
+        }
+        const summary = typeof args.summary === 'string' ? args.summary : ''
+        const prop = validatePlanPatchProposal(plan, args.operations, summary)
+        if ('error' in prop) {
+          messages.push({
+            role: 'assistant',
+            content: message.content ?? null,
+            tool_calls: message.tool_calls,
+          })
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify({ error: prop.error }),
+          })
+          continue
+        }
+        return {
+          text: `${prop.summary}\n\n**Proposal ready** — review the card below, then click **Apply** or **Dismiss**.`,
+          pendingPlanPatch: prop,
+        }
+      }
+
       messages.push({
         role: 'assistant',
         content: message.content ?? null,
@@ -225,10 +415,46 @@ export async function runAdoptionAssistantChat(userText: string, planDigest: str
 
     const out = message.content?.trim()
     if (out) {
-      return out
+      return { text: out }
     }
     throw new Error('OpenAI returned an empty message.')
   }
 
   throw new Error('Assistant stopped after too many tool rounds (max tool steps exceeded).')
+}
+
+const EXEC_SUMMARY_MODEL = 'gpt-4o-mini'
+
+/**
+ * One-shot Markdown for the Executive (Summary) tab. Same BYOL key / headers as
+ * {@link runAdoptionAssistantChat}; no tools. `contextJson` should be capped JSON
+ * (e.g. from {@link buildExecutiveSummaryAiContextJson}). `boldContext` carries the same
+ * customer and inventory strings used for deterministic \`**…**\` post-processing.
+ */
+export async function runExecutiveSummaryAiMarkdown(
+  contextJson: string,
+  boldContext: ExecutiveSummaryAiBoldContext,
+): Promise<{ markdown: string; model: string }> {
+  if (isCriblLocalShell()) {
+    throw new Error(
+      'OpenAI is not available in the Cribl `__local__` shell. Use a deployed installed app (Settings → pack KV `openaiKey`).',
+    )
+  }
+  const ctx = contextJson.slice(0, MAX_EXEC_SUMMARY_CONTEXT_CHARS)
+  const messages: ChatMessage[] = [
+    { role: 'system', content: EXECUTIVE_SUMMARY_AI_SYSTEM },
+    {
+      role: 'user',
+      content: `Plan context (JSON). If omittedSourcesCount > 0, the source list is a capped sample — honor digestCoverage and atAGlance.sourceRowsInPlan.\n\n${ctx}`,
+    },
+  ]
+  const { message } = await chatCompletionNoTools(messages)
+  const out = message.content?.trim()
+  if (!out) {
+    throw new Error('OpenAI returned an empty message.')
+  }
+  return {
+    markdown: postProcessExecutiveSummaryAiMarkdown(out, boldContext),
+    model: EXEC_SUMMARY_MODEL,
+  }
 }

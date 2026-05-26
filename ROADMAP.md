@@ -5,7 +5,7 @@ This roadmap is the project-facing source of truth for **ongoing programs** and
 CSE / PS usage and feedback, but they are not committed delivery dates.
 
 Detailed implementation history belongs in [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md);
-version-scoped summaries belong in `build/v*.*.*-release-notes.md`. This file
+version-scoped summaries belong in [`docs/releases/`](./docs/releases/) (git-tracked; `build/` remains gitignored for local pack output). This file
 tracks **what is still in flight** (including standing programs without an end
 date), a short **recently delivered** snapshot, and **exploration** ideas so the
 backlog stays aligned with the product.
@@ -26,11 +26,36 @@ clearer errors), not a single “workbooks finished” milestone.
   agent-assisted modeling**, **import from live environments**, **push plan to env
   via agent**, Activation, tile alignment with Cribl-as-Code).
 
+## Cribl product versions (alignment log)
+
+When we refresh **tiles**, **import assumptions**, or **field copy** against **Cribl
+Stream / Edge** (and related docs such as Search / Lake or **What’s New**), record
+the **product semver(s)** we actually skimmed or smoke-tested — e.g. **Stream
+4.18.0**, **Edge 4.x.y** — so the next person does not have to rediscover context.
+
+This is **not** a “minimum supported customer version” contract; it is a **working
+log** of what the repo was last aligned to on purpose. Update the table when
+[`src/data/referenceData.ts`](./src/data/referenceData.ts) (or similar) changes
+because of a **Cribl product** release, not on every Adoption Plan app semver bump.
+
+| Product | Version used | Last aligned (approx.) | Notes |
+|---------|--------------|------------------------|-------|
+| Cribl Stream | *e.g. 4.18.0* | *YYYY-MM* | e.g. release-notes skim for `techTiles` / destinations |
+| Cribl Edge | *e.g. 4.x.y* | *YYYY-MM* | |
+| Cribl Search / Lake | *optional* | *YYYY-MM* | if relevant to tiles or copy |
+
 ---
 
 ## Recently delivered
 
-### v2.2.0 (`build/v2.2.0-release-notes.md`)
+### v2.3.0 ([`docs/releases/v2.3.0.md`](./docs/releases/v2.3.0.md))
+
+- **AI ASSISTANT:** Multiple **session modes** (workbook, field narrative, product research), grouped **`+`** menu, digest row cap in menu, **overlay rail** with smooth resize, **plan patch coach** + `propose_plan_patch` Apply/Dismiss, compact **Cribl-tinted** suggested prompts, header **AI ASSISTANT** + inline **ⓘ**.
+- **Executive readout:** Summary AI context + **markdown post-processing** (tests via Vitest).
+- **Import / diagnostics:** Diagnostics import path and UI; tenant/leader harvest and topology import refinements.
+- **Packaging:** Semver **2.3.0**; build/package flow unchanged (`npm run package` → local `build/*.tgz`).
+
+### v2.2.0 (see tag `v2.2.0` / commit message on `main`)
 
 - **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when
   embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.
@@ -71,7 +96,7 @@ clearer errors), not a single “workbooks finished” milestone.
 
 - **In-app version:** Settings shows the package **version**; footer shows
   `Adoption Plan v…` (from `package.json`, injected at **Vite build** time).
-- **On-prem one-pager:** [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md)
+- **Customer / security one-pager (standalone & cloud):** [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md) (short pointer: [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md))
   — purpose, data boundaries, `localStorage` / `file://`, network expectations.
   Linked from the repo README.
 - **Release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) — steps for
@@ -104,9 +129,12 @@ clearer errors), not a single “workbooks finished” milestone.
 
 ### Unreleased (main; tag on next version bump)
 
+- **Import from diagnostic bundle:** parse Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundles in-browser (`groups/<id>/…/inputs.yml`) — see [`docs/diag-import.md`](./docs/diag-import.md) for **Cloud vs customer-managed** bundle availability; `planProvenance.kind` **`diag`**.
 - **Pre-release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) now
   requires skimming **Cribl Stream / Edge / What’s New** release notes before
-  tagging so `referenceData` tiles stay aligned with the product.
+  tagging so `referenceData` tiles stay aligned with the product; update the
+  **Cribl product versions (alignment log)** in this file when you bump tiles or
+  doc-driven copy from those notes.
 
 ## Ongoing programs (no committed finish line)
 
@@ -132,7 +160,7 @@ with a **regression fixture** so the same workbook shape stays supported.
 ### Standalone / on‑prem collateral
 
 - **Docs on demand:** extend
-  [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md) or add
+  [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md) or add
   companion material when a deployment pattern or objection comes up often in
   the field (PDF export of the one-pager, tenant disclaimers, localized variants
   only if PS asks).
@@ -183,6 +211,7 @@ with a **regression fixture** so the same workbook shape stays supported.
   Anything here is **exploratory**: tenant boundaries, read-only vs write,
   which Cribl surfaces (Stream UI export, Cribl-as-Code, Search/Lake, etc.) drive
   the design.
+- **Diagnostic (`diag`) import support (shipped on `main`):** **File → Import** accepts a Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundle and parses `groups/<id>/…/inputs.yml` (see [`docs/diag-import.md`](./docs/diag-import.md)). **Remaining:** fixture-backed tests on real bundle shapes, GNU/pax tar edge cases. **UX:** Import page and docs distinguish **Cribl.Cloud** (Leader-centric diags vs self-managed per-worker bundles; live tenant import) from **customer-managed** exports.
 - **Push adoption-plan intent into the customer environment (later):**
   **materialize** what the plan describes (routes, pipelines, naming, rollout
   steps) with an **AI agent** that can read **both** the structured plan **and**

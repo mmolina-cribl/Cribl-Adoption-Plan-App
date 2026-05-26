@@ -205,7 +205,7 @@ export type Activation = {
   useCases: ActivationUseCase[]
 }
 
-export type PlanProvenanceKind = 'scratch' | 'xlsx' | 'tenant'
+export type PlanProvenanceKind = 'scratch' | 'xlsx' | 'tenant' | 'diag'
 
 /**
  * Where the current plan body came from — used by the executive readout and
@@ -214,10 +214,19 @@ export type PlanProvenanceKind = 'scratch' | 'xlsx' | 'tenant'
  */
 export type PlanProvenance = {
   kind: PlanProvenanceKind
-  /** ISO 8601 when import or tenant harvest completed */
+  /** ISO 8601 when import, tenant harvest, or diag bundle import completed */
   capturedAt?: string
   /** Optional short note (e.g. harvest warnings) */
   note?: string
+}
+
+/** Optional AI-generated Markdown for the Executive (Summary) tab — same BYOL key as the assistant rail. */
+export type ExecutiveSummaryAi = {
+  markdown: string
+  /** ISO 8601 when generated */
+  generatedAt: string
+  /** Model id if we want to show it in UI later */
+  model?: string
 }
 
 export type PlanState = {
@@ -240,6 +249,12 @@ export type PlanState = {
    * `usePlanStorage` normalizes to `{ kind: 'scratch' }`.
    */
   planProvenance?: PlanProvenance
+  /**
+   * Optional AI-assisted narrative for the Summary page (Markdown). Persisted with the plan;
+   * not part of the gold Excel template. Cleared on explicit user action or left stale until regenerate.
+   * Anyone with access to the plan can generate or clear it.
+   */
+  executiveSummaryAi?: ExecutiveSummaryAi
 }
 
 export function newId(): string {

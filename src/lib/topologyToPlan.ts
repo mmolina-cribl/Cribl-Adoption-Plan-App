@@ -3,6 +3,7 @@ import { defaultActivation } from './defaultState'
 import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult } from './tenantHarvest'
 import { assignWorkerGroupIds } from './workerGroupIds'
 import { inferSourceTileFromLeaderInput } from './leaderInputToSourceTile'
+import { leaderWorkerGroupDetailFromMetrics, leaderWorkerHostingFromCloud } from './leaderWorkerGroupMetrics'
 
 /** Serializable snapshot of the last successful “Import from live tenant” run (for support / QA). */
 export type TenantImportDebugPayload = {
@@ -128,6 +129,10 @@ function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputI
   if (inp.disabled) {
     notes.push('Disabled on Leader')
   }
+  const leaderDesc = inp.description?.trim()
+  if (leaderDesc) {
+    notes.push(`Leader input description: ${leaderDesc}`)
+  }
   return {
     id: newId(),
     workerGroupId,
@@ -168,6 +173,10 @@ function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputI
 function workerGroupRowFromGroup(g: MasterGroupItem): WorkerGroupRow {
   const name = (g.description ?? '').trim() || g.id
   const kind = leaderWorkerGroupKind(g)
+  const workerDetail = leaderWorkerGroupDetailFromMetrics({
+    estimatedIngestRate: g.estimatedIngestRate,
+  })
+  const workerHosting = leaderWorkerHostingFromCloud(g.onPrem, g.cloud)
   return {
     id: newId(),
     kind,
@@ -175,9 +184,9 @@ function workerGroupRowFromGroup(g: MasterGroupItem): WorkerGroupRow {
     ingestGbd: '',
     egressGbd: '',
     throughputGbd: '',
-    workerHosting: '',
+    workerHosting,
     workerCount: '',
-    workerDetail: '',
+    workerDetail,
     diskOneDayGb: '',
     parentFleetId: '',
   }

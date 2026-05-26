@@ -1,72 +1,297 @@
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  type SetStateAction,
+} from 'react'
 import { useResizableAiRailWidth } from '../hooks/useResizableAiRailWidth'
-import { runAdoptionAssistantChat } from '../lib/aiAssistantOpenAi'
+import { runAdoptionAssistantChat, type AdoptionAssistantMode } from '../lib/aiAssistantOpenAi'
 import {
   loadPersistedChatMessages,
   planChatStorageId,
   savePersistedChatMessages,
   type PersistedChatMessage,
 } from '../lib/aiAssistantChatStorage'
+import { useAnimationsEnabled, usePrefersReducedMotion } from '../lib/animationsPreference'
 import { getSafeLocalStorage } from '../lib/safeLocalStorage'
 import { AssistantMessageReveal } from './AssistantMessageReveal'
 import { AssistantMessageRich } from './AssistantMessageRich'
 import { buildPlanDigestJson } from '../lib/planDigest'
 import { probeOpenAiKeyPresent, isCriblLocalShell, OPENAI_KEY_AVAILABILITY_EVENT } from '../lib/kvStore'
 import type { PlanState } from '../types/planTypes'
+import type { PlanPatchProposal } from '../lib/planPatchApply'
 
 const COLLAPSE_STORAGE_KEY = 'cribl-adoption-ai-rail-collapsed-v1'
 
 const ASSISTANT_SETUP_TOOLTIP =
   'Add your OpenAI API key in Settings so the AI assistant can run. In Cribl the key is stored with your app; locally it stays in this browser. Tenant admins: allow outbound access to OpenAI (and doc search hosts if you use them)—see AGENTS.md in the app package. AI can make mistakes — verify important answers against your plan and official docs.'
 
-/** Grouped starter prompts — wording nudges the model toward the matching tools where relevant. */
+/** Shown after ~1s hover (or on focus) — digest source-row cap. */
+const DIGEST_CAP_TIP =
+  'Caps how many source-summary rows are included in the plan digest JSON sent to the model each turn. This is not a workbook or export filter. Larger digests use more tokens and are more likely to hit model/request limits; your full plan stays in the app UI either way.'
+
+const PLAN_MODE_TIP =
+  'Each request includes your plan digest so answers track this customer’s topology, sources, and PS tier context. Pack and doc tools still run when relevant.'
+
+const RESEARCH_MODE_TIP =
+  'Prioritizes searchable product surfaces (criblpacks GitHub + docs indexes) with lighter plan grounding. Use for mostly product-level questions rather than inventory-specific reasoning.'
+
+const ASSISTANT_MODE_MENU_LABEL: Record<AdoptionAssistantMode, string> = {
+  plan: 'Plan + digest',
+  research: 'Product research',
+  activation: 'Activation & PS',
+  sources: 'Sources & ingest',
+  executive: 'Executive readout',
+  edge_topology: 'Edge vs Stream',
+  export_gold: 'Import & export',
+  patch_coach: 'Plan patch coach',
+}
+
+const ASSISTANT_MODE_MENU_SUB: Record<AdoptionAssistantMode, string> = {
+  plan: 'Workbook digest every turn — topology, sources, PS tier. Doc & pack tools when relevant.',
+  research: 'Tools-first answers from official docs + criblpacks; lighter plan grounding.',
+  activation: 'PS tier, base scope, use-case slots — static worksheet copy + digest progress.',
+  sources: 'Rank sources by volume, blockers, Stream vs Edge fit; inventory-first.',
+  executive: 'Short CIO-style bullets from digest facts only — no big tables in chat.',
+  edge_topology: 'Fleets vs worker groups, how sources attach; patterns from digest + docs.',
+  export_gold: 'Provenance, gold template, import/export round-trip — guide + digest.',
+  patch_coach: 'Steers allowlisted propose_plan_patch after you confirm what to change.',
+}
+
+const ASSISTANT_MODE_CHIP_TIP: Record<AdoptionAssistantMode, string> = {
+  plan: PLAN_MODE_TIP,
+  research: RESEARCH_MODE_TIP,
+  activation:
+    'Uses digest activation summary plus the built-in PS worksheet definitions in the system prompt. Add docs only for product PS packaging beyond this template.',
+  sources:
+    'Emphasizes digest source rows, GB/day, blockers, and collection context. Tools for evidence — only cite URLs returned by tools.',
+  executive:
+    'Keeps answers brief and leadership-ready; no invented metrics beyond the digest JSON.',
+  edge_topology:
+    'Uses workerGroups + sourceRowsByWorkerKind in the digest; doc/pack tools for Cribl patterns with real links only.',
+  export_gold:
+    'Explains provenance, export checks, and customer messaging for Excel round-trip — grounded in digest + user guide.',
+  patch_coach:
+    'Prefer propose_plan_patch when your intent is clear; nothing applies until you click Apply.',
+}
+
+/** `+` menu — section headers keep many modes scannable. */
+const SKILL_MENU_GROUPS: ReadonlyArray<{ title: string; modes: AdoptionAssistantMode[] }> = [
+  { title: 'Workbook', modes: ['plan', 'export_gold', 'patch_coach'] },
+  { title: 'Field & narrative', modes: ['activation', 'sources', 'edge_topology', 'executive'] },
+  { title: 'Product & docs', modes: ['research'] },
+]
+
+const HOVER_TIP_MS = 1000
+
+/**
+ * Rich tooltip after pointer dwell or immediately on keyboard focus; keeps open while
+ * pointer moves onto the tooltip (child of the same wrapper).
+ */
+function DelayHoverTip({ content, children }: { content: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearTimers = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+    if (focusTimerRef.current) {
+      clearTimeout(focusTimerRef.current)
+      focusTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => () => clearTimers(), [clearTimers])
+
+  const showNow = useCallback(() => {
+    clearTimers()
+    setOpen(true)
+  }, [clearTimers])
+
+  const scheduleHoverOpen = useCallback(() => {
+    clearTimers()
+    hoverTimerRef.current = setTimeout(() => setOpen(true), HOVER_TIP_MS)
+  }, [clearTimers])
+
+  const hideIfLeaving = useCallback(
+    (e: MouseEvent<HTMLElement>) => {
+      const next = e.relatedTarget as Node | null
+      if (next && (e.currentTarget as HTMLElement).contains(next)) {
+        return
+      }
+      clearTimers()
+      setOpen(false)
+    },
+    [clearTimers],
+  )
+
+  return (
+    <span
+      className="relative inline-flex max-w-full min-w-0"
+      onMouseEnter={scheduleHoverOpen}
+      onMouseLeave={hideIfLeaving}
+      onFocusCapture={() => {
+        clearTimers()
+        focusTimerRef.current = setTimeout(showNow, 0)
+      }}
+      onBlurCapture={(e) => {
+        const next = e.relatedTarget as Node | null
+        if (next && (e.currentTarget as HTMLElement).contains(next)) {
+          return
+        }
+        clearTimers()
+        setOpen(false)
+      }}
+    >
+      {children}
+      {open ? (
+        <>
+          {/* Bridges the gap so moving the pointer from control → tooltip does not fire mouseleave on the wrapper. */}
+          <span aria-hidden className="pointer-events-auto absolute left-0 right-0 top-full z-[99] h-2" />
+          <span
+            role="tooltip"
+            className="pointer-events-auto absolute left-0 top-[calc(100%+0.35rem)] z-[100] max-w-[min(18rem,calc(100vw-2rem))] rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-[10px] leading-snug text-neutral-800 shadow-md"
+          >
+            {content}
+          </span>
+        </>
+      ) : null}
+    </span>
+  )
+}
+
+/** Stacked up + down chevrons — reads as “drag vertically to resize”. */
+function AiComposerResizeGripGlyph() {
+  return (
+    <svg className="h-4 w-4 text-neutral-600" viewBox="0 0 16 16" aria-hidden>
+      <path d="M8 2.5 4.5 6.5h7z" fill="currentColor" fillOpacity={0.88} />
+      <path d="M8 13.5l3.5-4h-7l3.5 4z" fill="currentColor" fillOpacity={0.88} />
+    </svg>
+  )
+}
+
+const COMPOSER_HEIGHT_MIN_PX = 76
+const COMPOSER_HEIGHT_MAX_PX = 440
+const COMPOSER_HEIGHT_DEFAULT_PX = 92
+
+/** Grouped starter prompts — two per section to limit scroll; tool rows repeat URL rules in hints. */
 const ASSISTANT_WELCOME_SAMPLES: Array<{
   title: string
   hint: string
   items: Array<{ q: string }>
 }> = [
   {
-    title: 'Plan & workbook',
-    hint: 'Answers from the plan digest in this session (topology, sources, activation hints).',
+    title: 'Right after import',
+    hint: 'Digest + user guide. Only cite tool-returned URLs when using search.',
     items: [
       {
-        q: 'What are the differences between Silver, Gold, and Platinum PS tiers in this app, and what does the digest say about our activation tier?',
+        q: 'What should I validate in this plan right after import before I share it with the customer?',
       },
       {
-        q: 'What are the top onboarding risks in this plan, and what should we validate in the first customer workshop?',
-      },
-      {
-        q: 'Give me five short bullets summarizing worker groups, Edge fleets, and source mix for an executive readout.',
+        q: 'Explain gold template provenance and what Excel import/export round-trip does and does not guarantee.',
       },
     ],
   },
   {
-    title: 'Community packs (GitHub)',
-    hint: 'Uses search_cribl_packs_github — only cite pack URLs returned by that tool.',
+    title: 'Activation & PS',
+    hint: 'Tier gating in digest; deliverable names in static worksheet copy in the system prompt.',
     items: [
       {
-        q: 'Search criblpacks on GitHub for packs that could help with Splunk HEC, Windows XML, or Kafka JSON ingestion.',
+        q: 'Given my activation tier in the digest, which PS use-case slots are in scope, and how do I explain Silver vs Gold vs Platinum?',
       },
       {
-        q: 'Find community packs related to syslog RFC5424, S3 parquet, or edge file collection.',
+        q: 'Help me narrate PS Base Scope progress: what to mark complete first and what evidence to gather in workshops.',
       },
     ],
   },
   {
-    title: 'Official documentation',
-    hint: 'Uses search_cribl_docs_llms — only cite docs.cribl.io URLs that appear in tool results.',
+    title: 'Sources & data volume',
+    hint: 'Digest source rows + ingest. Packs/docs: tool URLs only.',
     items: [
       {
-        q: 'From the official docs indexes, what should we know about Stream worker groups, fleet sizing, or adding a Syslog Source?',
+        q: 'Rank my sources by avgDailyGb from the digest and list the top five follow-ups or risks.',
       },
       {
-        q: 'Search product documentation for pack import, QuickConnect, or App Platform proxies; include doc links from the tool output only.',
+        q: 'Which sources look like Stream vs Edge collection fits from digest columns, and what should I validate in tenant?',
+      },
+    ],
+  },
+  {
+    title: 'Worker groups & Edge fleets',
+    hint: 'workerGroups + sourceRowsByWorkerKind in digest.',
+    items: [
+      {
+        q: 'Summarize worker groups vs Edge fleets from the digest and how my sources attach to each kind.',
+      },
+      {
+        q: 'How should I explain subfleets vs top-level fleets using only digest facts?',
+      },
+    ],
+  },
+  {
+    title: 'Workshop & customer meeting',
+    hint: 'Agenda and discovery from digest topology and sources.',
+    items: [
+      {
+        q: 'Draft a one-hour workshop agenda from this plan digest (topology, sources, activation).',
+      },
+      {
+        q: 'List discovery questions for Splunk or syslog owners grounded in my digest source list.',
+      },
+    ],
+  },
+  {
+    title: 'Executive & readout',
+    hint: 'Short bullets; digest facts only — no big tables in chat.',
+    items: [
+      {
+        q: 'Five bullets for a CIO readout using only digest facts — no tables, no invented metrics.',
+      },
+      {
+        q: 'Draft a renewal narrative skeleton from worker group mix and ingest footprint in the digest.',
+      },
+    ],
+  },
+  {
+    title: 'Docs & packs (deep)',
+    hint: 'search_cribl_docs_llms / search_cribl_packs_github — tool JSON URLs only.',
+    items: [
+      {
+        q: 'Search official docs for worker group sizing relevant to my ingest footprint in the digest.',
+      },
+      {
+        q: 'Find criblpacks for Splunk HEC or syslog ingestion; list only pack URLs returned by the tool.',
+      },
+    ],
+  },
+  {
+    title: 'Safe workbook edits',
+    hint: 'Use Plan patch coach mode; nothing applies until Apply in the UI.',
+    items: [
+      {
+        q: 'After I confirm which rows, propose allowlisted updates to clear blockers on my nosiest sources.',
+      },
+      {
+        q: 'What can propose_plan_patch change here, and what is safer to edit manually in the UI?',
       },
     ],
   },
 ]
 
-type Props = { plan: PlanState }
+type Props = { plan: PlanState; setPlan: Dispatch<SetStateAction<PlanState>> }
 
 /** In-memory only — stripped before `savePersistedChatMessages`. */
 type AiChatMessage = PersistedChatMessage & { streamNonce?: number }
@@ -126,8 +351,17 @@ function aiChatReducer(state: AiChatState, action: AiChatAction): AiChatState {
  * Right-rail assistant: BYOL OpenAI + tool calls to GitHub (criblpacks) and
  * docs.cribl.io llms.txt indexes. See `proxies.yml` and AGENTS.md.
  */
-export function AiAssistantPanel({ plan }: Props) {
-  const { width: railW, beginResize, minW: railMinW, maxW: railMaxW } = useResizableAiRailWidth()
+export function AiAssistantPanel({ plan, setPlan }: Props) {
+  const {
+    width: railW,
+    beginResize,
+    minW: railMinW,
+    maxW: railMaxW,
+    railResizeDragging,
+  } = useResizableAiRailWidth()
+  const animationsEnabled = useAnimationsEnabled()
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const railWidthMotionOk = animationsEnabled && !prefersReducedMotion
   const [collapsed, setCollapsed] = useState(() => {
     try {
       const ls = getSafeLocalStorage()
@@ -148,12 +382,42 @@ export function AiAssistantPanel({ plan }: Props) {
     typeof window !== 'undefined' ? isCriblLocalShell() : false,
   )
 
-  const digest = useMemo(() => buildPlanDigestJson(plan), [plan])
+  const [assistantSkill, setAssistantSkill] = useState<{ mode: AdoptionAssistantMode } | null>({ mode: 'plan' })
+  const assistantModeForApi: AdoptionAssistantMode = assistantSkill?.mode ?? 'plan'
+  const [digestSourceRows, setDigestSourceRows] = useState<35 | 70 | 120>(35)
+  const [skillsMenuOpen, setSkillsMenuOpen] = useState(false)
+  const skillsMenuRef = useRef<HTMLDivElement>(null)
+  const [pendingPlanPatch, setPendingPlanPatch] = useState<PlanPatchProposal | null>(null)
+  const undoSnapshotRef = useRef<PlanState | null>(null)
+  const [undoAvailable, setUndoAvailable] = useState(false)
+  const [composerHeightPx, setComposerHeightPx] = useState(COMPOSER_HEIGHT_DEFAULT_PX)
+  const composerResizeDragRef = useRef<{ pointerId: number; startY: number; startH: number } | null>(null)
+  const [hasRetryableQuestion, setHasRetryableQuestion] = useState(false)
+  const lastUserQuestionRef = useRef<string | null>(null)
+
+  const digest = useMemo(() => buildPlanDigestJson(plan, { maxSourceRows: digestSourceRows }), [plan, digestSourceRows])
+
+  const assistantDigestMaxChars = useMemo(() => {
+    const high = digestSourceRows >= 70
+    switch (assistantModeForApi) {
+      case 'sources':
+      case 'edge_topology':
+        return high ? 19_000 : 15_000
+      case 'export_gold':
+        return high ? 17_000 : 13_000
+      case 'research':
+        return high ? 15_000 : 10_500
+      default:
+        return high ? 16_000 : 12_000
+    }
+  }, [assistantModeForApi, digestSourceRows])
 
   const workerGroupCount = plan.workerGroups?.length ?? 0
   const sourceSummaryCount = plan.sourceSummary?.length ?? 0
   const chatId = useMemo(
     () => planChatStorageId(plan),
+    // Intentionally avoid `plan` identity — only reset persisted chat when workbook "shape" changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable chat thread for same customer + inventory size
     [plan.customerName, plan.planProvenance?.kind, workerGroupCount, sourceSummaryCount],
   )
 
@@ -161,6 +425,7 @@ export function AiAssistantPanel({ plan }: Props) {
   const { messages, streamNonceActive } = chat
   const [clearChatDialogOpen, setClearChatDialogOpen] = useState(false)
   const clearChatTitleId = useId()
+  const digestDescId = useId()
   const chatIdRef = useRef<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   /** Skip one save after (re)loading from disk — avoids Strict Mode double-effect saving stale `[]`. */
@@ -179,7 +444,9 @@ export function AiAssistantPanel({ plan }: Props) {
   }, [clearChatDialogOpen])
 
   useEffect(() => {
-    setClearChatDialogOpen(false)
+    queueMicrotask(() => {
+      setClearChatDialogOpen(false)
+    })
   }, [chatId])
 
   useEffect(() => {
@@ -246,16 +513,46 @@ export function AiAssistantPanel({ plan }: Props) {
     dispatchChat({ type: 'streamDone' })
   }, [])
 
-  const send = async () => {
-    const q = input.trim()
+  const applyPendingPatch = useCallback(() => {
+    if (!pendingPlanPatch) return
+    undoSnapshotRef.current = JSON.parse(JSON.stringify(plan)) as PlanState
+    setUndoAvailable(true)
+    setPlan(pendingPlanPatch.nextPlan)
+    setPendingPlanPatch(null)
+    dispatchChat({
+      type: 'addAssistant',
+      text: 'Applied the assistant proposal to this plan. Re-export the workbook if you need an updated .xlsx.',
+    })
+  }, [pendingPlanPatch, plan, setPlan, dispatchChat])
+
+  const dismissPendingPatch = useCallback(() => {
+    setPendingPlanPatch(null)
+  }, [])
+
+  const undoAssistantApply = useCallback(() => {
+    const snap = undoSnapshotRef.current
+    if (!snap) return
+    setPlan(snap)
+    undoSnapshotRef.current = null
+    setUndoAvailable(false)
+  }, [setPlan])
+
+  const sendWithText = async (qRaw: string) => {
+    const q = qRaw.trim()
     if (!q || busy || criblLocalShell || openAiKeyPresent === false) return
-    setInput('')
+    setSkillsMenuOpen(false)
     setErr(null)
+    lastUserQuestionRef.current = q
+    setHasRetryableQuestion(true)
     dispatchChat({ type: 'addUser', text: q })
     setBusy(true)
     try {
-      const reply = await runAdoptionAssistantChat(q, digest)
-      dispatchChat({ type: 'addAssistant', text: reply })
+      const result = await runAdoptionAssistantChat(q, digest, plan, {
+        mode: assistantModeForApi,
+        digestMaxChars: assistantDigestMaxChars,
+      })
+      dispatchChat({ type: 'addAssistant', text: result.text })
+      setPendingPlanPatch(result.pendingPlanPatch ?? null)
     } catch (e) {
       const msg =
         e instanceof Error
@@ -268,9 +565,23 @@ export function AiAssistantPanel({ plan }: Props) {
         type: 'addAssistant',
         text: `Could not reach the model.\n\nDetail: ${msg}\n\n${checklist}`,
       })
+      setPendingPlanPatch(null)
     } finally {
       setBusy(false)
     }
+  }
+
+  const send = async () => {
+    const q = input.trim()
+    if (!q || busy || criblLocalShell || openAiKeyPresent === false) return
+    setInput('')
+    await sendWithText(q)
+  }
+
+  const retryLastQuestion = () => {
+    const q = lastUserQuestionRef.current
+    if (!q || busy || chatDisabled) return
+    void sendWithText(q)
   }
 
   const applySampleQuestion = (q: string) => {
@@ -287,6 +598,10 @@ export function AiAssistantPanel({ plan }: Props) {
   const confirmClearChat = () => {
     setClearChatDialogOpen(false)
     setErr(null)
+    setPendingPlanPatch(null)
+    undoSnapshotRef.current = null
+    setUndoAvailable(false)
+    setHasRetryableQuestion(false)
     dispatchChat({ type: 'clear' })
     savePersistedChatMessages(chatId, [])
   }
@@ -294,15 +609,115 @@ export function AiAssistantPanel({ plan }: Props) {
   /** Chat cannot run: missing key (or still probed as absent) or Cribl __local__ shell. */
   const chatDisabled = criblLocalShell || openAiKeyPresent === false
 
+  const aiRailAsideStyle: CSSProperties = useMemo(() => {
+    const base: CSSProperties = collapsed
+      ? { width: '2.5rem', minWidth: '2.5rem', maxWidth: '2.5rem' }
+      : {
+          width: railW,
+          minWidth: railMinW,
+          // Allow dragging up to `railMaxW` but never wider than the main column (absolute overlay parent).
+          maxWidth: `min(${railMaxW}px, 100%)`,
+        }
+    if (!railWidthMotionOk || railResizeDragging) {
+      return { ...base, transition: 'none' }
+    }
+    return {
+      ...base,
+      transition: 'width 220ms ease-out, min-width 220ms ease-out, max-width 220ms ease-out',
+    }
+  }, [collapsed, railW, railMinW, railMaxW, railResizeDragging, railWidthMotionOk])
+
+  const onComposerResizePointerDown = useCallback(
+    (e: PointerEvent<HTMLDivElement>) => {
+      if (busy || criblLocalShell || openAiKeyPresent === false) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      composerResizeDragRef.current = {
+        pointerId: e.pointerId,
+        startY: e.clientY,
+        startH: composerHeightPx,
+      }
+    },
+    [busy, criblLocalShell, openAiKeyPresent, composerHeightPx],
+  )
+
+  const endComposerResizeDrag = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    const d = composerResizeDragRef.current
+    if (!d || e.pointerId !== d.pointerId) return
+    try {
+      if (typeof e.currentTarget.hasPointerCapture === 'function' && e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }
+    } catch {
+      /* ignore */
+    }
+    composerResizeDragRef.current = null
+  }, [])
+
+  const onComposerResizePointerMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    const d = composerResizeDragRef.current
+    if (!d || e.pointerId !== d.pointerId) return
+    const next = Math.min(
+      COMPOSER_HEIGHT_MAX_PX,
+      // Top-corner affordance: drag up → taller, drag down → shorter (opposite of bottom-edge resize).
+      Math.max(COMPOSER_HEIGHT_MIN_PX, Math.round(d.startH - (e.clientY - d.startY))),
+    )
+    setComposerHeightPx(next)
+  }, [])
+
+  const onComposerLostPointerCapture = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (composerResizeDragRef.current?.pointerId === e.pointerId) {
+      composerResizeDragRef.current = null
+    }
+  }, [])
+
+  const onComposerResizeKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setComposerHeightPx((h) => Math.max(COMPOSER_HEIGHT_MIN_PX, h - 16))
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setComposerHeightPx((h) => Math.min(COMPOSER_HEIGHT_MAX_PX, h + 16))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setComposerHeightPx(COMPOSER_HEIGHT_MIN_PX)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setComposerHeightPx(COMPOSER_HEIGHT_MAX_PX)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!skillsMenuOpen) return
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSkillsMenuOpen(false)
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [skillsMenuOpen])
+
+  useEffect(() => {
+    if (!skillsMenuOpen) return
+    const onDown = (e: Event) => {
+      const t = e.target as Node | null
+      const wrap = skillsMenuRef.current
+      if (wrap && t && !wrap.contains(t)) {
+        setSkillsMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [skillsMenuOpen])
+
   return (
     <>
     <aside
-      className="group/aiail relative hidden min-h-0 shrink-0 flex-col self-stretch border-l border-neutral-300/60 bg-neutral-100/95 shadow-[inset_1px_0_0_rgba(255,255,255,0.4)] print:hidden lg:flex"
-      style={
-        collapsed
-          ? { width: '2.5rem', minWidth: '2.5rem' }
-          : { width: railW, minWidth: railMinW, maxWidth: railMaxW }
-      }
+      className="group/aiail relative z-40 hidden min-h-0 flex-col border-l border-neutral-200/90 bg-white shadow-[inset_1px_0_0_0_rgba(15,23,42,0.06)] print:hidden lg:absolute lg:right-0 lg:top-0 lg:bottom-0 lg:flex lg:flex-col"
+      style={aiRailAsideStyle}
       aria-label="AI ASSISTANT panel"
     >
       {collapsed ? (
@@ -337,109 +752,150 @@ export function AiAssistantPanel({ plan }: Props) {
         </div>
       ) : (
         <>
-          <div className="relative flex shrink-0 items-center justify-between overflow-visible bg-neutral-100/80 px-2 py-2">
-            <div className="relative z-10 flex shrink-0 items-center">
+          <div className="relative shrink-0 border-b border-neutral-200 bg-white px-3 py-2">
+            <div className="relative z-10 flex min-w-0 shrink-0 items-center gap-2">
               <button
                 type="button"
                 title="Collapse AI ASSISTANT"
                 onClick={toggle}
-                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-200/80 hover:text-neutral-800"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-sm text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800"
                 aria-expanded="true"
               >
                 <span className="sr-only">Collapse AI ASSISTANT</span>
                 <span aria-hidden>»</span>
               </button>
-            </div>
-            <span className="pointer-events-none absolute left-1/2 top-1/2 z-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-[length:calc(0.875rem*1.3)] font-semibold tracking-wide text-neutral-600">
-              AI ASSISTANT
-            </span>
-            <div className="relative z-10 flex shrink-0 items-center">
-              <span className="group relative inline-flex shrink-0">
-                <button
-                  type="button"
-                  className="relative z-10 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-[11px] font-semibold text-neutral-500 transition hover:bg-neutral-200/80 hover:text-neutral-800"
-                  aria-label="How the AI ASSISTANT is configured"
-                  aria-describedby="assistant-setup-help"
-                >
-                  <span aria-hidden>ⓘ</span>
-                </button>
-                <div
-                  id="assistant-setup-help"
-                  role="tooltip"
-                  className="absolute right-0 top-full z-[200] -mt-px hidden max-h-52 w-[min(17rem,calc(100vw-1.5rem))] overflow-y-auto rounded-md border border-neutral-200 bg-white p-2 text-left text-[10px] leading-snug text-neutral-800 shadow-md group-hover:block group-focus-within:block"
-                >
-                  {ASSISTANT_SETUP_TOOLTIP}
-                </div>
-              </span>
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="truncate text-[0.8125rem] font-bold uppercase tracking-tight text-neutral-900">
+                  AI ASSISTANT
+                </span>
+                <span className="group relative inline-flex shrink-0">
+                  <button
+                    type="button"
+                    className="relative z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                    aria-label="How the AI ASSISTANT is configured"
+                    aria-describedby="assistant-setup-help"
+                  >
+                    <span aria-hidden>ⓘ</span>
+                  </button>
+                  <div
+                    id="assistant-setup-help"
+                    role="tooltip"
+                    className="absolute left-0 top-full z-[200] mt-1 hidden max-h-52 w-[min(17rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-neutral-200/90 bg-white p-2.5 text-left text-[10px] leading-snug text-neutral-700 shadow-lg ring-1 ring-black/5 group-hover:block group-focus-within:block"
+                  >
+                    {ASSISTANT_SETUP_TOOLTIP}
+                  </div>
+                </span>
+              </div>
             </div>
           </div>
-          <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1">
+          {undoAvailable ? (
+            <div className="no-print shrink-0 border-b border-neutral-100 bg-neutral-50/70 px-3 py-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => undoAssistantApply()}
+                className="w-full rounded-md border border-amber-200/80 bg-amber-50/90 px-2 py-1 text-center text-[11px] font-medium text-amber-950 transition hover:bg-amber-50"
+              >
+                Undo last assistant apply
+              </button>
+            </div>
+          ) : null}
+          <div className="relative flex min-h-0 flex-1 flex-col px-3 pb-3 pt-2">
             <div
               className={
                 chatDisabled
-                  ? 'flex min-h-0 flex-1 flex-col px-4 pointer-events-none select-none opacity-55'
-                  : 'flex min-h-0 flex-1 flex-col px-4'
+                  ? 'flex min-h-0 flex-1 flex-col px-1 pointer-events-none select-none opacity-55'
+                  : 'flex min-h-0 flex-1 flex-col px-1'
               }
               aria-hidden={chatDisabled ? true : undefined}
             >
-            <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto rounded-md border border-neutral-200/80 bg-white/80 p-2 text-sm leading-relaxed text-neutral-800">
+            <div className="mt-1 min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-2.5 text-xs leading-relaxed text-neutral-700">
               {messages.length === 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
+                  <div className="flex w-full min-w-0 flex-col items-center space-y-3 px-1 pt-1 text-center">
+                    <div
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-base text-neutral-800 shadow-sm"
+                      aria-hidden
+                    >
+                      ✦
+                    </div>
+                    <div className="w-full max-w-full space-y-1.5">
+                      <p className="m-0 text-base font-semibold leading-snug tracking-tight text-neutral-900">Welcome</p>
+                      <p className="m-0 w-full max-w-full text-[11px] leading-relaxed text-neutral-500">
+                        Open <span className="font-medium text-neutral-700">+</span> for session modes (workbook, field, product), digest row cap, and skills. The chip sits above your message;{' '}
+                        <span className="font-medium text-neutral-700">×</span> clears it (defaults to plan + digest). Only cite URLs from tools (see ⓘ).
+                      </p>
+                    </div>
+                  </div>
                   <div>
-                    <p className="m-0 font-semibold text-neutral-800">Welcome</p>
-                    <p className="m-0 mt-1 text-sm leading-relaxed text-neutral-600">
-                      Replies use your plan digest. Pack and doc questions call tools that return real links — cite only those URLs (see ⓘ).
-                    </p>
+                    <p className="m-0 text-[10px] font-medium uppercase tracking-wider text-neutral-400">Suggested prompts</p>
+                    <div className="mt-2 space-y-3">
+                      {ASSISTANT_WELCOME_SAMPLES.map((group) => (
+                        <div key={group.title}>
+                          <p className="m-0 text-[10px] font-semibold text-neutral-800">{group.title}</p>
+                          <p className="m-0 mt-0.5 text-[9px] leading-snug text-neutral-400">{group.hint}</p>
+                          <ul className="m-0 mt-1 grid list-none grid-cols-1 gap-1 p-0 sm:grid-cols-2">
+                            {group.items.map((row) => (
+                              <li key={row.q} className="m-0 min-w-0">
+                                <button
+                                  type="button"
+                                  disabled={busy || chatDisabled}
+                                  onClick={() => applySampleQuestion(row.q)}
+                                  className="w-full rounded-md border border-cribl-primary/20 bg-cribl-primary-soft/50 px-2 py-1.5 text-left text-[11px] leading-snug text-neutral-700 transition hover:border-cribl-primary/45 hover:bg-cribl-primary-soft hover:text-cribl-primary-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cribl-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {row.q}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <p className="m-0 text-sm font-semibold uppercase tracking-wide text-neutral-500">Try a starter prompt</p>
-                  <div className="space-y-2.5">
-                    {ASSISTANT_WELCOME_SAMPLES.map((group) => (
-                      <div key={group.title}>
-                        <p className="m-0 text-sm font-semibold text-neutral-800">{group.title}</p>
-                        <p className="m-0 text-sm leading-snug text-neutral-500">{group.hint}</p>
-                        <ul className="m-0 mt-1 list-none space-y-1 p-0">
-                          {group.items.map((row) => (
-                            <li key={row.q} className="m-0">
-                              <button
-                                type="button"
-                                disabled={busy || chatDisabled}
-                                onClick={() => applySampleQuestion(row.q)}
-                                className="w-full rounded-md border border-neutral-200/90 bg-neutral-50/90 px-2 py-1.5 text-left text-sm leading-snug text-neutral-800 transition hover:border-cribl-primary/40 hover:bg-cribl-primary/5 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {row.q}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="m-0 text-sm text-neutral-500">
-                    Tip: click a prompt to load it into the box below, or ask your own question, then Send now.
+                  <p className="m-0 text-center text-[10px] leading-snug text-neutral-400">
+                    Tap a prompt to load the composer, edit, then send.
                   </p>
-                  <p className="m-0 mt-1 text-sm text-neutral-500">
-                    AI can make mistakes — verify important answers against your plan, tenant, and official docs.
+                  <p className="m-0 text-center text-[10px] leading-snug text-neutral-400">
+                    AI can make mistakes — verify against your plan and official docs.
                   </p>
                 </div>
               ) : (
                 messages.map((m, i) => (
                   <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                    <span
+                    <div
                       className={
                         m.role === 'user'
-                          ? 'text-sm font-semibold uppercase text-neutral-500'
-                          : 'text-sm font-semibold uppercase text-cribl-primary'
+                          ? 'mb-0.5 flex items-center justify-end gap-2'
+                          : 'mb-0.5 flex items-center justify-between gap-2'
                       }
                     >
-                      {m.role}
-                    </span>
+                      <span
+                        className={
+                          m.role === 'user'
+                            ? 'text-[10px] font-semibold uppercase tracking-wider text-neutral-400'
+                            : 'text-[10px] font-semibold uppercase tracking-wider text-cribl-primary/90'
+                        }
+                      >
+                        {m.role}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          void navigator.clipboard.writeText(m.text).catch(() => {})
+                        }}
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50"
+                      >
+                        Copy
+                      </button>
+                    </div>
                     {m.role === 'user' ? (
-                      <AssistantMessageRich text={m.text} className="m-0 mt-0.5" />
+                      <AssistantMessageRich text={m.text} className="m-0 mt-0.5 text-xs leading-relaxed text-neutral-700" />
                     ) : (
                       <AssistantMessageReveal
                         key={m.streamNonce != null ? `asn-${m.streamNonce}` : `a-${i}`}
                         text={m.text}
-                        className="m-0 mt-0.5"
+                        className="m-0 mt-0.5 text-xs leading-relaxed text-neutral-700"
                         animate={
                           m.role === 'assistant' &&
                           typeof m.streamNonce === 'number' &&
@@ -451,8 +907,46 @@ export function AiAssistantPanel({ plan }: Props) {
                   </div>
                 ))
               )}
+              {pendingPlanPatch && !chatDisabled && (
+                <div className="rounded-lg border border-cribl-primary/40 bg-cribl-primary-soft/80 p-2 text-left text-xs text-cribl-primary-ink">
+                  <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-cribl-primary">
+                    Proposed plan changes
+                  </p>
+                  <p className="m-0 mt-1 text-[11px] leading-snug text-cribl-primary-ink">{pendingPlanPatch.summary}</p>
+                  <ul className="m-0 mt-1.5 list-disc space-y-0.5 pl-3.5 text-[10px] leading-snug text-cribl-primary-ink">
+                    {pendingPlanPatch.operations.map((op, opi) => (
+                      <li key={opi}>
+                        {op.op === 'updateCseNotes'
+                          ? `Update plan notes (${op.value.length} chars)`
+                          : `Source ${op.sourceId.slice(0, 8)}… — set ${op.field}`}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="m-0 mt-1.5 text-[9px] leading-snug text-cribl-primary-ink/90">
+                    Nothing applies until you confirm. Re-validate exports after applying.
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => applyPendingPatch()}
+                      className="inline-flex items-center justify-center rounded-md bg-cribl-primary px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition hover:bg-cribl-primary-hover disabled:opacity-50"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => dismissPendingPatch()}
+                      className="inline-flex items-center justify-center rounded-md border border-cribl-primary/35 bg-white px-2.5 py-1 text-[11px] font-semibold text-cribl-primary-ink transition hover:bg-white/90 disabled:opacity-50"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
               {busy && (
-                <p className="m-0 text-sm font-medium text-cribl-primary" role="status" aria-live="polite">
+                <p className="m-0 text-xs font-medium text-cribl-primary" role="status" aria-live="polite">
                   Thinking
                   <span className="ai-thinking-dots" aria-hidden>
                     <span>.</span>
@@ -463,47 +957,202 @@ export function AiAssistantPanel({ plan }: Props) {
               )}
             </div>
             {err && (
-              <p className="m-0 mt-1 text-sm text-rose-700" role="alert">
+              <p className="m-0 mt-1 text-xs text-rose-700" role="alert">
                 {err.slice(0, 280)}
               </p>
             )}
             {(messages.length > 0 || err) && (
-              <div className="mt-1 flex justify-end">
+              <div className="mt-2 flex flex-wrap justify-end gap-1">
+                <button
+                  type="button"
+                  disabled={busy || chatDisabled || !hasRetryableQuestion}
+                  onClick={() => retryLastQuestion()}
+                  className="rounded-md px-2 py-1 text-[11px] font-medium text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 disabled:opacity-40"
+                >
+                  Retry last
+                </button>
                 <button
                   type="button"
                   disabled={busy || chatDisabled}
                   onClick={() => requestClearChat()}
-                  className="rounded-md border border-neutral-300/90 bg-white px-2 py-1 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+                  className="rounded-md px-2 py-1 text-[11px] font-medium text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 disabled:opacity-40"
                 >
                   Clear chat
                 </button>
               </div>
             )}
-            <div className="mt-2 flex shrink-0 flex-col gap-1">
-              <textarea
-                ref={inputRef}
-                id="adoption-ai-assistant-input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                rows={2}
-                placeholder="Ask a question…"
-                className="w-full min-h-[4.5rem] resize-y rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none focus:border-cribl-primary focus:ring-1 focus:ring-cribl-primary/30"
-                disabled={busy || chatDisabled}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    void send()
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => void send()}
-                disabled={busy || chatDisabled || !input.trim()}
-                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-cribl-primary/50 bg-cribl-primary px-4 py-2 text-sm font-medium text-white shadow-ctrl transition hover:bg-cribl-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Send now
-              </button>
+            <div className="relative mt-2 flex shrink-0 flex-col gap-2">
+              <div className="relative overflow-visible">
+                <div className="relative flex min-h-0 items-stretch gap-2 rounded-2xl border border-neutral-200/90 bg-white px-2 py-2 shadow-sm ring-1 ring-black/[0.04] transition-[border-color,box-shadow] focus-within:border-neutral-300 focus-within:ring-cribl-primary/15">
+                  <div ref={skillsMenuRef} className="relative flex shrink-0 flex-col justify-start pt-0.5">
+                    <button
+                      type="button"
+                      disabled={busy || chatDisabled}
+                      aria-haspopup="menu"
+                      aria-expanded={skillsMenuOpen}
+                      aria-label="Skills, digest cap, and assistant mode"
+                      title="Skills, digest row cap, and session modes (workbook, field, product)"
+                      onClick={() => setSkillsMenuOpen((o) => !o)}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-0 bg-neutral-100 text-lg leading-none text-neutral-700 transition hover:bg-neutral-200/90 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <span className="sr-only">Open assistant skills menu</span>
+                      <span aria-hidden className="-mt-0.5 font-light">
+                        +
+                      </span>
+                    </button>
+                    {skillsMenuOpen ? (
+                      <div
+                        role="menu"
+                        aria-label="Assistant skills"
+                        className="absolute bottom-[calc(100%+0.35rem)] left-0 z-[130] flex max-h-[min(70vh,28rem)] w-[min(19rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg"
+                      >
+                        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
+                          {SKILL_MENU_GROUPS.map((group, gi) => (
+                            <div key={group.title} className={gi > 0 ? 'border-t border-neutral-200' : ''}>
+                              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                                {group.title}
+                              </div>
+                              {group.modes.map((mode, mi) => (
+                                <button
+                                  key={mode}
+                                  role="menuitem"
+                                  type="button"
+                                  title={ASSISTANT_MODE_CHIP_TIP[mode]}
+                                  onClick={() => {
+                                    setAssistantSkill({ mode })
+                                    setSkillsMenuOpen(false)
+                                    queueMicrotask(() => inputRef.current?.focus())
+                                  }}
+                                  className={
+                                    mi > 0
+                                      ? 'flex w-full flex-col gap-0.5 border-t border-neutral-100 px-3 py-2 text-left text-xs transition hover:bg-neutral-50'
+                                      : 'flex w-full flex-col gap-0.5 px-3 py-2 text-left text-xs transition hover:bg-neutral-50'
+                                  }
+                                >
+                                  <span className="font-semibold text-neutral-900">{ASSISTANT_MODE_MENU_LABEL[mode]}</span>
+                                  <span className="text-[10px] leading-snug text-neutral-500">{ASSISTANT_MODE_MENU_SUB[mode]}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                        <div
+                          className="shrink-0 border-t border-neutral-100 px-3 py-2"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span id={digestDescId} className="sr-only">
+                            {DIGEST_CAP_TIP}
+                          </span>
+                          <DelayHoverTip content={DIGEST_CAP_TIP}>
+                            <label className="flex min-w-0 flex-col gap-1.5 text-[10px] text-neutral-600">
+                              <span className="font-medium leading-snug">Source rows (digest cap)</span>
+                              <select
+                                value={digestSourceRows}
+                                disabled={busy}
+                                onChange={(e) => setDigestSourceRows(Number(e.target.value) as 35 | 70 | 120)}
+                                aria-describedby={digestDescId}
+                                className="w-full max-w-full rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] text-neutral-800"
+                              >
+                                <option value={35}>35 (default)</option>
+                                <option value={70}>70</option>
+                                <option value={120}>120 (max)</option>
+                              </select>
+                            </label>
+                          </DelayHoverTip>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div
+                    className="relative flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden py-0.5 pr-1"
+                    style={{ height: composerHeightPx, minHeight: COMPOSER_HEIGHT_MIN_PX }}
+                  >
+                    {assistantSkill ? (
+                      <div
+                        role="group"
+                        aria-label={`Assistant skill: ${ASSISTANT_MODE_MENU_LABEL[assistantSkill.mode]}`}
+                        className="inline-flex w-fit max-w-[min(100%,18rem)] shrink-0 self-start items-center gap-1.5 rounded-xl border border-cribl-primary/30 bg-cribl-primary/10 px-2.5 py-1 text-[10px] font-semibold leading-tight text-cribl-primary-ink"
+                        title={ASSISTANT_MODE_CHIP_TIP[assistantSkill.mode]}
+                      >
+                        <span className="min-w-0 truncate" aria-live="polite">
+                          {ASSISTANT_MODE_MENU_LABEL[assistantSkill.mode]}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy || chatDisabled}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setAssistantSkill(null)
+                          }}
+                          aria-label="Remove assistant skill"
+                          title="Remove skill — uses Plan + digest until you pick again from +"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent text-[12px] font-semibold leading-none text-cribl-primary-ink/75 transition hover:bg-cribl-primary/25 hover:text-cribl-primary-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cribl-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <span aria-hidden>×</span>
+                        </button>
+                      </div>
+                    ) : null}
+                    <textarea
+                      ref={inputRef}
+                      id="adoption-ai-assistant-input"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      rows={1}
+                      placeholder="Let's chat…"
+                      aria-label="Message to assistant"
+                      className="min-h-0 w-full flex-1 resize-none border-0 bg-transparent px-0.5 py-1 text-xs leading-snug text-neutral-800 outline-none ring-0 placeholder:text-neutral-400 focus:ring-0"
+                      disabled={busy || chatDisabled}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          void send()
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex min-w-0 shrink-0 flex-col justify-end items-end self-stretch pl-0.5 pr-1 pb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => void send()}
+                      disabled={busy || chatDisabled || !input.trim()}
+                      className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-cribl-primary/50 bg-cribl-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-cribl-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Send
+                    </button>
+                  </div>
+
+                  <div
+                    role="slider"
+                    aria-label="Resize question box height — drag up to expand, down to shrink"
+                    aria-orientation="vertical"
+                    aria-valuemin={COMPOSER_HEIGHT_MIN_PX}
+                    aria-valuemax={COMPOSER_HEIGHT_MAX_PX}
+                    aria-valuenow={composerHeightPx}
+                    tabIndex={0}
+                    onPointerDown={onComposerResizePointerDown}
+                    onPointerMove={onComposerResizePointerMove}
+                    onPointerUp={endComposerResizeDrag}
+                    onPointerCancel={endComposerResizeDrag}
+                    onLostPointerCapture={onComposerLostPointerCapture}
+                    onKeyDown={onComposerResizeKeyDown}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      setComposerHeightPx(COMPOSER_HEIGHT_DEFAULT_PX)
+                    }}
+                    className="absolute right-1.5 top-1.5 z-30 flex h-9 w-9 cursor-ns-resize touch-none select-none items-start justify-end rounded-md border border-transparent p-0.5 text-neutral-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cribl-primary/35"
+                  >
+                    <span className="pointer-events-none flex h-7 w-7 items-start justify-end pt-0.5 pr-0.5">
+                      <AiComposerResizeGripGlyph />
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="m-0 px-1 text-center text-[9px] leading-snug text-neutral-400">
+                Uses your plan context and tools — not for model training. Check answers against your workbook and official docs before sharing.
+              </p>
             </div>
             </div>
             {chatDisabled ? (

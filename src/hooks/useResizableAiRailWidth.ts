@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 const W_KEY = 'prefs/aiRail/px'
@@ -6,7 +12,8 @@ const W_KEY = 'prefs/aiRail/px'
 /** Default matches the prior fixed `20rem` rail. */
 const DEFAULT_W = 320
 const MIN_W = 260
-const MAX_W = 520
+/** Upper bound (px); aside also uses `max-width: min(MAX_W, 100%)` so it never outgrows the main column. */
+const MAX_W = 1200
 
 function clampW(n: number) {
   return Math.min(MAX_W, Math.max(MIN_W, Math.round(n)))
@@ -19,6 +26,13 @@ function clampW(n: number) {
 export function useResizableAiRailWidth() {
   const [width, setWidth] = useState(DEFAULT_W)
   const [hasHydrated, setHasHydrated] = useState(false)
+  /** True while the user is dragging the rail edge — width updates every frame; CSS width transitions must be off. */
+  const [railResizeDragging, setRailResizeDragging] = useState(false)
+  const widthRef = useRef(width)
+
+  useEffect(() => {
+    widthRef.current = width
+  }, [width])
 
   useEffect(() => {
     void (async () => {
@@ -43,12 +57,14 @@ export function useResizableAiRailWidth() {
   const beginResize = useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
       e.preventDefault()
+      setRailResizeDragging(true)
       const startX = e.clientX
-      const startW = width
+      const startW = widthRef.current
       const move = (ev: PointerEvent) => {
         setWidth(clampW(startW - (ev.clientX - startX)))
       }
       const up = () => {
+        setRailResizeDragging(false)
         document.removeEventListener('pointermove', move)
         document.removeEventListener('pointerup', up)
         document.removeEventListener('pointercancel', up)
@@ -57,7 +73,7 @@ export function useResizableAiRailWidth() {
       document.addEventListener('pointerup', up)
       document.addEventListener('pointercancel', up)
     },
-    [width],
+    [setWidth],
   )
 
   return {
@@ -66,5 +82,6 @@ export function useResizableAiRailWidth() {
     minW: MIN_W,
     maxW: MAX_W,
     beginResize,
+    railResizeDragging,
   }
 }

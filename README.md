@@ -63,15 +63,22 @@ The app ships in **two flavors from the same codebase**:
   OS-level `prefers-reduced-motion`).
 - **Import from live tenant** — When running inside the Cribl App Platform,
   **File → Import** can bootstrap worker groups / fleets and **configured sources**
-  from Leader APIs (`/master/groups` and per-group **`/m/{group}/system/inputs`**).
+  from Leader APIs (`/master/groups` and per-group **`/m/{group}/system/inputs`**). When `/master/groups` returns **`estimatedIngestRate`**, **`cloud`**, or **`onPrem`**, the app pre-fills **worker detail / hosting hints** (MB/s tier line — not GB/day workbook numbers). Leader input **`description`** is copied into source **additional notes**.
   After a successful run, expand **Import debug** for per-group input counts, an
   **Imported sources** table (labels, collector types, WG), harvest warnings, and
   copyable JSON. Routing (pipelines / destinations) is **not** imported—fill that in the plan or Excel as usual.
   For a full **Leader vs plan** field matrix (what can be pulled, what we use, what we ignore), see
   [`docs/tenant-import-leader-data.md`](./docs/tenant-import-leader-data.md).
+- **Import from diagnostic bundle** — **File → Import** accepts a Cribl Stream/Edge
+  **`.tar.gz` / `.tgz`** diagnostic bundle and parses `groups/<id>/…/inputs.yml` in
+  the browser (no Leader call). On **Cribl.Cloud**, Leader-oriented diagnostics differ from **self-managed** (where you can also create **per-worker** bundles); **live tenant import** is usually the easiest way to hydrate the full topology there. Scope and limits: [`docs/diag-import.md`](./docs/diag-import.md).
 - **Activation** (Plan nav) — In-app **PS Use Case Worksheet** (tier, base scope, use-case overview, per-use-case parameters) aligned to the Excel sheet of the same name.
 - **Summary** (Plan nav) — **executive summary**: stakeholder narrative, provenance, and the **full**
   worker-group and source inventory; **Download summary (.md)** and **Download workbook (.xlsx)** on the page.
+  Optional **AI-assisted talking points** use the same optional OpenAI API key as the assistant (bring your own key): the app sends a **capped JSON**
+  snapshot of the plan (large source lists may be sampled with explicit omit counts in the payload). Anyone editing the plan can generate this content. Generated Markdown
+  is stored on the plan, shown on the Summary page, and appended to the downloaded `.md` with a fixed disclaimer — always
+  verify against the full inventory tables and workbook before sharing outside your organization.
 - **AI ASSISTANT (right rail)** — Optional BYOL OpenAI (`gpt-4o-mini`) using
   `config/proxies.yml` + KV per AGENTS.md; sends a compact JSON plan digest for
   grounded suggestions. On large screens, drag the rail’s **left** edge to resize (width is persisted like the plan sidebar).
@@ -127,8 +134,11 @@ the way you'd hand them a PDF:
    `file://` and works immediately. No Node, no `npm`, no IT-side
    allowlist.
 
-For a **short customer-facing summary** (purpose, data boundaries, network),
-see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md).
+For a **short customer- and security-facing summary** (purpose, data boundaries,
+network) covering **both** standalone HTML and the **Cribl App Platform** install,
+see [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md).
+The legacy filename [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md)
+redirects to the same material.
 
 For **Cribl Copilot / Cribl AI** vs **BYOL** options from an App Platform iframe,
 see [`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md)

@@ -174,14 +174,14 @@ export function AssistantMessageRich({ text, className, linkifyPlainUrls = false
           return (
             <div
               key={i}
-              className="break-words pt-1 text-sm font-semibold tracking-tight text-neutral-900 first:pt-0"
+              className="break-words pt-1 text-xs font-semibold tracking-tight text-neutral-900 first:pt-0"
             >
               {renderInlineRich(hm[1], `ln-${i}`, linkifyPlainUrls)}
             </div>
           )
         }
         return (
-          <div key={i} className="break-words whitespace-pre-wrap">
+          <div key={i} className="break-words whitespace-pre-wrap leading-relaxed">
             {renderInlineRich(line, `ln-${i}`, linkifyPlainUrls)}
           </div>
         )

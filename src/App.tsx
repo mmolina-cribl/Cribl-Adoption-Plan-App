@@ -88,9 +88,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     useResizableRail()
   // First-load lands on the Plan dashboard — the topology + resource
   // map are the highest-density introduction to what a customer is
-  // looking at. Activation now sits one click away as a sub-entry
-  // under Plan in the left nav, and the dashboard surfaces a
-  // "Plan in shape? Activate it." nudge that points at it directly,
+  // looking at. Summary and Activation sit as sub-entries under Plan
+  // in the left nav (Summary first), and the dashboard surfaces a
+  // "Plan in shape? Activate it." nudge that points at Activation directly,
   // so a CSE / customer who lands here still has an obvious next step
   // without us pre-empting the plan view.
   const [mainView, setMainView] = useState<MainView>('overview')
@@ -759,7 +759,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           )}
         </aside>
 
-        <div className="adoption-app-main-column flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-cribl-canvas">
+        <div className="adoption-app-main-column relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-cribl-canvas">
           {/* overflow-x-hidden: wide headers (e.g. Activation PS tier) must not paint under the AI rail */}
           <div className="adoption-app-main-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
             <header className="relative z-30 w-full border-b border-cribl-border bg-white">
@@ -769,7 +769,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   <div
                     className="flex w-full flex-col items-center max-md:justify-center
                     md:absolute md:left-1/2 md:top-1/2 md:z-0
-                    md:w-[min(100%-26.675rem,28rem)] md:max-w-[calc(100%-27.225rem)]
+                    md:w-[min(28rem,calc(100%-22rem))] md:max-w-full
                     md:-translate-x-1/2 md:-translate-y-1/2
                     md:items-center md:justify-center
                   "
@@ -864,7 +864,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 />
               )}
 
-              {mainView === 'execBrief' && <ExecutiveReadoutView plan={plan} />}
+              {mainView === 'execBrief' && <ExecutiveReadoutView plan={plan} setPlan={setPlan} />}
 
               {mainView === 'workerGroups' && (
                 <WorkerGroupsIndexView
@@ -975,9 +975,9 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
               </footer>
             </main>
           </div>
-        </div>
 
-        <AiAssistantPanel plan={plan} />
+          <AiAssistantPanel plan={plan} setPlan={setPlan} />
+        </div>
       </div>
     </div>
   )

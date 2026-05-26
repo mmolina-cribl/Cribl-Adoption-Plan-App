@@ -82,8 +82,15 @@ type Props = {
 
 type Point = { x: number; y: number }
 
+/** Synthetic id for hover + SVG hit-testing on the collapsed summary branch. */
+const WG_SOURCES_SUMMARY_HOVER_ID = '__wg_sources_summary__'
+
+const SOURCES_PANEL_TRANSITION_MS = 360
+
 type Branch = {
   id: string
+  /** `summary` = one dashed branch from the collapsed chip to the hub (no detach). */
+  kind: 'source' | 'summary'
   d: string
   weight: number
   /** Source-side endpoint of the cubic curve, in container coords. */
@@ -144,6 +151,9 @@ export function WorkerGroupResourceMap({
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [branches, setBranches] = useState<Branch[]>([])
   const [hovered, setHovered] = useState<string | null>(null)
+  /** When false, attached sources render as one summary chip (like Plan resource map). */
+  const [sourcesExpanded, setSourcesExpanded] = useState(false)
+  const summaryRef = useRef<HTMLButtonElement | null>(null)
 
   /**
    * Drag-to-attach state. `null` while idle. Activated when the user
@@ -244,7 +254,14 @@ export function WorkerGroupResourceMap({
       ...sourceNodes.map((s) => s.volumeGb),
     )
 
-    const buildBranch = (id: string, el: HTMLElement, weightHint: number): Branch | null => {
+    const collapsedSummary = !sourcesExpanded && sourceNodes.length > 0
+
+    const buildBranch = (
+      id: string,
+      el: HTMLElement,
+      weightHint: number,
+      kind: 'source' | 'summary',
+    ): Branch | null => {
       const rb = el.getBoundingClientRect()
       const x1 = rb.right - cb.left
       const y1 = rb.top - cb.top + rb.height / 2
@@ -257,6 +274,7 @@ export function WorkerGroupResourceMap({
       const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
       return {
         id,
+        kind,
         d,
         weight: weightHint,
         src: { x: x1, y: y1 },
@@ -271,26 +289,40 @@ export function WorkerGroupResourceMap({
     }
 
     const newBranches: Branch[] = []
-    for (const s of sourceNodes) {
-      const el = sourceRefs.current.get(s.id)
-      if (!el) {
-        continue
+    if (collapsedSummary) {
+      const el = summaryRef.current
+      if (el) {
+        const weight =
+          totalVolumeGb > 0
+            ? Math.max(1.8, Math.min(7, (totalVolumeGb / maxVol) * 5.5 + 1.6))
+            : 1.8
+        const br = buildBranch(WG_SOURCES_SUMMARY_HOVER_ID, el, weight, 'summary')
+        if (br) {
+          newBranches.push(br)
+        }
       }
-      // No-volume sources still get a thin (but always-visible) dashed
-      // connector — the attachment to this WG/fleet should never look
-      // "floating" just because the customer hasn't filled in GB/d yet.
-      const weight = s.hasVolume
-        ? Math.max(1.6, Math.min(7, (s.volumeGb / maxVol) * 5.5 + 1.6))
-        : 1.6
-      const br = buildBranch(s.id, el, weight)
-      if (br) {
-        newBranches.push(br)
+    } else {
+      for (const s of sourceNodes) {
+        const el = sourceRefs.current.get(s.id)
+        if (!el) {
+          continue
+        }
+        // No-volume sources still get a thin (but always-visible) dashed
+        // connector — the attachment to this WG/fleet should never look
+        // "floating" just because the customer hasn't filled in GB/d yet.
+        const weight = s.hasVolume
+          ? Math.max(1.6, Math.min(7, (s.volumeGb / maxVol) * 5.5 + 1.6))
+          : 1.6
+        const br = buildBranch(s.id, el, weight, 'source')
+        if (br) {
+          newBranches.push(br)
+        }
       }
     }
 
     setBranches(newBranches)
     setSize({ w, h })
-  }, [sourceNodes])
+  }, [sourceNodes, sourcesExpanded, totalVolumeGb])
 
   useLayoutEffect(() => {
     measure()
@@ -304,6 +336,9 @@ export function WorkerGroupResourceMap({
     if (hubRef.current) {
       ro.observe(hubRef.current)
     }
+    if (summaryRef.current) {
+      ro.observe(summaryRef.current)
+    }
     sourceRefs.current.forEach((el) => ro.observe(el))
     const onWindowResize = () => measure()
     window.addEventListener('resize', onWindowResize)
@@ -311,7 +346,7 @@ export function WorkerGroupResourceMap({
       ro.disconnect()
       window.removeEventListener('resize', onWindowResize)
     }
-  }, [measure, sourceNodes])
+  }, [measure, sourceNodes, sourcesExpanded])
 
   /**
    * Window-level pointer listeners that drive the active drag. Attached
@@ -427,6 +462,10 @@ export function WorkerGroupResourceMap({
   const [hoveredSourceName, setHoveredSourceName] = useState<string | null>(null)
   useEffect(() => {
     if (!hovered) return
+    if (hovered === WG_SOURCES_SUMMARY_HOVER_ID) {
+      setHoveredSourceName(`${sourceNodes.length} sources`)
+      return
+    }
     const name = sourceNodes.find((s) => s.id === hovered)?.name ?? null
     if (name) {
       setHoveredSourceName(name)
@@ -451,7 +490,8 @@ export function WorkerGroupResourceMap({
           <p className="m-0 text-xs font-semibold text-cribl-ink">Resource map</p>
           <p className="m-0 mt-0.5 text-[11px] text-cribl-muted">
             Sources branching into <span className="text-cribl-ink/80">{workerGroup.wg.trim() || copy.thisOne}</span>
-            . Hover a leaf or its connector to highlight, click the{' '}
+            . Attached sources start <strong className="font-medium text-cribl-ink/90">collapsed</strong> into one summary row
+            (expand to see each source). Hover a leaf or its connector to highlight; click the{' '}
             <span
               aria-hidden
               className="inline-flex h-3 w-3 items-center justify-center rounded-full border border-red-500 align-[-1px] text-[8px] font-bold leading-none text-red-500"
@@ -569,19 +609,16 @@ export function WorkerGroupResourceMap({
            */}
           {branches.map((b) => {
             const isHovered = hovered === b.id
-            // Wide invisible "hit-stroke" sits on top of each visible
-            // curve so users can hover or tap the connector itself, not
-            // just the source card or the WG hub.
+            const isSummaryBranch = b.kind === 'summary'
+            const inDrawPhase = animEnabled && !entryAnimated
+            const dash = inDrawPhase ? '1 1' : isSummaryBranch ? '5 5' : undefined
             const hitWidth = Math.max(20, b.weight + 18)
-            // X badge hugs the source's right edge — the curve's source-
-            // side tangent is horizontal, so a small x-offset off `b.src`
-            // keeps the badge centered on the connector line without
-            // drifting toward the WG hub.
             const detachX = b.src.x + 14
             const detachY = b.src.y
+            const showDetachX = b.kind === 'source' && isHovered && !isDragging
             return (
               <g
-                key={b.id}
+                key={`${b.kind}:${b.id}`}
                 onPointerEnter={() => setHovered(b.id)}
                 onPointerLeave={() =>
                   setHovered((cur) => (cur === b.id ? null : cur))
@@ -594,27 +631,8 @@ export function WorkerGroupResourceMap({
                   strokeWidth={isHovered ? b.weight + 1.4 : b.weight}
                   strokeLinecap="round"
                   opacity={isHovered ? 1 : hovered ? 0.55 : 0.85}
-                  // Source → worker-group draw animation, standard SVG
-                  // dash-offset technique:
-                  //   - `pathLength={1}` normalizes the curve to a
-                  //     unit length so dash math is path-relative
-                  //     regardless of the actual rendered length.
-                  //   - `strokeDasharray={1}` (which the spec expands
-                  //     to `"1 1"` — one full-length dash, one full-
-                  //     length gap) gives us a "drawn" half and a
-                  //     "blank" half exactly the size of the curve.
-                  //   - `strokeDashoffset` slides from 1 (gap on top
-                  //     of the path → invisible) to 0 (dash on top
-                  //     of the path → fully drawn), revealing the
-                  //     line from its start (source endpoint) to its
-                  //     end (WG hub).
-                  //
-                  // Earlier versions used `"1 0"` (zero gap) which
-                  // some browsers treat as solid regardless of offset,
-                  // so the animation didn't play and adjacent paths
-                  // could blink out from the rendering quirk.
-                  pathLength={1}
-                  strokeDasharray={1}
+                  pathLength={inDrawPhase ? 1 : undefined}
+                  strokeDasharray={dash}
                   strokeDashoffset={animEnabled && !entryAnimated ? 1 : 0}
                   style={{
                     pointerEvents: 'none',
@@ -631,7 +649,7 @@ export function WorkerGroupResourceMap({
                   strokeLinecap="round"
                   style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
                 />
-                {isHovered ? (
+                {showDetachX ? (
                   <g
                     style={{ cursor: 'pointer' }}
                     onPointerDown={(e) => {
@@ -719,103 +737,188 @@ export function WorkerGroupResourceMap({
               to add your first source.
             </div>
           ) : (
-            sourceNodes.map((s) => {
-              const isHovered = hovered === s.id
-              const volStr = s.hasVolume ? formatGbOrTbPerDayStr(s.volumeGb) : '—'
-              const critTone =
-                /^high$/i.test(s.criticality)
-                  ? 'bg-rose-50 text-rose-700 border-rose-100'
-                  : /^medium$/i.test(s.criticality)
-                  ? 'bg-amber-50 text-amber-700 border-amber-100'
-                  : /^low$/i.test(s.criticality)
-                  ? 'bg-cribl-primary-soft text-cribl-primary-ink border-cribl-primary/30'
-                  : ''
-              return (
-                <div
-                  key={s.id}
-                  ref={(el) => setSourceRef(s.id, el)}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onOpenSource(s.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      onOpenSource(s.id)
-                    }
-                  }}
-                  onMouseEnter={() => setHovered(s.id)}
-                  onMouseLeave={() => setHovered((cur) => (cur === s.id ? null : cur))}
-                  onFocus={() => setHovered(s.id)}
-                  onBlur={() => setHovered((cur) => (cur === s.id ? null : cur))}
-                  title="Open source detail"
-                  aria-label={`Open ${s.name}`}
+            <>
+              <button
+                type="button"
+                ref={summaryRef}
+                onClick={() => {
+                  setHovered(null)
+                  setSourcesExpanded((v) => !v)
+                }}
+                onMouseEnter={() => {
+                  if (isDragging) return
+                  setHovered(WG_SOURCES_SUMMARY_HOVER_ID)
+                }}
+                onMouseLeave={() => {
+                  if (isDragging) return
+                  setHovered((cur) => (cur === WG_SOURCES_SUMMARY_HOVER_ID ? null : cur))
+                }}
+                onFocus={() => {
+                  if (isDragging) return
+                  setHovered(WG_SOURCES_SUMMARY_HOVER_ID)
+                }}
+                onBlur={() => {
+                  if (isDragging) return
+                  setHovered((cur) => (cur === WG_SOURCES_SUMMARY_HOVER_ID ? null : cur))
+                }}
+                className={[
+                  'group flex min-w-0 items-center gap-3 rounded-xl border bg-white px-3 py-2.5 text-left shadow-ctrl transition',
+                  hovered === WG_SOURCES_SUMMARY_HOVER_ID
+                    ? isEdgeKind
+                      ? 'border-cribl-edge/60 ring-2 ring-cribl-edge/30 -translate-y-0.5'
+                      : 'border-cribl-primary/60 ring-2 ring-cribl-primary/30 -translate-y-0.5'
+                    : sourcesExpanded
+                    ? isEdgeKind
+                      ? 'border-cribl-edge/30'
+                      : 'border-cribl-primary/30'
+                    : isEdgeKind
+                    ? 'border-cribl-border/80 hover:border-cribl-edge/40'
+                    : 'border-cribl-border/80 hover:border-cribl-primary/40',
+                ].join(' ')}
+                aria-expanded={sourcesExpanded}
+                title={sourcesExpanded ? 'Collapse sources' : 'Expand sources'}
+              >
+                <span
+                  aria-hidden
                   className={[
-                    // The whole widget is the click target now (no
-                    // separate "Open" pill below the title), matching
-                    // how the Plan resource map presents source rows.
-                    // We keep `role="button"` on a <div> rather than
-                    // using <button> because the connector-X badge
-                    // and (in the unassigned section) drag-handle are
-                    // real <button>s; nested <button>s would be
-                    // invalid HTML.
-                    'card-axiom relative flex min-w-0 cursor-pointer items-center gap-3 border-cribl-border/80 bg-white px-3 py-2.5 text-left shadow-ctrl transition focus-visible:outline-none',
-                    isEdgeKind
-                      ? 'focus-visible:ring-2 focus-visible:ring-cribl-edge/50'
-                      : 'focus-visible:ring-2 focus-visible:ring-cribl-primary/50',
-                    isHovered
+                    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
+                    hovered === WG_SOURCES_SUMMARY_HOVER_ID || sourcesExpanded
                       ? isEdgeKind
-                        ? 'ring-2 ring-cribl-edge/40 border-cribl-edge/60'
-                        : 'ring-2 ring-cribl-primary/40 border-cribl-primary/60'
-                      : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
+                        ? 'bg-cribl-edge text-white'
+                        : 'bg-cribl-primary text-white'
+                      : isEdgeKind
+                      ? 'bg-cribl-edge-soft text-cribl-edge-ink'
+                      : 'bg-cribl-primary-soft text-cribl-primary-ink',
+                  ].join(' ')}
                 >
-                  <span
-                    aria-hidden
-                    className={[
-                      'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
-                      isHovered
-                        ? isEdgeKind
-                          ? 'bg-cribl-edge text-white'
-                          : 'bg-cribl-primary text-white'
-                        : isEdgeKind
-                        ? 'bg-cribl-edge-soft text-cribl-edge-ink'
-                        : 'bg-cribl-primary-soft text-cribl-primary-ink',
-                    ].join(' ')}
-                  >
-                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                      <path d="M10 2.5c-3.59 0-6.5 2.91-6.5 6.5 0 4.5 6.5 8.5 6.5 8.5s6.5-4 6.5-8.5c0-3.59-2.91-6.5-6.5-6.5Zm0 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z" />
-                    </svg>
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                    <path d="M3.5 5h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Zm0 4h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Zm0 4h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5Z" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-cribl-ink">
+                    {sourceNodes.length} {sourceNodes.length === 1 ? 'source' : 'sources'}
                   </span>
-                  <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                    <span className="block max-w-full truncate text-sm font-semibold text-cribl-ink">
-                      {s.name}
-                    </span>
-                    {s.subtitle ? (
-                      <span className="block max-w-full truncate text-[11px] text-cribl-muted">
-                        {s.subtitle}
-                      </span>
-                    ) : null}
-                    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-                      <span className="rounded-md bg-cribl-card-body px-2 py-0.5 tabular-nums text-cribl-ink/80">
-                        {volStr}
-                      </span>
-                      {s.criticality && critTone ? (
-                        <span className={`rounded-md border px-2 py-0.5 ${critTone}`}>
-                          {s.criticality}
-                        </span>
-                      ) : null}
-                      {s.isCompliance ? (
-                        <span className="rounded-md border border-cribl-primary/30 bg-cribl-primary-soft px-2 py-0.5 text-cribl-primary-ink">
-                          Compliance
-                        </span>
-                      ) : null}
-                    </span>
+                  <span className="block truncate text-[11px] text-cribl-muted">
+                    {totalVolumeGb > 0 ? formatGbOrTbPerDayStr(totalVolumeGb) : 'No volume yet'}
+                    {' · '}
+                    {sourcesExpanded ? 'click to collapse' : 'expand to view'}
+                  </span>
+                </span>
+                <ChevronCueWgMap open={sourcesExpanded} />
+              </button>
+
+              <div
+                aria-hidden={!sourcesExpanded}
+                className="ml-6 grid"
+                style={{
+                  gridTemplateRows: sourcesExpanded ? '1fr' : '0fr',
+                  opacity: sourcesExpanded ? 1 : 0,
+                  marginTop: sourcesExpanded ? 8 : 0,
+                  pointerEvents: sourcesExpanded ? undefined : 'none',
+                  transitionProperty: 'grid-template-rows, opacity, margin-top',
+                  transitionDuration: `${SOURCES_PANEL_TRANSITION_MS}ms`,
+                  transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+                onTransitionEnd={() => {
+                  measure()
+                }}
+              >
+                <div className="min-h-0 overflow-hidden">
+                  <div className="flex flex-col gap-2">
+                    {sourceNodes.map((s) => {
+                      const isHovered = hovered === s.id
+                      const volStr = s.hasVolume ? formatGbOrTbPerDayStr(s.volumeGb) : '—'
+                      const critTone =
+                        /^high$/i.test(s.criticality)
+                          ? 'bg-rose-50 text-rose-700 border-rose-100'
+                          : /^medium$/i.test(s.criticality)
+                          ? 'bg-amber-50 text-amber-700 border-amber-100'
+                          : /^low$/i.test(s.criticality)
+                          ? 'bg-cribl-primary-soft text-cribl-primary-ink border-cribl-primary/30'
+                          : ''
+                      return (
+                        <div
+                          key={s.id}
+                          ref={(el) => setSourceRef(s.id, el)}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onOpenSource(s.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onOpenSource(s.id)
+                            }
+                          }}
+                          onMouseEnter={() => setHovered(s.id)}
+                          onMouseLeave={() => setHovered((cur) => (cur === s.id ? null : cur))}
+                          onFocus={() => setHovered(s.id)}
+                          onBlur={() => setHovered((cur) => (cur === s.id ? null : cur))}
+                          title="Open source detail"
+                          aria-label={`Open ${s.name}`}
+                          className={[
+                            'card-axiom relative flex min-w-0 cursor-pointer items-center gap-3 border-cribl-border/80 bg-white px-3 py-2.5 text-left shadow-ctrl transition focus-visible:outline-none',
+                            isEdgeKind
+                              ? 'focus-visible:ring-2 focus-visible:ring-cribl-edge/50'
+                              : 'focus-visible:ring-2 focus-visible:ring-cribl-primary/50',
+                            isHovered
+                              ? isEdgeKind
+                                ? 'ring-2 ring-cribl-edge/40 border-cribl-edge/60'
+                                : 'ring-2 ring-cribl-primary/40 border-cribl-primary/60'
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          <span
+                            aria-hidden
+                            className={[
+                              'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition',
+                              isHovered
+                                ? isEdgeKind
+                                  ? 'bg-cribl-edge text-white'
+                                  : 'bg-cribl-primary text-white'
+                                : isEdgeKind
+                                ? 'bg-cribl-edge-soft text-cribl-edge-ink'
+                                : 'bg-cribl-primary-soft text-cribl-primary-ink',
+                            ].join(' ')}
+                          >
+                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                              <path d="M10 2.5c-3.59 0-6.5 2.91-6.5 6.5 0 4.5 6.5 8.5 6.5 8.5s6.5-4 6.5-8.5c0-3.59-2.91-6.5-6.5-6.5Zm0 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z" />
+                            </svg>
+                          </span>
+                          <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                            <span className="block max-w-full truncate text-sm font-semibold text-cribl-ink">
+                              {s.name}
+                            </span>
+                            {s.subtitle ? (
+                              <span className="block max-w-full truncate text-[11px] text-cribl-muted">
+                                {s.subtitle}
+                              </span>
+                            ) : null}
+                            <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                              <span className="rounded-md bg-cribl-card-body px-2 py-0.5 tabular-nums text-cribl-ink/80">
+                                {volStr}
+                              </span>
+                              {s.criticality && critTone ? (
+                                <span className={`rounded-md border px-2 py-0.5 ${critTone}`}>
+                                  {s.criticality}
+                                </span>
+                              ) : null}
+                              {s.isCompliance ? (
+                                <span className="rounded-md border border-cribl-primary/30 bg-cribl-primary-soft px-2 py-0.5 text-cribl-primary-ink">
+                                  Compliance
+                                </span>
+                              ) : null}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-              )
-            })
+              </div>
+            </>
           )}
         </div>
 
@@ -1149,5 +1252,25 @@ function UnassignedSection({
       </div>
       )}
     </div>
+  )
+}
+
+function ChevronCueWgMap({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className={[
+        'h-3.5 w-3.5 shrink-0 text-cribl-muted transition-transform',
+        open ? 'rotate-90' : '',
+      ].join(' ')}
+      aria-hidden
+    >
+      <path
+        fillRule="evenodd"
+        d="M7.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 1 1-1.06-1.06L10.94 10 7.22 6.28a.75.75 0 0 1 0-1.06Z"
+        clipRule="evenodd"
+      />
+    </svg>
   )
 }

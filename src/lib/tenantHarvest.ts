@@ -5,6 +5,7 @@
  * `docs/tenant-import-leader-data.md` — keep that file in sync when changing harvest behavior.
  */
 import { criblGetJson, criblApiBase } from './leaderApi'
+import type { LeaderCloudInfo } from './leaderWorkerGroupMetrics'
 
 export type MasterGroupItem = {
   id: string
@@ -13,6 +14,13 @@ export type MasterGroupItem = {
   isSearch?: boolean
   /** Leader group type when present (`stream`, `edge`, `outpost`, …). */
   type?: string
+  /**
+   * Cribl provisioned-ingest **tier code** (maps to max MB/s) when returned by
+   * `GET /master/groups` — not GB/day. See `leaderWorkerGroupMetrics.ts`.
+   */
+  estimatedIngestRate?: number
+  onPrem?: boolean
+  cloud?: LeaderCloudInfo
 }
 
 /** One configured Stream/Edge **input** (source) from Leader `GET …/system/inputs`. */

@@ -8,8 +8,9 @@ the iframe, the Excel round-trip approach, Vite + Cribl `?init=` /
 
 For platform-level rules (fetch proxy, KV REST shape, `proxies.yml`),
 see [`AGENTS.md`](./AGENTS.md). For a feature-level overview, see
-[`README.md`](./README.md). For **standalone / on‑prem customer messaging**,
-see [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md). For
+[`README.md`](./README.md). For **customer / security one-pager** messaging (standalone **and** cloud Apps),
+see [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md)
+(standalone-only pointer: [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md)). For
 **Cribl Copilot / Cribl AI integration research** (APM reference, `/ai/*` spike
 snippet, internal questions for platform/AI), see
 [`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md).
@@ -30,7 +31,9 @@ that affect planning conversations):
 If a release introduces tiles, destinations, or topology concepts you expect on
 adoption plans, update [`src/data/referenceData.ts`](./src/data/referenceData.ts)
 (and wizard or export copy if needed) in the same release or an immediate patch,
-then note it in `build/vX.Y.Z-release-notes.md`.
+then note it in `docs/releases/vX.Y.Z.md`. When you intentionally align to a
+specific **Cribl product** semver, add or refresh the row in
+[`ROADMAP.md`](./ROADMAP.md) (**Cribl product versions (alignment log)**).
 
 ---
 

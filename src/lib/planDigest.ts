@@ -20,8 +20,16 @@ function sliceStr(s: string | undefined, max: number): string | undefined {
  * Stream vs Edge mix, collection context, and PS activation — without inventing
  * tenant facts not captured in the workbook. `activationSummary` includes PS tier,
  * unlocked use-case slot counts, and `tierScopeSummaryInApp` when a tier is set.
+ * The same payload supports all AI assistant session modes (plan, activation, sources, executive, etc.);
+ * row caps and `digestMaxChars` are tuned per mode in the UI, not here.
  */
-export function buildPlanDigestJson(plan: PlanState): string {
+export type PlanDigestOptions = {
+  /** Source rows to include (trimmed fields). Clamped 1–120. Default 35. */
+  maxSourceRows?: number
+}
+
+export function buildPlanDigestJson(plan: PlanState, options?: PlanDigestOptions): string {
+  const maxSourceRows = Math.min(120, Math.max(1, options?.maxSourceRows ?? 35))
   const prov = plan.planProvenance ?? { kind: 'scratch' as const }
   const wgById = new Map(plan.workerGroups.map((w) => [w.id, w]))
 
@@ -61,7 +69,7 @@ export function buildPlanDigestJson(plan: PlanState): string {
     baseScopeTotal: act.baseScope.length,
   }
 
-  const sources = plan.sourceSummary.slice(0, 35).map((r, i) => {
+  const sources = plan.sourceSummary.slice(0, maxSourceRows).map((r, i) => {
     const wg = wgById.get(r.workerGroupId)
     const row: Record<string, unknown> = {
       name: sourceLabel(r, i),
@@ -147,8 +155,7 @@ export function buildPlanDigestJson(plan: PlanState): string {
     customerName: (plan.customerName ?? '').trim(),
     planProvenance: prov,
     /** What this JSON includes / omits so the assistant can calibrate answers. */
-    digestCoverage:
-      'Truncated snapshot for chat context — not a full cell-by-cell workbook. Activation: tier, slot-scope summary, base-scope completion counts (not each deliverable line). Sources: up to 35 rows with trimmed fields. Worker groups: summary fields only.',
+    digestCoverage: `Truncated snapshot for chat context — not a full cell-by-cell workbook. Activation: tier, slot-scope summary, base-scope completion counts (not each deliverable line). Sources: up to ${maxSourceRows} of ${plan.sourceSummary.length} rows with trimmed fields. Worker groups: summary fields only.`,
     activationSummary,
     workerGroupMix: {
       streamWorkerGroups: workerGroupStreamCount,

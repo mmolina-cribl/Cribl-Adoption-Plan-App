@@ -963,7 +963,7 @@ export function PlanSidebarRail({
   const [wgListOpen, setWgListOpen] = useState(true)
   const [fleetListOpen, setFleetListOpen] = useState(true)
   const [sourcesListOpen, setSourcesListOpen] = useState(true)
-  /** Desktop rail: when false, the indented Plan sub-items (Activation, Summary) are hidden. */
+  /** Desktop rail: when false, the indented Plan sub-items (Summary, Activation) are hidden. */
   const [planSectionOpen, setPlanSectionOpen] = useState(true)
 
   useEffect(() => {
@@ -1016,6 +1016,14 @@ export function PlanSidebarRail({
       <AnimatedCollapse open={planSectionOpen}>
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
           <NavButton
+            active={mainView === 'execBrief'}
+            onClick={onSelectExecBrief}
+            title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
+            className="mt-0.5"
+          >
+            Summary
+          </NavButton>
+          <NavButton
             active={mainView === 'activation'}
             onClick={onSelectActivation}
             title="Cribl PS activation worksheet (tier, base scope, use cases)"
@@ -1041,14 +1049,6 @@ export function PlanSidebarRail({
                 })()
               ) : null}
             </span>
-          </NavButton>
-          <NavButton
-            active={mainView === 'execBrief'}
-            onClick={onSelectExecBrief}
-            title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
-            className="mt-0.5"
-          >
-            Summary
           </NavButton>
         </div>
       </AnimatedCollapse>
@@ -1454,7 +1454,7 @@ export function PlanNavMobile({
     >
       {/*
        * Mobile chip order mirrors the desktop rail: Overview (Plan), then
-       * Activation, then Summary under Plan. Keeping the same order as the
+       * Summary, then Activation under Plan. Keeping the same order as the
        * desktop indent preserves parity between layouts.
        */}
       <button
@@ -1463,6 +1463,14 @@ export function PlanNavMobile({
         onClick={onSelectOverview}
       >
         Overview
+      </button>
+      <button
+        type="button"
+        className={chip(mainView === 'execBrief')}
+        onClick={_onSelectExecBrief}
+        title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
+      >
+        Summary
       </button>
       <button type="button" className={chip(mainView === 'activation')} onClick={_onSelectActivation}>
         Activation
@@ -1483,14 +1491,6 @@ export function PlanNavMobile({
               )
             })()
           : null}
-      </button>
-      <button
-        type="button"
-        className={chip(mainView === 'execBrief')}
-        onClick={_onSelectExecBrief}
-        title="Executive summary — full inventory, narrative, exports (.md / .xlsx)"
-      >
-        Summary
       </button>
       <button type="button" className={chip(mainView === 'workerGroups')} onClick={_onSelectWorkerGroups}>
         Worker Groups

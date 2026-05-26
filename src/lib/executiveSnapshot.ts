@@ -1,12 +1,13 @@
-import type { PlanState, WorkerGroupRow } from '../types/planTypes'
+import type { ExecutiveSummaryAi, PlanState, WorkerGroupRow } from '../types/planTypes'
 import { sourceLabel } from '../types/planTypes'
+import { parseGb } from './formatRate'
 
 export type ExecutiveReadoutNarrativeSection = {
   title: string
   paragraphs: string[]
 }
 
-/** One row in the Summary sources inventory (full plan, not a sample). */
+/** One row in the Summary sources inventory (full plan, not a sample). Ordered by GB/d descending. */
 export type ExecutiveSourceRow = {
   id: string
   name: string
@@ -27,7 +28,7 @@ export type ExecutiveSnapshot = {
   wgEdgeCount: number
   sourceCount: number
   activationTier: string | null
-  /** Every source row in plan order. */
+  /** Every source row, sorted by average daily GB (largest first; non-numeric / empty last). */
   sources: ExecutiveSourceRow[]
   /** Every worker group / fleet in plan order. */
   workerGroups: Array<{ id: string; name: string; kind: 'stream' | 'edge' }>
@@ -56,6 +57,19 @@ function provenanceCopy(plan: PlanState): { label: string; detail: string; cavea
       caveats,
     }
   }
+  if (p.kind === 'diag') {
+    const caveats: string[] = [
+      'Topology was parsed from a **diagnostic bundle** snapshot — it reflects on-disk config at capture time, not live Leader APIs.',
+      'Sources come from `inputs.yml` (and `inputs/*.yml`) under each `groups/<id>/` tree; routing is not imported.',
+      'If the bundle omitted `groups/*` configs or used an unexpected layout, some groups or sources may be missing — compare with the tenant or Excel.',
+      '**Cribl.Cloud** diagnostics are **Leader-centric**; **per-worker / per-node** bundle workflows differ from self-managed Stream — **Import from live tenant** is often the easiest way to hydrate the full plan on Cloud.',
+    ]
+    return {
+      label: 'Imported from diagnostic bundle',
+      detail: `Bootstrapped from a Cribl Stream/Edge **.tar.gz** diagnostic bundle${p.capturedAt ? ` (${p.capturedAt})` : ''}.`,
+      caveats,
+    }
+  }
   return {
     label: 'Authored in-app',
     detail: 'Plan data was entered directly in this tool (no file or tenant bootstrap recorded).',
@@ -69,7 +83,7 @@ function wgDisplayName(w: WorkerGroupRow): string {
 
 function buildExecutiveSourceRows(plan: PlanState): ExecutiveSourceRow[] {
   const wgById = new Map(plan.workerGroups.map((w) => [w.id, w]))
-  return plan.sourceSummary.map((r, i) => {
+  const rows = plan.sourceSummary.map((r, i) => {
     const wg = r.workerGroupId ? wgById.get(r.workerGroupId) : undefined
     const wgLabel = wg ? wgDisplayName(wg) : '—'
     return {
@@ -82,6 +96,17 @@ function buildExecutiveSourceRows(plan: PlanState): ExecutiveSourceRow[] {
       blockers: (r.blockers ?? '').trim() || '—',
     }
   })
+  rows.sort((a, b) => {
+    const ga = parseGb(a.vol)
+    const gb = parseGb(b.vol)
+    const va = Number.isFinite(ga) ? ga : Number.NEGATIVE_INFINITY
+    const vb = Number.isFinite(gb) ? gb : Number.NEGATIVE_INFINITY
+    if (vb !== va) {
+      return vb - va
+    }
+    return a.id.localeCompare(b.id)
+  })
+  return rows
 }
 
 function buildExecutiveSummaryNarrative(args: {
@@ -141,8 +166,8 @@ function buildExecutiveSummaryNarrative(args: {
     sections.push({
       title: 'Ingest volumes',
       paragraphs: [
-        `*${withVol.length}* source row${withVol.length === 1 ? '' : 's'} include an average daily GB figure. The *Sources* table lists every row with the same values as the plan editor.`,
-        `Figures reflect what your team entered (or tenant harvest where applicable). *Validate them with the customer* before capacity, licensing, or sizing commitments.`,
+        `*${withVol.length}* source row${withVol.length === 1 ? '' : 's'} include an average daily GB figure. The *Sources* table lists every row with the same values as the plan editor, sorted by average daily GB (largest first).`,
+        `Figures reflect what your team entered (or tenant / diagnostic import where applicable). *Validate them with the customer* before capacity, licensing, or sizing commitments.`,
       ],
     })
   } else {
@@ -184,8 +209,9 @@ function narrativeStarToMarkdownBold(s: string): string {
 
 /**
  * Serialize the executive Summary to Markdown (mirrors the on-screen readout).
+ * When `ai` is set, appends an AI-assisted section (same disclaimer as the UI).
  */
-export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot): string {
+export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot, ai?: ExecutiveSummaryAi | null): string {
   const lines: string[] = []
   lines.push(`# ${snap.customerName} — Adoption plan summary`)
   lines.push('')
@@ -245,6 +271,8 @@ export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot): string {
   if (snap.sources.length === 0) {
     lines.push('*(No sources in plan.)*')
   } else {
+    lines.push('*Rows sorted by average daily GB (largest first).*')
+    lines.push('')
     lines.push('| Source | GB/d | Worker group / fleet | Stream/Edge | Source tile | Blockers |')
     lines.push('| --- | --- | --- | --- | --- | --- |')
     for (const s of snap.sources) {
@@ -256,6 +284,19 @@ export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot): string {
     }
   }
   lines.push('')
+  if (ai?.markdown?.trim()) {
+    lines.push('## AI-assisted notes')
+    lines.push('')
+    lines.push(
+      '*The following was generated by an AI model from a capped JSON snapshot of this plan. It is not an independent audit — verify counts, sources, and claims against the tables above and in the workbook.*',
+    )
+    lines.push('')
+    const modelNote = ai.model ? ` *(model: ${ai.model})*` : ''
+    lines.push(`*Generated ${ai.generatedAt}*${modelNote}`)
+    lines.push('')
+    lines.push(ai.markdown.trim())
+    lines.push('')
+  }
   return lines.join('\n')
 }
 
@@ -265,8 +306,8 @@ function sanitizeFilenameBase(name: string): string {
 }
 
 /** Trigger a browser download of the Markdown summary. */
-export function downloadExecutiveSummaryMarkdown(snap: ExecutiveSnapshot): void {
-  const md = executiveSnapshotToMarkdown(snap)
+export function downloadExecutiveSummaryMarkdown(snap: ExecutiveSnapshot, ai?: ExecutiveSummaryAi | null): void {
+  const md = executiveSnapshotToMarkdown(snap, ai)
   const stamp = new Date().toISOString().slice(0, 10)
   const base = sanitizeFilenameBase(snap.customerName)
   const filename = `${base}-adoption-summary-${stamp}.md`

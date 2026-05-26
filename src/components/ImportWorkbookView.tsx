@@ -4,6 +4,7 @@ import { setImportShellFromBytes } from '../lib/importShellStore'
 import { importAdoptionPlanXlsx } from '../lib/importWorkbook'
 import { xlsxSheets } from '../data/planDataMap'
 import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
+import { DiagImportSection } from './DiagImportSection'
 import { TenantImportSection } from './TenantImportSection'
 
 type Props = {
@@ -87,12 +88,15 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
       <div>
         <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Import a plan</h2>
         <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
-          Load from an Excel workbook or bootstrap topology from your Cribl tenant when running inside the App
-          Platform.
+          Load from an Excel workbook, a Cribl <span className="font-mono">.tar.gz</span> diagnostic bundle (most practical when you can{' '}
+          <strong className="text-cribl-ink/90">export the archive from a customer-managed deployment</strong>), or bootstrap topology from your
+          Cribl tenant when running inside the App Platform.
         </p>
       </div>
 
       <TenantImportSection setPlan={setPlan} hasExistingPlanData={hasAnyPlanData(plan)} />
+
+      <DiagImportSection setPlan={setPlan} hasExistingPlanData={hasAnyPlanData(plan)} />
 
       <div className="border-t border-cribl-border pt-6">
         <h3 className="m-0 text-base font-semibold text-cribl-ink">Import from Excel</h3>

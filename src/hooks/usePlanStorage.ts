@@ -6,6 +6,7 @@ import { kvGet, kvSet } from '../lib/kvStore'
 import { assignWorkerGroupIds } from '../lib/workerGroupIds'
 import type {
   Activation,
+  ExecutiveSummaryAi,
   PlanProvenance,
   PlanState,
   SourceSummaryRow,
@@ -15,6 +16,21 @@ import type {
 
 /** Logical KV / localStorage key for the main plan blob (namespaced per user in KV). */
 export const PLAN_STORAGE_KEY = 'plan' as const
+
+function normalizeExecutiveSummaryAi(raw: unknown): ExecutiveSummaryAi | undefined {
+  if (raw === null || typeof raw !== 'object') {
+    return undefined
+  }
+  const o = raw as { markdown?: unknown; generatedAt?: unknown; model?: unknown }
+  if (typeof o.markdown !== 'string' || typeof o.generatedAt !== 'string') {
+    return undefined
+  }
+  return {
+    markdown: o.markdown,
+    generatedAt: o.generatedAt,
+    model: typeof o.model === 'string' ? o.model : undefined,
+  }
+}
 
 /**
  * Normalize a raw value (typically the JSON-parsed body from KV) into a valid
@@ -75,6 +91,7 @@ function normalizePlan(raw: unknown): PlanState {
     // dropping data the user has already entered.
     activation: backfillActivation((p as Partial<PlanState>).activation as Activation | undefined),
     planProvenance: ((p as Partial<PlanState>).planProvenance ?? { kind: 'scratch' as const }) as PlanProvenance,
+    executiveSummaryAi: normalizeExecutiveSummaryAi((p as Partial<PlanState>).executiveSummaryAi),
   }
   return assignWorkerGroupIds(backfillSourceSummaryTypePhysicalLocation(merged))
 }

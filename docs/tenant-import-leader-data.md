@@ -5,9 +5,8 @@ This document lists **which Cribl Leader APIs the Adoption Plan app calls**, **w
 The implementation lives in:
 
 - `src/lib/tenantHarvest.ts` — HTTP calls and normalization
+- `src/lib/leaderWorkerGroupMetrics.ts` — maps Leader `estimatedIngestRate` tier codes to MB/s labels for `workerDetail`
 - `src/lib/topologyToPlan.ts` — mapping into `PlanState` / `SourceSummaryRow` / `WorkerGroupRow`
-
----
 
 ## 1. APIs called today
 
@@ -52,11 +51,14 @@ Each item is a group object. Real tenants often include fields such as:
 | `WorkerGroupRow.wg` | Yes — from `description` or `id` |
 | `WorkerGroupRow.kind` | Yes — `stream` or `edge` per above |
 | `WorkerGroupRow.id` | New in-app id (not Leader id) |
-| Ingest / worker counts / hosting / disk / parent fleet | **No** — left empty for you to fill |
+| `WorkerGroupRow.workerHosting` | **Partial** — from Leader `onPrem` and `cloud.provider` / `cloud.region` when present (short hint, not full infra) |
+| `WorkerGroupRow.workerDetail` | **Partial** — from Leader `estimatedIngestRate` when present: human-readable **provisioned max ingest (MB/s)** line. This is a Cribl **tier code**, not GB/day; see Cribl worker-group docs for code → throughput. |
+| `WorkerGroupRow.ingestGbd` / `egressGbd` / `throughputGbd` | **No** — workbook columns expect **GB/day** planning numbers; we do not invent those from the tier code. |
+| `WorkerGroupRow.workerCount`, `diskOneDayGb`, … | **No** — not returned in a usable form from the APIs we call today |
 
 ### Leader fields we **do not** read into the plan (today)
 
-Examples: `cloud`, `estimatedIngestRate`, `configVersion`, `onPrem`, `tags`, `provisioned`, `name` (distinct from `description`), nested deployment lists. Any of these could be wired later into workbook columns such as physical region, sizing, or notes if product prioritizes it.
+Examples: `name` (distinct from `description`), `tags`, `provisioned`, `configVersion`, nested deployment inventories, and any other group keys not listed above. Additional fields can be wired later if product prioritizes them.
 
 ---
 
@@ -86,14 +88,15 @@ Implementation: `normalizeLeaderInputsResponse()` in `tenantHarvest.ts`.
 | Plan column / field | Populated? |
 | ------------------- | ---------- |
 | **Source** (name) | Yes — Leader input **`id`** (falls back to **`type`** if id were ever empty after normalization) |
-| **Current collection** (pre-Cribl ingestion path in the workbook) | **No** — left empty; tenant import does not set this field |
+| **Current collection** (pre-Cribl ingestion path in the workbook) | **No** — tenant import does not infer this from Leader input JSON (only normalized fields below are kept). |
 | **Stream / Edge** | Derived from the **worker group** the input belongs to |
 | **Pipeline / use case** and **Destinations** | **No** — left empty (`''`); routing is **not** imported (destinations may be wired later) |
 | **On-Prem vs Cloud/Internet** (`type` enum on source row) | Left empty (`''`) — not inferred from Leader |
 | **Volumes, stakeholders, PS fields, …** | **No** |
+| **Additional notes** | **Partial** — Leader input `description` (when present) is appended as `Leader input description: …` (alongside any “Disabled on Leader” note). |
 | **Source tile** (workbook catalog) | **Partially** — inferred from Leader input `type` (and `id` for generic `splunk`) via `inferSourceTileFromLeaderInput()` in `src/lib/leaderInputToSourceTile.ts`. Only values that exist in `input_data.techTiles` are written; otherwise the field stays empty so users can pick manually. |
 
-Leader **collector** `type` is in **Import debug** as `syntheticSourceDetails[].collectorType` (from harvest order, not from `currentCollection`). The **Source** name is the input **`id`** (Leader `description` is not used). The inferred workbook **Source tile** is the same row’s `syntheticSourceDetails[].sourceTile` (and `SourceSummaryRow.sourceTile` in the plan).
+Leader **collector** `type` is in **Import debug** as `syntheticSourceDetails[].collectorType` (from harvest order, not from `currentCollection`). The **Source** name is the input **`id`** (Leader `description` is not used for the Source column — it is copied into **additional notes** when present). The inferred workbook **Source tile** is the same row’s `syntheticSourceDetails[].sourceTile` (and `SourceSummaryRow.sourceTile` in the plan).
 
 ### What we **drop on the floor** (today)
 
@@ -122,9 +125,9 @@ Examples of Leader / Stream concepts this import **does not** touch:
 | Workbook / app goal | Supported by tenant import today? |
 | ------------------- | ----------------------------------- |
 | “Which worker groups / fleets exist?” | **Yes** — names + Stream vs Edge |
-| “Which collectors (inputs) exist per group?” | **Partially** — id, type, optional description (in harvest only), disabled flag |
+| “Which collectors (inputs) exist per group?” | **Partially** — id, type, disabled; Leader `description` copied into source **additional notes** |
 | “How does data route (pipeline → destination)?” | **No** — enter manually or from Excel |
-| “Volumes, sizing, security class, PS use cases?” | **No** — enter manually |
+| “Volumes, sizing, security class, PS use cases?” | **Partially** — Leader **provisioned ingest tier** (`estimatedIngestRate` → MB/s hint in `workerDetail`) and **cloud / on-prem** hints in `workerHosting` when present; **GB/day** ingest/egress/throughput columns are still manual |
 
 ---
 

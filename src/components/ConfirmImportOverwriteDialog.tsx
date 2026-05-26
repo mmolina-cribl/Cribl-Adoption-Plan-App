@@ -47,8 +47,8 @@ export function ConfirmImportOverwriteDialog({ open, onCancel, onConfirm }: Prop
           Import and overwrite current data?
         </h2>
         <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
-          You already have data in this session. Importing will replace your current plan with the contents of the Excel
-          file.
+          You already have data in this session. Importing will replace your current plan with the imported content (Excel
+          workbook, diagnostic bundle, or tenant bootstrap).
         </p>
         <div className="mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
           <button
