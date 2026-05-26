@@ -438,6 +438,27 @@ export function SettingsView() {
           </a>
         </p>
       </section>
+
+      <section className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
+        <h3 className="m-0 text-sm font-semibold text-cribl-ink">Credits</h3>
+        <p className="m-0 mt-1 text-sm text-cribl-muted">
+          Initial ideas (not implementation):{' '}
+          <a
+            href="mailto:dadamic@cribl.io"
+            className="font-medium text-cribl-navy underline decoration-cribl-border underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/50"
+          >
+            dadamic@cribl.io
+          </a>
+          ,{' '}
+          <a
+            href="mailto:rallen@cribl.io"
+            className="font-medium text-cribl-navy underline decoration-cribl-border underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/50"
+          >
+            rallen@cribl.io
+          </a>
+          .
+        </p>
+      </section>
     </div>
   )
 }
