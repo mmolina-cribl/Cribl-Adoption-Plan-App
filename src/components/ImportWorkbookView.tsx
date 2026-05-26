@@ -69,7 +69,7 @@ export function ImportWorkbookView({ plan, setPlan }: Props) {
   )
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <ConfirmImportOverwriteDialog
         open={confirmOpen}
         onCancel={() => {

@@ -15,7 +15,7 @@ This app’s assistant is **BYOL OpenAI** with a **plan digest** plus **docs** /
 | `export_gold` | Import & export | Provenance, gold template, round-trip Excel; guide + digest. |
 | `patch_coach` | Plan patch coach | Steers allowlisted `propose_plan_patch` after explicit user intent. |
 
-**Starter prompts:** Eight grouped sections in [`src/components/AiAssistantPanel.tsx`](../src/components/AiAssistantPanel.tsx) (`ASSISTANT_WELCOME_SAMPLES`) — post-import validation, activation, sources, worker groups / Edge, workshop, executive, docs/packs, safe edits.
+**Starter prompts:** Eight grouped sections in [`src/components/AiAssistantPanel.tsx`](../src/components/AiAssistantPanel.tsx) (`ASSISTANT_WELCOME_SAMPLES`) — customer-facing starters for post-import validation, activation, sources, worker groups / Edge, workshops, executive, docs/packs, safe edits.
 
 **`+` menu:** Grouped **Workbook** / **Field & narrative** / **Product & docs**; **Source rows (digest cap)** lives at the bottom of the menu (not the rail header).
 
@@ -35,7 +35,7 @@ This app’s assistant is **BYOL OpenAI** with a **plan digest** plus **docs** /
 - **One primary signal per mode** — Session suffix makes the default behavior obvious vs `plan`.
 - **Same safety rules** — No fabricated URLs; plan patches never auto-apply.
 - **Token budget** — `digestMaxChars` and digest row cap scale with mode (`AiAssistantPanel` `assistantDigestMaxChars`).
-- **Discoverability** — Grouped `+` menu; welcome cards mirror post-import workflows.
+- **Discoverability** — Grouped `+` menu; welcome cards mirror customer post-import workflows.
 
 ---
 

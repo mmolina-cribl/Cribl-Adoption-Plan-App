@@ -187,7 +187,7 @@ const COMPOSER_HEIGHT_MIN_PX = 76
 const COMPOSER_HEIGHT_MAX_PX = 440
 const COMPOSER_HEIGHT_DEFAULT_PX = 92
 
-/** Grouped starter prompts — two per section to limit scroll; tool rows repeat URL rules in hints. */
+/** Grouped starter prompts — customer-facing voice (your org’s plan); two per section. */
 const ASSISTANT_WELCOME_SAMPLES: Array<{
   title: string
   hint: string
@@ -195,97 +195,97 @@ const ASSISTANT_WELCOME_SAMPLES: Array<{
 }> = [
   {
     title: 'Right after import',
-    hint: 'Digest + user guide. Only cite tool-returned URLs when using search.',
+    hint: 'Uses your plan snapshot and in-app guidance. Only paste links that search tools actually return.',
     items: [
       {
-        q: 'What should I validate in this plan right after import before I share it with the customer?',
+        q: 'What should we double-check in our adoption plan right after import, before we brief our own teams?',
       },
       {
-        q: 'Explain gold template provenance and what Excel import/export round-trip does and does not guarantee.',
+        q: 'In plain language, what does importing and exporting this workbook guarantee for us—and what does it not?',
       },
     ],
   },
   {
     title: 'Activation & PS',
-    hint: 'Tier gating in digest; deliverable names in static worksheet copy in the system prompt.',
+    hint: 'Your PS tier in this plan sets how many use-case slots apply; deliverable names are explained in the app’s built-in guidance.',
     items: [
       {
-        q: 'Given my activation tier in the digest, which PS use-case slots are in scope, and how do I explain Silver vs Gold vs Platinum?',
+        q: 'Our plan shows a PS tier—which use-case slots apply to us, and how do Silver, Gold, and Platinum change what we should expect?',
       },
       {
-        q: 'Help me narrate PS Base Scope progress: what to mark complete first and what evidence to gather in workshops.',
+        q: 'Help us describe our base-scope progress: what we should finish first and what evidence we should collect in working sessions.',
       },
     ],
   },
   {
     title: 'Sources & data volume',
-    hint: 'Digest source rows + ingest. Packs/docs: tool URLs only.',
+    hint: 'Grounded in your source rows and daily volume in this plan. Pack and doc links only if tools return them.',
     items: [
       {
-        q: 'Rank my sources by avgDailyGb from the digest and list the top five follow-ups or risks.',
+        q: 'Rank our data sources by daily volume from this plan and list the top five risks or next steps we should own.',
       },
       {
-        q: 'Which sources look like Stream vs Edge collection fits from digest columns, and what should I validate in tenant?',
+        q: 'Which of our sources look like a better fit for Stream vs Edge, and what should we verify in our own environment?',
       },
     ],
   },
   {
     title: 'Worker groups & Edge fleets',
-    hint: 'workerGroups + sourceRowsByWorkerKind in digest.',
+    hint: 'Summarizes your worker groups and how sources attach to Stream vs Edge.',
     items: [
       {
-        q: 'Summarize worker groups vs Edge fleets from the digest and how my sources attach to each kind.',
+        q: 'Summarize our worker groups vs Edge fleets in plain English and how our sources attach to each.',
       },
       {
-        q: 'How should I explain subfleets vs top-level fleets using only digest facts?',
+        q: 'How should we explain subfleets vs top-level fleets to our leadership using only what is captured in this plan?',
       },
     ],
   },
   {
-    title: 'Workshop & customer meeting',
-    hint: 'Agenda and discovery from digest topology and sources.',
+    title: 'Workshops & meetings',
+    hint: 'Agendas and talking points grounded in your topology and sources.',
     items: [
       {
-        q: 'Draft a one-hour workshop agenda from this plan digest (topology, sources, activation).',
+        q: 'Draft a one-hour internal workshop agenda from this plan (topology, sources, activation).',
       },
       {
-        q: 'List discovery questions for Splunk or syslog owners grounded in my digest source list.',
+        q: 'Give us discovery questions we can ask our Splunk or syslog owners, based on the sources listed in this plan.',
       },
     ],
   },
   {
     title: 'Executive & readout',
-    hint: 'Short bullets; digest facts only — no big tables in chat.',
+    hint: 'Short bullets for briefings; numbers and facts come only from this plan—no big tables in chat.',
     items: [
       {
-        q: 'Five bullets for a CIO readout using only digest facts — no tables, no invented metrics.',
+        q: 'Give us five bullets for a CIO briefing using only facts from this plan—no tables, no invented metrics.',
       },
       {
-        q: 'Draft a renewal narrative skeleton from worker group mix and ingest footprint in the digest.',
+        q: 'Draft a simple renewal narrative from our worker-group mix and ingest footprint as shown in this plan.',
       },
     ],
   },
   {
     title: 'Docs & packs (deep)',
-    hint: 'search_cribl_docs_llms / search_cribl_packs_github — tool JSON URLs only.',
+    hint: 'Official docs and community packs—only use links returned in search results.',
     items: [
       {
-        q: 'Search official docs for worker group sizing relevant to my ingest footprint in the digest.',
+        q: 'Look up official guidance on sizing worker groups for an ingest footprint like ours in this plan.',
       },
       {
-        q: 'Find criblpacks for Splunk HEC or syslog ingestion; list only pack URLs returned by the tool.',
+        q: 'Suggest community packs that could help with Splunk HEC or syslog ingestion; include only pack links returned by search.',
       },
     ],
   },
   {
     title: 'Safe workbook edits',
-    hint: 'Use Plan patch coach mode; nothing applies until Apply in the UI.',
+    hint: 'When your team wants controlled updates to this workbook, use Plan patch coach; changes still require Apply in the app.',
     items: [
       {
-        q: 'After I confirm which rows, propose allowlisted updates to clear blockers on my nosiest sources.',
+        q: 'We are ready to name specific source rows—propose allowed updates that clear blockers on our highest-volume sources.',
       },
       {
-        q: 'What can propose_plan_patch change here, and what is safer to edit manually in the UI?',
+        q: 'What kinds of fields can be updated via a patch in this app, and what is safer for us to change manually in the workbook?',
       },
     ],
   },
@@ -822,8 +822,9 @@ export function AiAssistantPanel({ plan, setPlan }: Props) {
                     <div className="w-full max-w-full space-y-1.5">
                       <p className="m-0 text-base font-semibold leading-snug tracking-tight text-neutral-900">Welcome</p>
                       <p className="m-0 w-full max-w-full text-[11px] leading-relaxed text-neutral-500">
-                        Open <span className="font-medium text-neutral-700">+</span> for session modes (workbook, field, product), digest row cap, and skills. The chip sits above your message;{' '}
-                        <span className="font-medium text-neutral-700">×</span> clears it (defaults to plan + digest). Only cite URLs from tools (see ⓘ).
+                        Use <span className="font-medium text-neutral-700">+</span> to pick how this assistant focuses (workbook, rollout, or product docs), set digest
+                        detail, and choose skills. The chip above your message shows the mode;{' '}
+                        <span className="font-medium text-neutral-700">×</span> clears it (back to the full plan + digest view). Only trust links that came from tools (see ⓘ).
                       </p>
                     </div>
                   </div>
@@ -853,10 +854,10 @@ export function AiAssistantPanel({ plan, setPlan }: Props) {
                     </div>
                   </div>
                   <p className="m-0 text-center text-[10px] leading-snug text-neutral-400">
-                    Tap a prompt to load the composer, edit, then send.
+                    Tap a starter to load your message—edit it, then send.
                   </p>
                   <p className="m-0 text-center text-[10px] leading-snug text-neutral-400">
-                    AI can make mistakes — verify against your plan and official docs.
+                    AI can make mistakes—double-check answers against your plan and Cribl’s official docs before you act.
                   </p>
                 </div>
               ) : (

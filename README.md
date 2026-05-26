@@ -295,6 +295,7 @@ source of truth in `package.json`). Recent history:
   standalone HTML build for on-prem deployment, and UI polish (Plan
   hero pencil-edit customer name, dismissible Activation callout,
   Plan as default landing).
+- **2.3.x** — Tenant import from Leader, Summary / executive readout, AI assistant session modes and plan patches, diagnostics import, centered Import/Export/Settings layout, Settings **Credits** + **README** thank-you (three contributors); see [`docs/releases/v2.3.0.md`](./docs/releases/v2.3.0.md) and [`ROADMAP.md`](./ROADMAP.md).
 - **1.3.x** — Interactive resource maps, animations preference,
   full-card click targets, header redesign, dated export filename,
   reusable `SearchInput` component.
@@ -311,3 +312,7 @@ produced by `npm run build:standalone`.
 ## Author
 
 Michael Molina — Cribl Sr. CSE.
+
+## Credits:
+
+Thank you to [dadamic@cribl.io](mailto:dadamic@cribl.io), [rallen@cribl.io](mailto:rallen@cribl.io), and [jdeslauriers@cribl.io](mailto:jdeslauriers@cribl.io) for sharing early feedback on adoption planning challenges from the field. That perspective helped shape early versions of this app for teams planning Cribl deployments.

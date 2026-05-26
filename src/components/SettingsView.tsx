@@ -92,7 +92,7 @@ export function SettingsView() {
         : ''
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <div>
         <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Settings</h2>
         <p className="m-0 mt-1.5 text-sm text-cribl-muted">
@@ -439,26 +439,34 @@ export function SettingsView() {
         </p>
       </section>
 
-      <section className="card-axiom border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
-        <h3 className="m-0 text-sm font-semibold text-cribl-ink">Credits</h3>
-        <p className="m-0 mt-1 text-sm text-cribl-muted">
-          Initial ideas (not implementation):{' '}
+      <footer className="mt-2 border-t border-cribl-border/50 pt-6 text-center text-xs leading-relaxed text-cribl-muted/80">
+        <p className="m-0 mb-1.5 font-medium text-cribl-ink/75">Credits:</p>
+        <p className="m-0 mx-auto max-w-prose">
+          Thank you to{' '}
           <a
             href="mailto:dadamic@cribl.io"
-            className="font-medium text-cribl-navy underline decoration-cribl-border underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/50"
+            className="text-cribl-ink/85 underline decoration-cribl-border/70 underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/40"
           >
             dadamic@cribl.io
           </a>
           ,{' '}
           <a
             href="mailto:rallen@cribl.io"
-            className="font-medium text-cribl-navy underline decoration-cribl-border underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/50"
+            className="text-cribl-ink/85 underline decoration-cribl-border/70 underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/40"
           >
             rallen@cribl.io
           </a>
-          .
+          , and{' '}
+          <a
+            href="mailto:jdeslauriers@cribl.io"
+            className="text-cribl-ink/85 underline decoration-cribl-border/70 underline-offset-2 transition hover:text-cribl-ink hover:decoration-cribl-navy/40"
+          >
+            jdeslauriers@cribl.io
+          </a>{' '}
+          for sharing early feedback on adoption planning challenges from the field. That perspective helped shape early versions of this
+          app for teams planning Cribl deployments.
         </p>
-      </section>
+      </footer>
     </div>
   )
 }

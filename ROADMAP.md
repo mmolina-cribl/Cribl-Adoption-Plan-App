@@ -50,19 +50,13 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ### v2.3.0 ([`docs/releases/v2.3.0.md`](./docs/releases/v2.3.0.md))
 
-- **AI ASSISTANT:** Multiple **session modes** (workbook, field narrative, product research), grouped **`+`** menu, digest row cap in menu, **overlay rail** with smooth resize, **plan patch coach** + `propose_plan_patch` Apply/Dismiss, compact **Cribl-tinted** suggested prompts, header **AI ASSISTANT** + inline **ⓘ**.
-- **Executive readout:** Summary AI context + **markdown post-processing** (tests via Vitest).
+- **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.
+- **Summary** under Plan nav — **executive summary**: stakeholder narrative + inventory snapshot + caveats for tenant-derived plans; Summary AI **markdown post-processing** (Vitest coverage).
+- **AI ASSISTANT (right rail):** BYOL OpenAI via `proxies.yml` + KV `openaiKey`; plan digest context; multiple **session modes** (Activation & PS, Sources & ingest, Executive readout, Edge vs Stream, Import & export, Plan patch coach, etc.); grouped **`+`** menu; digest row cap in menu; **overlay rail** with smooth resize; **`propose_plan_patch`** Apply/Dismiss + session undo; compact **Cribl-tinted** suggested prompts; header **AI ASSISTANT** + inline **ⓘ**; clear-chat confirm scoped to the rail.
 - **Import / diagnostics:** Diagnostics import path and UI; tenant/leader harvest and topology import refinements.
-- **Packaging:** Semver **2.3.0**; build/package flow unchanged (`npm run package` → local `build/*.tgz`).
-
-### v2.2.0 (see tag `v2.2.0` / commit message on `main`)
-
-- **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when
-  embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.
-- **Summary** under Plan nav — **executive summary**: stakeholder narrative + inventory snapshot + caveats for tenant-derived plans.
-- **Right-rail AI ASSISTANT** (BYOL OpenAI via `proxies.yml` + KV `openaiKey`) with plan digest context; expanded-rail title sizing;
-  clear-chat confirm scoped to the rail; client-side reply reveal fixes (**bold** chunking, persistence strips stream metadata).
-- **Settings:** **OpenAI API key**; **Feedback & app support** (`mmolina@cribl.io`); **About this build** and feedback at the bottom of the page.
+- **Layout:** **Import**, **Export**, and **Settings** centered `max-w-2xl` column in the main pane.
+- **Settings / README:** **OpenAI API key**; **Feedback & app support** (`mmolina@cribl.io`); **About this build**; footer **Credits:** thank-you to **dadamic@cribl.io**, **rallen@cribl.io**, and **jdeslauriers@cribl.io** (aligned with **README**).
+- **Packaging:** Semver **2.3.0**; build/package flow unchanged (`npm run package` → local `build/*.tgz`); GitHub **v2.3.0** release + standalone HTML aligned with repo notes.
 
 ### v2.1.2 (`build/v2.1.2-release-notes.md`)
 

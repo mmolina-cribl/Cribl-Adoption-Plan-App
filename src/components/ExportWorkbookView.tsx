@@ -12,7 +12,7 @@ export function ExportWorkbookView({ plan }: Props) {
   const [exportError, setExportError] = useState<string | null>(null)
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <div>
         <h2 className="m-0 text-lg font-semibold tracking-tight text-cribl-ink sm:text-xl">Download your plan</h2>
         <p className="m-0 mt-1.5 text-sm leading-relaxed text-cribl-muted">
