@@ -24,3 +24,6 @@ build
 *.njsproj
 *.sln
 *.sw?
+
+# Project markdown under docs/ is not version-controlled (local / distribution only)
+/docs/

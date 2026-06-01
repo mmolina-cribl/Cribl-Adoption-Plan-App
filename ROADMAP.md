@@ -5,7 +5,9 @@ This roadmap is the project-facing source of truth for **ongoing programs** and
 CSE / PS usage and feedback, but they are not committed delivery dates.
 
 Detailed implementation history belongs in [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md);
-version-scoped summaries belong in [`docs/releases/`](./docs/releases/) (git-tracked; `build/` remains gitignored for local pack output). This file
+version-scoped summaries can live under local `docs/releases/` (**`docs/` is
+gitignored** — distribute via GitHub Release bodies or internal docs as needed;
+`build/` remains gitignored for local pack output). This file
 tracks **what is still in flight** (including standing programs without an end
 date), a short **recently delivered** snapshot, and **exploration** ideas so the
 backlog stays aligned with the product.
@@ -23,8 +25,9 @@ clearer errors), not a single “workbooks finished” milestone.
 - **Planned exploration**: product and UX bets that are useful but not tied to a
   schedule (nested fleets polish, internal renames, **AI-assisted pattern
   onboarding** (packs, routes, docs), **customer-facing readouts**, **financial /
-  agent-assisted modeling**, **import from live environments**, **push plan to env
-  via agent**, Activation, tile alignment with Cribl-as-Code).
+  agent-assisted modeling**, **import from live environments**, **plan-level
+  Cribl Leader version** (see below), **push plan to env via agent**, Activation,
+  tile alignment with Cribl-as-Code).
 
 ## Cribl product versions (alignment log)
 
@@ -48,7 +51,7 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ## Recently delivered
 
-### v2.3.0 ([`docs/releases/v2.3.0.md`](./docs/releases/v2.3.0.md))
+### v2.3.0 (GitHub Release + local `docs/releases/v2.3.0.md` if maintained)
 
 - **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.
 - **Summary** under Plan nav — **executive summary**: stakeholder narrative + inventory snapshot + caveats for tenant-derived plans; Summary AI **markdown post-processing** (Vitest coverage).
@@ -60,7 +63,7 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ### v2.1.2 (`build/v2.1.2-release-notes.md`)
 
-- **Copilot / Cribl AI research:** [`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md)
+- **Copilot / Cribl AI research:** `docs/copilot-integration-research.md` (local `docs/` tree)
   — APM-style `/ai/*` agent pattern, verification steps, stakeholder questions, BYOL path.
 - **Docs cross-links:** [`README.md`](./README.md) and [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md)
   point to the research note.
@@ -90,7 +93,7 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 - **In-app version:** Settings shows the package **version**; footer shows
   `Adoption Plan v…` (from `package.json`, injected at **Vite build** time).
-- **Customer / security one-pager (standalone & cloud):** [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md) (short pointer: [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md))
+- **Customer / security one-pager (standalone & cloud):** `docs/adoption-plan-tool-one-pager.md` (local `docs/` tree; short pointer: `docs/standalone-on-premises.md`)
   — purpose, data boundaries, `localStorage` / `file://`, network expectations.
   Linked from the repo README.
 - **Release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) — steps for
@@ -123,7 +126,7 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ### Unreleased (main; tag on next version bump)
 
-- **Import from diagnostic bundle:** parse Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundles in-browser (`groups/<id>/…/inputs.yml`) — see [`docs/diag-import.md`](./docs/diag-import.md) for **Cloud vs customer-managed** bundle availability; `planProvenance.kind` **`diag`**.
+- **Import from diagnostic bundle:** parse Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundles in-browser (`groups/<id>/…/inputs.yml`) — see `docs/diag-import.md` (local `docs/` tree) for **Cloud vs customer-managed** bundle availability; `planProvenance.kind` **`diag`**.
 - **Pre-release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) now
   requires skimming **Cribl Stream / Edge / What’s New** release notes before
   tagging so `referenceData` tiles stay aligned with the product; update the
@@ -154,7 +157,7 @@ with a **regression fixture** so the same workbook shape stays supported.
 ### Standalone / on‑prem collateral
 
 - **Docs on demand:** extend
-  [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md) or add
+  `docs/adoption-plan-tool-one-pager.md` or add
   companion material when a deployment pattern or objection comes up often in
   the field (PDF export of the one-pager, tenant disclaimers, localized variants
   only if PS asks).
@@ -205,7 +208,22 @@ with a **regression fixture** so the same workbook shape stays supported.
   Anything here is **exploratory**: tenant boundaries, read-only vs write,
   which Cribl surfaces (Stream UI export, Cribl-as-Code, Search/Lake, etc.) drive
   the design.
-- **Diagnostic (`diag`) import support (shipped on `main`):** **File → Import** accepts a Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundle and parses `groups/<id>/…/inputs.yml` (see [`docs/diag-import.md`](./docs/diag-import.md)). **Remaining:** fixture-backed tests on real bundle shapes, GNU/pax tar edge cases. **UX:** Import page and docs distinguish **Cribl.Cloud** (Leader-centric diags vs self-managed per-worker bundles; live tenant import) from **customer-managed** exports.
+- **Plan-level Cribl Leader version (under consideration — not scheduled):**
+  capture **one optional Leader / Stream product version per adoption plan**
+  (same tenant or diag context), **not** repeated per worker group / fleet and
+  **not** in per-source **Additional notes**. Leave **blank** when import cannot
+  detect it; customer can always override. **Detection (research):** live tenant
+  **`GET /system/info`**; diagnostic bundle **`log/cribl.log`** (`upgradeMgr`
+  `installedVersion`) with fallback to `groups/<id>/package.json` — see
+  `docs/tenant-import-leader-data.md` /
+  `docs/diag-import.md` when implemented. **Excel
+  round-trip (proposed):** single value on **Stream Overview** (e.g. label **I1**,
+  value **J1**); do **not** fan the same semver into every **Worker Detail**
+  column (redundant and ambiguous on re-import). Open product questions: gold
+  template cell placement, re-import overwrite vs preserve customer edits, whether
+  Summary / digest copy references the field. **v2.3.x** tenant and diag import
+  do not persist Leader version yet.
+- **Diagnostic (`diag`) import support (shipped on `main`):** **File → Import** accepts a Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundle and parses `groups/<id>/…/inputs.yml` (see `docs/diag-import.md` in local `docs/` tree). **Remaining:** fixture-backed tests on real bundle shapes, GNU/pax tar edge cases. **UX:** Import page and docs distinguish **Cribl.Cloud** (Leader-centric diags vs self-managed per-worker bundles; live tenant import) from **customer-managed** exports.
 - **Push adoption-plan intent into the customer environment (later):**
   **materialize** what the plan describes (routes, pipelines, naming, rollout
   steps) with an **AI agent** that can read **both** the structured plan **and**

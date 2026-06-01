@@ -9,11 +9,10 @@ the iframe, the Excel round-trip approach, Vite + Cribl `?init=` /
 For platform-level rules (fetch proxy, KV REST shape, `proxies.yml`),
 see [`AGENTS.md`](./AGENTS.md). For a feature-level overview, see
 [`README.md`](./README.md). For **customer / security one-pager** messaging (standalone **and** cloud Apps),
-see [`docs/adoption-plan-tool-one-pager.md`](./docs/adoption-plan-tool-one-pager.md)
-(standalone-only pointer: [`docs/standalone-on-premises.md`](./docs/standalone-on-premises.md)). For
+maintain `docs/adoption-plan-tool-one-pager.md` under the local **`docs/`** tree
+(**gitignored** — not in clone) and/or attach it to GitHub Releases. Standalone-only pointer: `docs/standalone-on-premises.md`. For
 **Cribl Copilot / Cribl AI integration research** (APM reference, `/ai/*` spike
-snippet, internal questions for platform/AI), see
-[`docs/copilot-integration-research.md`](./docs/copilot-integration-research.md).
+snippet, internal questions for platform/AI), use `docs/copilot-integration-research.md` in the same local tree.
 
 ---
 
@@ -56,7 +55,7 @@ On‑prem customers use the **single-file** build from GitHub, not the App Platf
 include the standalone artifact on the release page:
 
 1. From a clean tree at the tagged commit, run **`npm run build:standalone`**
-   (output: **`dist-standalone/cribl-adoption-plan.html`** — see [`README.md`](./README.md#standalone-deployment)).
+   (output: **`dist-standalone/cribl-adoption-plan.html`** — see [`README.md`](./README.md#install-in-cribl-and-standalone-distribution)).
 2. Upload it to the GitHub release, for example:
    `gh release upload vX.Y.Z dist-standalone/cribl-adoption-plan.html --repo <owner>/<repo>`
    (use the same tag as the release).
@@ -952,7 +951,7 @@ sheets in embedded gold:
 below) is the same one the dev server already used, so persistence
 "just works" — but `localStorage` is path-scoped under `file://`,
 which is a non-obvious gotcha worth documenting in the
-[README](./README.md#standalone-deployment): if the user moves the
+[README](./README.md#install-in-cribl-and-standalone-distribution): if the user moves the
 `.html` to a different directory, their saved plan does not follow.
 The `.xlsx` Export is the canonical save path and always has been;
 `localStorage` is session continuity, not durable storage. We
