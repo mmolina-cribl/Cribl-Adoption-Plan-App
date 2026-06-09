@@ -56,15 +56,16 @@ export function sumAvgDailyFromSourceSummaryForWg(
   workerGroupId: string,
 ): { sum: number; count: number } {
   let sum = 0
+  /** Attached source rows (for nav / labels), not only rows with parseable GB/d. */
   let count = 0
   for (const s of plan.sourceSummary) {
     if (s.workerGroupId !== workerGroupId) {
       continue
     }
+    count += 1
     const n = parseGb(s.avgDailyGb)
     if (Number.isFinite(n) && n >= 0) {
       sum += n
-      count += 1
     }
   }
   return { sum, count }

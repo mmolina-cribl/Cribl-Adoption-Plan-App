@@ -49,7 +49,7 @@ see `docs/adoption-plan-tool-one-pager.md` when you maintain that tree locally
 
 **Release line:** **v2.3.x** — tenant + diagnostic import, Summary / executive
 readout, AI assistant (session modes, plan patch proposals), and more; see
-GitHub **Release** notes for the tag (or `docs/releases/v2.3.0.md` locally). Gold **v0.9.1** alignment
+GitHub **Release** notes for the tag (or `docs/releases/v2.3.0.md` locally). **v2.3.1** is a **patch**: per-WG / per-fleet **Excel** validation and color scales past row **21** when a group has **20+ sources**, plus **`propose_plan_patch`** structural ops (add/move sources and groups), digest **ids**, assistant **tool/prompt** alignment, and rollup **source counts**. Gold **v0.9.1** alignment
 and design history: [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091).
 
 ---
@@ -94,7 +94,7 @@ Without `window.CRIBL_API_URL`, the app uses **`localStorage`** for plan state
 2. Deliver **`dist-standalone/cribl-adoption-plan.html`** (~2.2 MB raw / ~720 KB
    gzipped — comfortable to email), or point customers at the same asset on
    [GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)
-   (e.g. `…/releases/download/v2.3.0/cribl-adoption-plan.html`).
+   (e.g. `…/releases/download/v2.3.1/cribl-adoption-plan.html`).
 3. Customer opens the file in a modern browser (`file://` or hosted HTTPS). No
    Node, no server.
 

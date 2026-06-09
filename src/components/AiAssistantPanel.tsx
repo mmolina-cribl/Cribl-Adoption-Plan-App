@@ -29,9 +29,50 @@ import { AssistantMessageRich } from './AssistantMessageRich'
 import { buildPlanDigestJson } from '../lib/planDigest'
 import { probeOpenAiKeyPresent, isCriblLocalShell, OPENAI_KEY_AVAILABILITY_EVENT } from '../lib/kvStore'
 import type { PlanState } from '../types/planTypes'
-import type { PlanPatchProposal } from '../lib/planPatchApply'
+import type { PlanPatchOp, PlanPatchProposal } from '../lib/planPatchApply'
 
 const COLLAPSE_STORAGE_KEY = 'cribl-adoption-ai-rail-collapsed-v1'
+
+const PLAN_PATCH_OP_PREVIEW_LIMIT = 15
+
+function shortId(id: string): string {
+  const t = id.trim()
+  if (t.length <= 10) {
+    return t
+  }
+  return `${t.slice(0, 8)}…`
+}
+
+function summarizePlanPatchOp(op: PlanPatchOp): string {
+  switch (op.op) {
+    case 'updateCseNotes':
+      return `Update plan notes (${op.value.length} chars)`
+    case 'updateSourceField':
+      return `Source ${shortId(op.sourceId)} — set ${op.field}`
+    case 'addWorkerGroup': {
+      const label = op.kind === 'edge' ? 'Edge fleet' : 'Stream worker group'
+      const sub = op.parentFleetId ? ' (sub-fleet)' : ''
+      return `Add ${label} “${op.wg}”${sub}`
+    }
+    case 'addSource': {
+      const attach = op.workerGroupWg
+        ? ` → “${op.workerGroupWg}”`
+        : op.workerGroupId
+          ? ` → group ${shortId(op.workerGroupId)}`
+          : ' (unassigned)'
+      const tile = op.sourceTile ? ` [tile: ${op.sourceTile}]` : ''
+      return `Add source “${op.source}”${attach}${tile}`
+    }
+    case 'setSourceWorkerGroup': {
+      const attach = op.workerGroupWg
+        ? ` → “${op.workerGroupWg}”`
+        : op.workerGroupId
+          ? ` → group ${shortId(op.workerGroupId)}`
+          : ' → unassigned'
+      return `Move source ${shortId(op.sourceId)}${attach}`
+    }
+  }
+}
 
 const ASSISTANT_SETUP_TOOLTIP =
   'Add your OpenAI API key in Settings so the AI assistant can run. In Cribl the key is stored with your app; locally it stays in this browser. Tenant admins: allow outbound access to OpenAI (and doc search hosts if you use them)—see AGENTS.md in the app package. AI can make mistakes — verify important answers against your plan and official docs.'
@@ -915,14 +956,15 @@ export function AiAssistantPanel({ plan, setPlan }: Props) {
                   </p>
                   <p className="m-0 mt-1 text-[11px] leading-snug text-cribl-primary-ink">{pendingPlanPatch.summary}</p>
                   <ul className="m-0 mt-1.5 list-disc space-y-0.5 pl-3.5 text-[10px] leading-snug text-cribl-primary-ink">
-                    {pendingPlanPatch.operations.map((op, opi) => (
-                      <li key={opi}>
-                        {op.op === 'updateCseNotes'
-                          ? `Update plan notes (${op.value.length} chars)`
-                          : `Source ${op.sourceId.slice(0, 8)}… — set ${op.field}`}
-                      </li>
+                    {pendingPlanPatch.operations.slice(0, PLAN_PATCH_OP_PREVIEW_LIMIT).map((op, opi) => (
+                      <li key={opi}>{summarizePlanPatchOp(op)}</li>
                     ))}
                   </ul>
+                  {pendingPlanPatch.operations.length > PLAN_PATCH_OP_PREVIEW_LIMIT ? (
+                    <p className="m-0 mt-0.5 text-[9px] text-cribl-primary-ink/85">
+                      +{pendingPlanPatch.operations.length - PLAN_PATCH_OP_PREVIEW_LIMIT} more operations
+                    </p>
+                  ) : null}
                   <p className="m-0 mt-1.5 text-[9px] leading-snug text-cribl-primary-ink/90">
                     Nothing applies until you confirm. Re-validate exports after applying.
                   </p>

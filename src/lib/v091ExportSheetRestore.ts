@@ -64,13 +64,16 @@ import type {
 import { sourceSummaryValueForHeaderName } from './exportWorkbook'
 import {
   ALL_SOURCE_IMPORT_HEADER_NAMES,
+  V091_FLEET_SHEET_PREFIX,
   V091_OVERVIEW_TABLE2_FIRST_DATA_ROW,
   V091_OVERVIEW_TABLE2_HEADER_ROW,
+  V091_PER_WG_DEFAULT_DATA_ROW_SLOTS,
   V091_PER_WG_FIRST_DATA_ROW,
   V091_UNASSIGNED_BUCKET_SHEET_NAME,
   V091_UNASSIGNED_BUCKET_WG_ID,
+  V091_WG_SHEET_PREFIX,
 } from './planWorkbookLayout'
-import { resolveAllSheetNames } from './v091SheetNames'
+import { classifyV091SheetName, resolveAllSheetNames } from './v091SheetNames'
 import {
   PS_BASE_SCOPE_ITEMS,
   PS_BASE_SCOPE_WORKSHEET_FIRST_ROW,
@@ -252,6 +255,153 @@ function dateToExcelSerial(d: Date): number {
   return (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000
 }
 
+/** Last 1-based data row on gold per-WG / per-Fleet scaffolds (rows 3–21 inclusive). */
+const V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED =
+  V091_PER_WG_FIRST_DATA_ROW + V091_PER_WG_DEFAULT_DATA_ROW_SLOTS - 1
+
+function extendOneSqrefRect(
+  rect: string,
+  lastDataRow: number,
+  scaffoldLast: number,
+  firstDataRow: number,
+): string {
+  const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(rect.trim())
+  if (!m) {
+    return rect
+  }
+  const c1 = m[1]!
+  const r1 = Number(m[2])
+  const c2 = m[3]!
+  const r2 = Number(m[4])
+  const top = Math.min(r1, r2)
+  const bottom = Math.max(r1, r2)
+  if (bottom !== scaffoldLast || top < firstDataRow) {
+    return rect
+  }
+  if (lastDataRow <= scaffoldLast) {
+    return rect
+  }
+  const colTop = r1 === top ? c1 : c2
+  const colBottom = r1 === bottom ? c1 : c2
+  return `${colTop}${top}:${colBottom}${lastDataRow}`
+}
+
+/**
+ * Widen `sqref` rectangles that cover the gold per-WG source scaffold
+ * (rows `firstDataRow`–`scaffoldLast`, typically 3–21) when the sheet has
+ * more source rows, so list validation and conditional formatting stay
+ * aligned with data.
+ */
+export function extendPerWgSourceBandSqrefAttribute(
+  sqref: string,
+  lastDataRow: number,
+  scaffoldLast: number = V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED,
+  firstDataRow: number = V091_PER_WG_FIRST_DATA_ROW,
+): string {
+  if (lastDataRow <= scaffoldLast) {
+    return sqref
+  }
+  const parts = sqref.trim().split(/\s+/).filter(Boolean)
+  return parts.map((p) => extendOneSqrefRect(p, lastDataRow, scaffoldLast, firstDataRow)).join(' ')
+}
+
+/** Apply {@link extendPerWgSourceBandSqrefAttribute} to worksheet `sqref` attrs under DV + CF. */
+export function extendPerWgWorksheetDataBandSqrefs(
+  worksheetXml: string,
+  lastDataRow: number,
+): string {
+  if (lastDataRow <= V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED) {
+    return worksheetXml
+  }
+  let xml = worksheetXml
+  xml = xml.replace(
+    /<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/gi,
+    (block) =>
+      block.replace(
+        /\bsqref="([^"]+)"/g,
+        (_a, sq: string) => `sqref="${extendPerWgSourceBandSqrefAttribute(sq, lastDataRow)}"`,
+      ),
+  )
+  xml = xml.replace(
+    /<conditionalFormatting\b([^>]*)\bsqref="([^"]+)"([^>]*)>/g,
+    (_full, before: string, sq: string, after: string) =>
+      `<conditionalFormatting${before}sqref="${extendPerWgSourceBandSqrefAttribute(
+        sq,
+        lastDataRow,
+      )}"${after}>`,
+  )
+  return xml
+}
+
+/**
+ * Read gold row {@link V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED} so appended
+ * source rows (22+) can reuse each column's `cellXf` index (`s=`) for borders
+ * and number formats.
+ */
+function extractPerWgScaffoldStyleTemplate(sheetXml: string): {
+  colToStyleId: Map<string, string>
+  rowTailAttrs: string
+} {
+  const rowNum = V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED
+  const colToStyleId = new Map<string, string>()
+  const rowRe = new RegExp(`<row\\s+r="${rowNum}"([^>]*)>([\\s\\S]*?)</row>`)
+  const rowM = rowRe.exec(sheetXml)
+  if (!rowM) {
+    return { colToStyleId, rowTailAttrs: '' }
+  }
+  const rowTailAttrs = rowM[1] ?? ''
+  const rowInner = rowM[2] ?? ''
+  const cellRe = /<c\s+([^>]*?)(\/>|>[\s\S]*?<\/c>)/g
+  let cm: RegExpExecArray | null
+  while ((cm = cellRe.exec(rowInner)) !== null) {
+    const attrs = cm[1]!
+    const addr = attr(attrs, 'r')
+    const s = attr(attrs, 's')
+    if (!addr || s == null || s === '') continue
+    const sp = splitAddr(addr)
+    if (!sp || sp.row !== rowNum) continue
+    colToStyleId.set(sp.col, s)
+  }
+  return { colToStyleId, rowTailAttrs }
+}
+
+/** Insert `<row r="rowNum">…</row>` after the nearest existing lower row (or before `</sheetData>`). */
+function insertNewDataRowAfterPrev(
+  sheetXml: string,
+  rowNum: number,
+  rowInnerXml: string,
+  rowTailAttrs: string,
+): string {
+  const rowOpen = `<row r="${rowNum}"${rowTailAttrs}>`
+  for (let prev = rowNum - 1; prev >= 1; prev -= 1) {
+    const prevRe = new RegExp(`<row\\s+r="${prev}"[^>]*>[\\s\\S]*?</row>`)
+    const m = prevRe.exec(sheetXml)
+    if (m) {
+      const at = m.index + m[0].length
+      return sheetXml.slice(0, at) + `${rowOpen}${rowInnerXml}</row>` + sheetXml.slice(at)
+    }
+  }
+  let bestIdx = -1
+  let bestR = Infinity
+  const nextRowRe = /<row\s+r="(\d+)"/g
+  let nm: RegExpExecArray | null
+  while ((nm = nextRowRe.exec(sheetXml)) !== null) {
+    const r = Number(nm[1])
+    if (r > rowNum && r < bestR) {
+      bestR = r
+      bestIdx = nm.index
+    }
+  }
+  if (bestIdx >= 0) {
+    return sheetXml.slice(0, bestIdx) + `${rowOpen}${rowInnerXml}</row>` + sheetXml.slice(bestIdx)
+  }
+  const sd = sheetXml.lastIndexOf('</sheetData>')
+  if (sd >= 0) {
+    return sheetXml.slice(0, sd) + `${rowOpen}${rowInnerXml}</row>` + sheetXml.slice(sd)
+  }
+  return sheetXml
+}
+
 /**
  * Insert overlay cells that don't exist in the gold sheet XML. Gold
  * frequently omits empty data cells entirely (no `<c>` element), so
@@ -261,11 +411,17 @@ function dateToExcelSerial(d: Date): number {
  *
  * `addresses` should be the list of overlay addresses that the cell-
  * rewrite pass did NOT visit (i.e. the cell was missing in gold). If
- * the row containing the address is itself missing in the sheet, we
- * skip it — the PS Use Case Worksheet always has every relevant row
- * defined, so this is defensive only.
+ * the row containing the address is itself missing (per-WG gold only
+ * defines rows 1–21 while the plan may have more than 19 sources), we
+ * append a new `<row r="…">` after the nearest lower row so every
+ * overlay cell round-trips. Rows **after** the gold per-WG scaffold
+ * reuse column `s=` (and optional row attrs) from the last scaffold
+ * data row so borders match. The PS Use Case Worksheet always defines
+ * its rows, so that path rarely uses this branch.
+ *
+ * Exported for Vitest (append-row path for per-WG >19 sources).
  */
-function insertMissingCells(
+export function insertMissingCells(
   sheetXml: string,
   missing: Array<[string, OverlayValue]>,
 ): string {
@@ -279,7 +435,9 @@ function insertMissingCells(
     byRow.get(a.row)!.push([addr, value])
   }
   let out = sheetXml
-  for (const [rowNum, cellsForRow] of byRow) {
+  const sortedRows = Array.from(byRow.entries()).sort((a, b) => a[0] - b[0])
+  const wgScaffoldTpl = extractPerWgScaffoldStyleTemplate(sheetXml)
+  for (const [rowNum, cellsForRow] of sortedRows) {
     // Sort overlay cells in alphabetical column order so a single
     // sequential splice produces a row that's already in the order
     // OOXML requires.
@@ -290,7 +448,19 @@ function insertMissingCells(
     })
     const rowRe = new RegExp(`<row\\s+r="${rowNum}"([^>]*)>([\\s\\S]*?)</row>`)
     const rowMatch = rowRe.exec(out)
-    if (!rowMatch) continue
+    if (!rowMatch) {
+      const useWgScaffoldStyles = rowNum > V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED
+      const rowTailAttrs = useWgScaffoldStyles ? wgScaffoldTpl.rowTailAttrs : ''
+      const parts: string[] = []
+      for (const [addr, value] of cellsForRow) {
+        const sp = splitAddr(addr)
+        const goldS =
+          useWgScaffoldStyles && sp ? wgScaffoldTpl.colToStyleId.get(sp.col) ?? null : null
+        parts.push(buildOverlayCellXml(addr, value, goldS))
+      }
+      out = insertNewDataRowAfterPrev(out, rowNum, parts.join(''), rowTailAttrs)
+      continue
+    }
     const rowAttrs = rowMatch[1]!
     const rowInner = rowMatch[2]!
     // Each insertion mutates `newInner`, so we re-scan it on every
@@ -389,11 +559,20 @@ function inlineStrBody(escapedValue: string, white: boolean): string {
   return `<is><t xml:space="preserve">${escapedValue}</t></is>`
 }
 
-function overlayCellsInSheet(
+/** @internal Exported for Vitest; prefer callers in this module for production. */
+export function overlayCellsInSheet(
   sheetXml: string,
   goldSharedStrings: string[],
   overlay: OverlayMap,
   whiteTextAddresses: ReadonlySet<string> = new Set(),
+  /**
+   * When true (per-WG / per-Fleet restore only): for overlay addresses on
+   * rows **after** {@link V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED} that
+   * gold never materialized, still emit empty `<c r="…" s="…"/>` cells so
+   * borders match the scaffold row. Without this, only non-empty columns
+   * get `<c>` elements on row 22+.
+   */
+  emitEmptyMissingCellsForPerWgRowsBeyondScaffold = false,
 ): string {
   const visited = new Set<string>()
   const cellRegex = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g
@@ -427,7 +606,17 @@ function overlayCellsInSheet(
   )
   const missing: Array<[string, OverlayValue]> = []
   for (const [addr, value] of overlay) {
-    if (!visited.has(addr) && value != null && value !== '') {
+    if (visited.has(addr)) {
+      continue
+    }
+    if (emitEmptyMissingCellsForPerWgRowsBeyondScaffold) {
+      const sp = splitAddr(addr)
+      if (sp && sp.row > V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED) {
+        missing.push([addr, value === '' || value == null ? null : value])
+        continue
+      }
+    }
+    if (value != null && value !== '') {
       missing.push([addr, value])
     }
   }
@@ -1539,6 +1728,20 @@ function applyPerimeterToSheet(
   return out
 }
 
+/**
+ * Mirror of the static reserved-name set the exporter passes to
+ * `resolveAllSheetNames`. Listed separately here (rather than
+ * imported from `v091ExportWorkbook`) to avoid pulling in the
+ * exporter's full dependency graph from the restore module.
+ */
+const PER_WG_RESERVED_STATIC_SHEET_NAMES: readonly string[] = [
+  'INSTRUCTIONS',
+  'PS Use Case Worksheet',
+  'Stream Overview',
+  'Edge Overview',
+  'input_data',
+] as const
+
 // ─── Per-WG / per-Fleet sheet restorer ─────────────────────────────────────
 
 /**
@@ -1675,6 +1878,58 @@ function perWgSheetOverlay(
 }
 
 /**
+ * Widen list validation + conditional-formatting `sqref` bands on each
+ * per-WG / per-Fleet sheet when the plan has more than 19 sources.
+ */
+async function extendPerWgSheetSourceBandSqrefs(zOut: JSZip, plan: PlanState): Promise<void> {
+  const outMap = await buildSheetNamePathMap(zOut)
+  const realWgs = plan.workerGroups.filter((w) => w.id !== V091_UNASSIGNED_BUCKET_WG_ID)
+  const finalNames = resolveAllSheetNames(realWgs, [
+    ...PER_WG_RESERVED_STATIC_SHEET_NAMES,
+    V091_UNASSIGNED_BUCKET_SHEET_NAME,
+  ])
+  if (plan.workerGroups.some((w) => w.id === V091_UNASSIGNED_BUCKET_WG_ID)) {
+    finalNames.set(V091_UNASSIGNED_BUCKET_WG_ID, V091_UNASSIGNED_BUCKET_SHEET_NAME)
+  }
+  const sheetToWgId = new Map<string, string>()
+  for (const [wgId, name] of finalNames) {
+    sheetToWgId.set(name, wgId)
+  }
+
+  for (const [sheetName, sheetPath] of outMap) {
+    const isPerWgSheet =
+      sheetName === V091_UNASSIGNED_BUCKET_SHEET_NAME ||
+      sheetName.startsWith(V091_WG_SHEET_PREFIX) ||
+      sheetName.startsWith(V091_FLEET_SHEET_PREFIX) ||
+      classifyV091SheetName(sheetName) !== null
+    if (!isPerWgSheet) {
+      continue
+    }
+    const wgId = sheetToWgId.get(sheetName)
+    if (!wgId) {
+      continue
+    }
+    const n = plan.sourceSummary.filter((s) => s.workerGroupId === wgId).length
+    const lastDataRow = Math.max(
+      V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED,
+      V091_PER_WG_FIRST_DATA_ROW + Math.max(0, n - 1),
+    )
+    if (lastDataRow <= V091_PER_WG_SCAFFOLD_LAST_DATA_ROW_1_BASED) {
+      continue
+    }
+    const f = zOut.file(sheetPath)
+    if (!f) {
+      continue
+    }
+    const xml = await f.async('string')
+    const patched = extendPerWgWorksheetDataBandSqrefs(xml, lastDataRow)
+    if (patched !== xml) {
+      zOut.file(sheetPath, patched)
+    }
+  }
+}
+
+/**
  * Restore every per-WG / per-Fleet sheet in the output zip from
  * gold. Same playbook as the other restorers:
  *
@@ -1741,7 +1996,13 @@ async function restorePerWgSheets(
     if (!outPath) return
     const goldXml = goldTemplates.get(scaffoldName)
     if (!goldXml) return
-    const patched = overlayCellsInSheet(goldXml, goldSharedStrings, overlay)
+    const patched = overlayCellsInSheet(
+      goldXml,
+      goldSharedStrings,
+      overlay,
+      new Set(),
+      true,
+    )
     zOut.file(outPath, patched)
   }
 
@@ -1795,20 +2056,6 @@ async function restorePerWgSheets(
     restoreOne(scaffoldName, scaffoldName, new Map())
   }
 }
-
-/**
- * Mirror of the static reserved-name set the exporter passes to
- * `resolveAllSheetNames`. Listed separately here (rather than
- * imported from `v091ExportWorkbook`) to avoid pulling in the
- * exporter's full dependency graph from the restore module.
- */
-const PER_WG_RESERVED_STATIC_SHEET_NAMES: readonly string[] = [
-  'INSTRUCTIONS',
-  'PS Use Case Worksheet',
-  'Stream Overview',
-  'Edge Overview',
-  'input_data',
-] as const
 
 // ─── input_data restorer ───────────────────────────────────────────────────
 
@@ -1977,4 +2224,5 @@ export async function restoreSheetsFromGold(
   await restoreOverviewSheet(zIn, zOut, plan, 'edge', EDGE_OVERVIEW_SPEC)
   await restoreInputDataSheet(zIn, zOut)
   await restorePerWgSheets(zIn, zOut, plan)
+  await extendPerWgSheetSourceBandSqrefs(zOut, plan)
 }

@@ -1122,6 +1122,22 @@ trimmed`** (raw) for iframe PUTs; `probeOpenAiKeyPresent` /
 `getOpenAiKeyForLocalDevOnly` use `normalizeOpenAiSecretFromKvPayload` so **legacy**
 JSON-quoted values still read correctly until the user re-saves the key.
 
+### AI assistant — `propose_plan_patch` allowlist
+
+The BYOL assistant’s **`propose_plan_patch`** tool ([`src/lib/aiAssistantOpenAi.ts`](./src/lib/aiAssistantOpenAi.ts) → [`src/lib/planPatchApply.ts`](./src/lib/planPatchApply.ts)) mutates **only** the in-browser `PlanState` after the user clicks **Apply**. It does **not** call Leader APIs or change tenant config.
+
+**Allowed operations (ordered `operations` array):**
+
+- `updateSourceField` — existing `sourceId`; fields: `blockers`, `avgDailyGb`, `additionalNotes`, `pipelineUsecase`.
+- `updateCseNotes` — plan-wide CSE notes string.
+- `addWorkerGroup` — `kind` `stream` | `edge`, `wg` display name; optional `parentFleetId` for **Edge sub-fleet** (parent must be a **top-level** Edge fleet).
+- `addSource` — `source` label; optional `sourceTile`; attach via `workerGroupId` or `workerGroupWg` (name match, case-insensitive); omit both for unassigned.
+- `setSourceWorkerGroup` — move an existing source by `sourceId` to a group (id or `workerGroupWg`).
+
+**Caps:** `MAX_PLAN_PATCH_OPS` (40) operations and `MAX_PLAN_PATCH_NEW_SOURCES` (30) `addSource` calls per proposal — see `planPatchApply.ts`. **No delete/rename** ops in this version.
+
+**Digest:** [`planDigest.ts`](./src/lib/planDigest.ts) includes each source row’s stable `id` and worker group `id` / `name` / `kind` (plus `parentFleetId` when set) so the model can target patches.
+
 ### `__local__` shell — BYOL OpenAI disabled
 
 When `CRIBL_APP_ID` is `__local__` or the page URL references `__local__` (e.g.

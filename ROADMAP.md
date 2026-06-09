@@ -51,6 +51,20 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ## Recently delivered
 
+### v2.3.1 (GitHub Release)
+
+Patch release: **export parity** for large per-WG source lists, plus **AI assistant** plan-patch behavior that should have shipped with the v2.3.0 assistant surface.
+
+- **Export (v0.9.1):** Per-`wg-*` / `fl-*` / unassigned-bucket sheets with **more than 19 sources** extend **data validation `sqref`** and **conditional formatting `sqref`** past gold row **21** (`extendPerWgSheetSourceBandSqrefs` after `restorePerWgSheets` in [`v091ExportSheetRestore.ts`](./src/lib/v091ExportSheetRestore.ts)).
+- **Export:** New data rows beyond the gold scaffold reuse **row 21 column `s=`** when inserting missing overlay cells (`insertMissingCells`).
+- **AI assistant — `propose_plan_patch`:** Allowlisted structural ops — **`addWorkerGroup`** (Stream / Edge; optional **`parentFleetId`** for Edge sub-fleet under a top-level parent), **`addSource`** (attach by `workerGroupId` or **`workerGroupWg`** name match; unassigned when both omitted), **`setSourceWorkerGroup`** — plus existing field updates; caps **`MAX_PLAN_PATCH_OPS`** / **`MAX_PLAN_PATCH_NEW_SOURCES`** ([`planPatchApply.ts`](./src/lib/planPatchApply.ts)). Tool schema + session prompts updated ([`aiAssistantOpenAi.ts`](./src/lib/aiAssistantOpenAi.ts)); higher **`MAX_TOOL_ROUNDS`** for multi-step chats.
+- **Plan digest:** Each source row includes stable **`id`**; Edge worker groups include **`parentFleetId`** when set; **`digestCoverage`** text documents patch capability ([`planDigest.ts`](./src/lib/planDigest.ts)).
+- **UI:** Pending-patch preview lists all op types with short labels and a cap + “more operations” tail ([`AiAssistantPanel.tsx`](./src/components/AiAssistantPanel.tsx)).
+- **Rollups:** [`workerGroupRollup.ts`](./src/lib/workerGroupRollup.ts) counts **every** source attached to a worker group for labels/nav (not only rows with parseable GB/day).
+- **Docs:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) — `propose_plan_patch` allowlist summary for operators.
+- **Tests:** Vitest for [`v091ExportSheetRestore.test.ts`](./src/lib/v091ExportSheetRestore.test.ts), [`planPatchApply.test.ts`](./src/lib/planPatchApply.test.ts), [`workerGroupRollup.test.ts`](./src/lib/workerGroupRollup.test.ts).
+- **Packaging:** Semver **2.3.1**; same `npm run package` / standalone build flow as v2.3.0.
+
 ### v2.3.0 (GitHub Release + local `docs/releases/v2.3.0.md` if maintained)
 
 - **Tenant import** from live Leader (`/master/groups` + routes per worker group) on **File → Import** when embedded in App Platform; **plan provenance** tracks `tenant` vs `xlsx` vs `scratch`.

@@ -6,7 +6,12 @@ import {
   postProcessExecutiveSummaryAiMarkdown,
   type ExecutiveSummaryAiBoldContext,
 } from './executiveSummaryAiMarkdownPost'
-import { validatePlanPatchProposal, type PlanPatchProposal } from './planPatchApply'
+import {
+  MAX_PLAN_PATCH_NEW_SOURCES,
+  MAX_PLAN_PATCH_OPS,
+  validatePlanPatchProposal,
+  type PlanPatchProposal,
+} from './planPatchApply'
 import type { PlanState } from '../types/planTypes'
 
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions'
@@ -56,7 +61,8 @@ Rules:
   - Documentation links exactly as they appear inside \`markdown_line\` strings from \`search_cribl_docs_llms\` (those lines are copied from Cribl's published llms.txt indexes at docs.cribl.io).
   For any other product URL, only use text the user pasted in chat.
 - When the user asks about **community packs**, **criblpacks**, or GitHub packs, call \`search_cribl_packs_github\` with focused keywords. When they ask about **product behavior**, **sources**, **destinations**, **Stream/Edge** setup, **release notes**, **known issues**, **App Platform** / packaged apps, or **official docs**, call \`search_cribl_docs_llms\` with keywords (and optional \`doc_areas\` — include \`known-issues\` or \`apps\` when relevant). The doc tool always loads the global docs index plus matching product indexes. You may call each tool multiple times with different queries.
-- **Plan edits:** When the user explicitly asks you to update workbook fields (blockers, notes, pipeline use case text, per-source GB/day, etc.), you may call \`propose_plan_patch\` with a short \`summary\` and an \`operations\` array. Only use allowlisted operations the tool schema describes. The app **never** applies changes automatically — the user must click **Apply** in the UI. If you are unsure or the request is out of scope, answer in prose instead of proposing a patch.
+- **Plan edits (\`propose_plan_patch\` — strict allowlist):** Allowed \`operations\` (see tool schema): \`updateSourceField\` (existing \`sourceId\`: blockers, avgDailyGb, additionalNotes, pipelineUsecase), \`updateCseNotes\`, \`addWorkerGroup\` (new Stream worker group or Edge fleet; optional \`parentFleetId\` for Edge **sub-fleet** under a **top-level** parent fleet), \`addSource\` (new row; attach with \`workerGroupId\` or \`workerGroupWg\` name match; omit both for unassigned), \`setSourceWorkerGroup\` (move existing source to a group by id or name). **Order matters:** e.g. \`addWorkerGroup\` before \`addSource\` rows that reference the new name. Caps: at most ${MAX_PLAN_PATCH_OPS} operations and ${MAX_PLAN_PATCH_NEW_SOURCES} \`addSource\` per proposal — split huge lists across multiple proposals if needed. **No deletes, no renames** of worker groups or sources via patch in this version. Nothing applies until the user clicks **Apply**. If the request is outside the allowlist, answer in prose (do not chain doc searches for bulk-adds you can express as patch ops).
+- **Plan edits (when in scope):** For bulk “add these collectors under fleet X”, prefer **one** \`propose_plan_patch\` with a short \`summary\` and an ordered \`operations\` array. Use \`workerGroupWg\` when the digest does not yet list the new group’s id. Optional \`sourceTile\` when you know the canonical tile id string; otherwise omit. If unsure about product facts, keep \`sourceTile\` empty. The app **never** applies automatically — user must click **Apply**.
 - Distinguish **built-in source types** (in the digest) from **optional community packs**; packs are not guaranteed to exist for every source.
 - Suggest next steps (workbook fields, Stream validation, questions for the customer) rather than generic filler.`
 
@@ -114,7 +120,7 @@ const PROPOSE_PLAN_PATCH_TOOL = {
   function: {
     name: 'propose_plan_patch',
     description:
-      'Propose allowlisted edits to the in-browser adoption plan (sources blockers/notes/pipeline use case/avg daily GB, or plan notes). The user must confirm in the UI — nothing applies automatically. Use only when the user asked for concrete plan updates you can express as patch operations.',
+      `Propose allowlisted edits to the in-browser adoption plan (user must click Apply). Allowed ops: updateSourceField on existing sourceId; updateCseNotes; addWorkerGroup (kind stream|edge, wg name, optional parentFleetId for Edge sub-fleet under top-level parent); addSource (source label, optional sourceTile, optional workerGroupId or workerGroupWg); setSourceWorkerGroup (sourceId + workerGroupId or workerGroupWg). Max ${MAX_PLAN_PATCH_OPS} ops and ${MAX_PLAN_PATCH_NEW_SOURCES} addSource per call. No deletes. Order ops so new groups appear before sources that attach by name.`,
     parameters: {
       type: 'object',
       properties: {
@@ -124,8 +130,7 @@ const PROPOSE_PLAN_PATCH_TOOL = {
         },
         operations: {
           type: 'array',
-          description:
-            'Each item: { op: "updateSourceField", sourceId, field, value } with field one of blockers | avgDailyGb | additionalNotes | pipelineUsecase; or { op: "updateCseNotes", value } for the plan-wide notes field.',
+          description: `Ordered array of ops (max ${MAX_PLAN_PATCH_OPS}). Examples: {"op":"addWorkerGroup","kind":"edge","wg":"test fleet"} then {"op":"addSource","source":"s3","workerGroupWg":"test fleet"}; {"op":"updateSourceField","sourceId":"…","field":"blockers","value":"…"}; {"op":"setSourceWorkerGroup","sourceId":"…","workerGroupWg":"WG1"}; {"op":"updateCseNotes","value":"…"}.`,
           items: { type: 'object', additionalProperties: true },
         },
       },
@@ -238,7 +243,8 @@ async function chatCompletionNoTools(messages: ChatMessage[]): Promise<{
   }
 }
 
-const MAX_TOOL_ROUNDS = 8
+/** OpenAI rounds (each round = one completion; may include multiple tool calls in one message). */
+const MAX_TOOL_ROUNDS = 14
 
 export type AdoptionAssistantMode =
   | 'plan'
@@ -263,7 +269,7 @@ export function adoptionAssistantSessionModeAppend(mode: AdoptionAssistantMode |
     return `\n\n**Session mode — Activation & PS:** Focus on the Adoption Planner **Activation** area: PS tier (Silver/Gold/Platinum or unset), base-scope progress counts, unlocked use-case slots, and how in-app scope maps to the worksheet. Use the **PS Use Case Worksheet — static canonical copy** and **App UI reference** in the system prompt for deliverable names, use-case kind definitions, and tab structure — do not claim those definitions are missing from context. Prefer digest fields for **customer-specific** progress; call doc tools only for **Cribl product PS packaging** beyond this template. Stay concise; suggest next fields to fill in the app.`
   }
   if (m === 'sources') {
-    return `\n\n**Session mode — Sources & ingest:** Prioritize the digest **sources** rows and **sourceVolumeSample** / ingest footprint: ranking by \`avgDailyGb\`, blockers, destinations, Stream vs Edge column, collection paths, and questions for the customer. Stress practical follow-ups and validation in Stream/Edge rather than generic product essays. Use pack/doc tools when the user needs external evidence; never fabricate URLs.`
+    return `\n\n**Session mode — Sources & ingest:** Prioritize the digest **sources** rows and **sourceVolumeSample** / ingest footprint: ranking by \`avgDailyGb\`, blockers, destinations, Stream vs Edge column, collection paths, and questions for the customer. Stress practical follow-ups and validation in Stream/Edge rather than generic product essays. Use pack/doc tools when the user needs **Cribl product** evidence; never fabricate URLs. **Bulk-add sources / fleets:** you may use \`propose_plan_patch\` with \`addWorkerGroup\` + \`addSource\` (see system prompt caps); use \`workerGroupWg\` to attach by fleet/WG display name. For full topology from a tenant or Excel, still prefer **File → Import**.`
   }
   if (m === 'executive') {
     return `\n\n**Session mode — Executive narrative:** Produce **short, customer-ready bullets** (headlines + tight sub-bullets). Use digest facts only for quantities and topology — no large markdown tables in chat, no invented metrics. If something is not in the digest, say it is unknown or suggest what to capture in the workbook. Complements the Executive tab; keep tone appropriate for CIO/IT leadership readouts.`
@@ -275,7 +281,7 @@ export function adoptionAssistantSessionModeAppend(mode: AdoptionAssistantMode |
     return `\n\n**Session mode — Import, export & gold template:** Explain **plan provenance**, import/export behavior, gold template parity, and what re-export is for — using the in-prompt **Adoption Plan — detailed user guide** and digest \`planProvenance\` / \`digestCoverage\`. Help the user explain round-trip Excel to customers. Defer live tenant truth to the customer; do not claim you changed files.`
   }
   if (m === 'patch_coach') {
-    return `\n\n**Session mode — Plan patch coach:** The user wants **controlled workbook edits**. After they clearly confirm **what** should change (which sources, which fields), prefer a single \`propose_plan_patch\` call with allowlisted operations and a short summary. If the request is ambiguous or out of scope for the tool schema, answer in prose and ask clarifying questions — do not guess patch ops. Remind them nothing applies until they click **Apply** in the UI.`
+    return `\n\n**Session mode — Plan patch coach:** Prefer **one** \`propose_plan_patch\` with ordered ops: structural adds (\`addWorkerGroup\`, \`addSource\`, \`setSourceWorkerGroup\`) and/or field updates (\`updateSourceField\`, \`updateCseNotes\`) — see system prompt for caps and sub-fleet rules. Ask at most **one** clarifying question if attach target or Stream vs Edge is truly ambiguous; otherwise patch with reasonable defaults (e.g. Edge fleet if they said “fleet”). Remind: nothing applies until **Apply**.`
   }
   return ''
 }
@@ -420,7 +426,9 @@ export async function runAdoptionAssistantChat(
     throw new Error('OpenAI returned an empty message.')
   }
 
-  throw new Error('Assistant stopped after too many tool rounds (max tool steps exceeded).')
+  throw new Error(
+    'Assistant stopped after too many tool rounds (max tool steps exceeded). Try a shorter question, split large **propose_plan_patch** batches across multiple Apply steps (see op caps in the system prompt), reduce doc/pack tool calls in one message, or use **File → Import** for full topology. Check your API key / network if failures repeat.',
+  )
 }
 
 const EXEC_SUMMARY_MODEL = 'gpt-4o-mini'

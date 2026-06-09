@@ -72,6 +72,7 @@ export function buildPlanDigestJson(plan: PlanState, options?: PlanDigestOptions
   const sources = plan.sourceSummary.slice(0, maxSourceRows).map((r, i) => {
     const wg = wgById.get(r.workerGroupId)
     const row: Record<string, unknown> = {
+      id: r.id,
       name: sourceLabel(r, i),
       wgId: r.workerGroupId,
       workerGroupKind: wg?.kind ?? 'unknown',
@@ -155,7 +156,7 @@ export function buildPlanDigestJson(plan: PlanState, options?: PlanDigestOptions
     customerName: (plan.customerName ?? '').trim(),
     planProvenance: prov,
     /** What this JSON includes / omits so the assistant can calibrate answers. */
-    digestCoverage: `Truncated snapshot for chat context — not a full cell-by-cell workbook. Activation: tier, slot-scope summary, base-scope completion counts (not each deliverable line). Sources: up to ${maxSourceRows} of ${plan.sourceSummary.length} rows with trimmed fields. Worker groups: summary fields only.`,
+    digestCoverage: `Truncated snapshot for chat context — not a full cell-by-cell workbook. Activation: tier, slot-scope summary, base-scope completion counts (not each deliverable line). Sources: up to ${maxSourceRows} of ${plan.sourceSummary.length} rows with trimmed fields (each row includes stable id for propose_plan_patch). Worker groups: id, kind, and summary fields (use id or name for patch ops). The assistant may propose structural adds (addWorkerGroup, addSource, setSourceWorkerGroup) and field updates via propose_plan_patch — see tool schema; caps apply.`,
     activationSummary,
     workerGroupMix: {
       streamWorkerGroups: workerGroupStreamCount,
@@ -168,15 +169,21 @@ export function buildPlanDigestJson(plan: PlanState, options?: PlanDigestOptions
       totalSources: plan.sourceSummary.length,
     },
     ingestFootprintGbPerDayApprox: roundedIngest,
-    workerGroups: plan.workerGroups.map((w) => ({
-      id: w.id,
-      name: (w.wg ?? '').trim() || w.id,
-      kind: w.kind,
-      ingestGbd: sliceStr(w.ingestGbd, 24),
-      egressGbd: sliceStr(w.egressGbd, 24),
-      workerCount: sliceStr(w.workerCount, 24),
-      workerHosting: sliceStr(w.workerHosting, 48),
-    })),
+    workerGroups: plan.workerGroups.map((w) => {
+      const o: Record<string, unknown> = {
+        id: w.id,
+        name: (w.wg ?? '').trim() || w.id,
+        kind: w.kind,
+        ingestGbd: sliceStr(w.ingestGbd, 24),
+        egressGbd: sliceStr(w.egressGbd, 24),
+        workerCount: sliceStr(w.workerCount, 24),
+        workerHosting: sliceStr(w.workerHosting, 48),
+      }
+      if (w.kind === 'edge' && (w.parentFleetId ?? '').trim()) {
+        o.parentFleetId = w.parentFleetId.trim()
+      }
+      return o
+    }),
     sources,
     sourceVolumeSample: volumeSample.some((o) => Object.keys(o).length > 0) ? volumeSample : undefined,
     cseNotesSnippet: sliceStr(plan.cseNotes, 450),
