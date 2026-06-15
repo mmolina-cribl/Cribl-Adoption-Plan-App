@@ -114,6 +114,9 @@ export function leaderWorkerGroupKind(g: MasterGroupItem): 'stream' | 'edge' {
 /** Max length for plan **Source** when built from Leader input `id` / `type`. */
 const MAX_SOURCE_NAME_CHARS = 200
 
+/** Suffix for Leader inputs with `disabled: true` — appended to **Source** for UI + Excel export. */
+const DISABLED_SOURCE_NAME_SUFFIX = ' disabled'
+
 /** Adoption plan **Source** label from a Leader input: always input **`id`**, else **`type`**. */
 function leaderInputSourceLabel(inp: LeaderInputItem): string {
   const id = inp.id?.trim() ?? ''
@@ -124,11 +127,22 @@ function leaderInputSourceLabel(inp: LeaderInputItem): string {
   return typ.slice(0, MAX_SOURCE_NAME_CHARS)
 }
 
+/**
+ * **Source** column for a synthetic import row. When `disabled` is true, the suffix
+ * {@link DISABLED_SOURCE_NAME_SUFFIX} is always applied (truncating the base id/type first
+ * so the full string stays within {@link MAX_SOURCE_NAME_CHARS}).
+ */
+function leaderInputSourceNameForPlan(inp: LeaderInputItem): string {
+  const base = leaderInputSourceLabel(inp).trimEnd()
+  if (!inp.disabled) {
+    return base.slice(0, MAX_SOURCE_NAME_CHARS)
+  }
+  const maxBase = Math.max(0, MAX_SOURCE_NAME_CHARS - DISABLED_SOURCE_NAME_SUFFIX.length)
+  return `${base.slice(0, maxBase)}${DISABLED_SOURCE_NAME_SUFFIX}`
+}
+
 function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputItem): SourceSummaryRow {
   const notes: string[] = []
-  if (inp.disabled) {
-    notes.push('Disabled on Leader')
-  }
   const leaderDesc = inp.description?.trim()
   if (leaderDesc) {
     notes.push(`Leader input description: ${leaderDesc}`)
@@ -136,7 +150,7 @@ function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputI
   return {
     id: newId(),
     workerGroupId,
-    source: leaderInputSourceLabel(inp),
+    source: leaderInputSourceNameForPlan(inp),
     securityOrObs: '',
     streamOrEdge: '',
     type: '',

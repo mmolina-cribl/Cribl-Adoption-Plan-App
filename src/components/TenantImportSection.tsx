@@ -119,7 +119,8 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           />
           <span>
             <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> (on by default). Uncheck if you use{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span> for collectors you still want listed.
+            <span className="font-mono text-cribl-ink/80">disabled: true</span> for collectors you still want listed — each included row gets{' '}
+            <span className="font-mono"> disabled</span> appended to <strong className="text-cribl-ink/85">Source</strong> (UI + Excel).
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
@@ -195,9 +196,10 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
                 <strong className="text-cribl-ink/85">Used:</strong> <span className="font-mono">id</span> (plan{' '}
                 <strong className="text-cribl-ink/85">Source</strong> name),{' '}
                 <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (when included, each input becomes one plan
-                source row; disabled rows get a note). With <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> on (default),
-                disabled inputs are not imported. <span className="font-mono">description</span> is kept in import debug JSON only — not copied
-                into the source name.
+                source row; <strong className="text-cribl-ink/85">disabled</strong> inputs get <span className="font-mono"> disabled</span>{' '}
+                appended to <strong className="text-cribl-ink/85">Source</strong> for UI and Excel). With{' '}
+                <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> on (default), disabled inputs are not imported.{' '}
+                <span className="font-mono">description</span> is kept in import debug JSON only — not copied into the source name.
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Dropped (today):</strong> all collector-specific fields (ports, hosts, URLs, auth,

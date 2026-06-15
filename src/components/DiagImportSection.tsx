@@ -112,7 +112,8 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
           />
           <span>
             <strong className="text-cribl-ink/85">Skip disabled inputs</strong> (on by default). Uncheck to include YAML entries with{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span>.
+            <span className="font-mono text-cribl-ink/80">disabled: true</span>. Those rows get <span className="font-mono"> disabled</span> appended
+            to the plan <strong className="text-cribl-ink/85">Source</strong> name (UI + Excel).
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
