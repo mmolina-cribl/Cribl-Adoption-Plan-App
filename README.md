@@ -56,6 +56,8 @@ and design history: [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewri
 
 ## Quick start
 
+**Installing on a Cribl tenant?** Use **[Install in Cribl and standalone distribution](#install-in-cribl-and-standalone-distribution)** below — the workspace **Apps → Install** flow must use **Import from file** with the release **`.tgz`**. **Import from git** and **Import from URL** are not supported for this app.
+
 **Prerequisites:** Node.js + npm (for building from source; **not** required for
 end users of a released `.html` or `.tgz`).
 
@@ -83,10 +85,13 @@ Without `window.CRIBL_API_URL`, the app uses **`localStorage`** for plan state
 
 ### Cribl App Platform (`.tgz`)
 
-1. From a tagged checkout, run **`npm run package`** (see [Build and release](#build-and-release)).
-2. In the Cribl workspace: **Settings → Apps → Install** (or your org’s flow).
-3. Upload **`build/adoption-plan-<version>.tgz`** (version comes from `package.json`). The same file is attached to **[GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)** for each tag — use **`adoption-plan-<version>.tgz`**, not GitHub’s auto **Source code (tar.gz)** (that archive is not a Cribl app pack).
-4. Open the app from **Apps**; plan state persists to **workspace KV**.
+In the Cribl workspace, open **Settings → Apps → Install** (or your org’s equivalent). In the install dialog, choose **Import from file** only — **Import from git** and **Import from URL** do **not** work for Adoption Plan (they fail with errors such as **app not found**).
+
+1. Download **`adoption-plan-<version>.tgz`** from **[GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)** for the version you want (direct link pattern: `…/releases/download/v<version>/adoption-plan-<version>.tgz`). Do **not** use GitHub’s auto-generated **Source code (tar.gz)** — that is not a Cribl app pack.
+2. In **Apps → Install**, select **Import from file** and upload that downloaded **`.tgz`**.
+3. Open the app from **Apps**; plan state persists to **workspace KV**.
+
+**Maintainers / CI:** To produce the same pack locally instead of downloading, use a tagged checkout and run **`npm run package`** (see [Build and release](#build-and-release)); the artifact is **`build/adoption-plan-<version>.tgz`** (version from `package.json`).
 
 ### Standalone HTML (customer handoff)
 
@@ -369,7 +374,7 @@ notes) to **GitHub Releases** or an internal wiki.
 
 | Symptom | What to check |
 | ------- | ------------- |
-| **Plan vanished after moving the `.html`** | `localStorage` is **path-scoped** under `file://`. Use **Export .xlsx** as the canonical save; re-import after moves. |
+| **“App not found” (or similar) when installing the pack** | Use **Settings → Apps → Install → Import from file** with **`adoption-plan-<version>.tgz`** from [Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases). Do **not** use **Import from git**, **Import from URL**, or GitHub’s **Source code** archive — those paths are not valid for this app. |
 | **Plan lost after reload in `__local__` shell** | **`__local__`** has no pack KV; storage can be unreliable. Use a **deployed** app for QA, or Export / Summary → workbook. [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) |
 | **“Not a supported workbook” on Import** | File must match v0.9.1 adoption shape (or legacy wg/fl names). Try a fresh export from this app. |
 | **No Import from live tenant** | Expected on standalone / dev without `CRIBL_API_URL` (Apps iframe feature). |

@@ -41,7 +41,7 @@ specific **Cribl product** semver, add or refresh the row in
 Before tagging a release that ships **`npm run package`**:
 
 1. Run **`npm run package`** from a clean tree (or at least after `npm run build`).
-2. Install the `.tgz` on a tenant (or unpack `static/` locally) and open the app **without** importing a workbook.
+2. On a tenant, install via **Settings → Apps → Install** using **Import from file** with the **`.tgz`** (see [`README.md`](./README.md#install-in-cribl-and-standalone-distribution) — **Import from git** / **Import from URL** do not work for this pack). Open the app **without** importing a workbook.
 3. Use **Export** in the sidebar (or **Summary → Download workbook**) and confirm a **styled** `.xlsx` downloads (gold template **`adoption-plan-empty.xlsx`** must sit beside **`index.html`** under `static/`; the app resolves it relative to the document URL).
 4. **File → Import** a known-good v0.9.1 export from the previous release, make a small edit, export again, and spot-check key sheets.
 5. Record outcomes in **`build/vX.Y.Z-release-notes.md`**.
@@ -57,7 +57,7 @@ Every **public GitHub release** must ship **both** installable artifacts (they a
 | **Cribl App Platform** `.tgz` | `npm run package` | **`build/adoption-plan-<version>.tgz`** |
 | **On‑prem standalone** HTML | `npm run build:standalone` | **`dist-standalone/cribl-adoption-plan.html`** |
 
-**Do not** point admins at GitHub’s auto-generated **Source code (tar.gz)** — that is a raw git archive, not the Cribl pack, and installs will fail with **app not found**.
+**Do not** point admins at GitHub’s auto-generated **Source code (tar.gz)** — that is a raw git archive, not the Cribl pack, and installs will fail with **app not found**. On the tenant, **Apps → Install** must use **Import from file** with **`adoption-plan-<version>.tgz`**; **Import from git** and **Import from URL** are not supported for this app even if the URL points at a release asset.
 
 After the tag exists (`gh release create …` or push tag), from a clean checkout **at that tag**:
 

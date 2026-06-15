@@ -1,5 +1,9 @@
 # Cribl App Platform Developer Guide
 
+## Installing this pack on a tenant
+
+Use **Settings → Apps → Install** and choose **Import from file** with the release **`adoption-plan-<version>.tgz`** from [GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases) (or a locally built copy from `npm run package`). **Import from git** and **Import from URL** are **not** supported for this app. See [**README** — Install in Cribl and standalone distribution](./README.md#install-in-cribl-and-standalone-distribution).
+
 ## Global Variables
 
 The following are set on `window` automatically when your app runs inside Cribl. They are read-only and always present.
