@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "package": "npm run build && node scripts/package.mjs"
+    "package": "npm run build && node scripts/package.mjs",
+    "release:upload-github-assets": "node scripts/upload-github-release-assets.mjs"
   },
   "dependencies": {
     "buffer": "^6.0.3",

@@ -85,7 +85,7 @@ Without `window.CRIBL_API_URL`, the app uses **`localStorage`** for plan state
 
 1. From a tagged checkout, run **`npm run package`** (see [Build and release](#build-and-release)).
 2. In the Cribl workspace: **Settings → Apps → Install** (or your org’s flow).
-3. Upload **`build/adoption-plan-<version>.tgz`** (version comes from `package.json`).
+3. Upload **`build/adoption-plan-<version>.tgz`** (version comes from `package.json`). The same file is attached to **[GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)** for each tag — use **`adoption-plan-<version>.tgz`**, not GitHub’s auto **Source code (tar.gz)** (that archive is not a Cribl app pack).
 4. Open the app from **Apps**; plan state persists to **workspace KV**.
 
 ### Standalone HTML (customer handoff)
@@ -114,6 +114,7 @@ file under the local `docs/` tree (see [Documentation](#documentation)).
 | `npm run build` | `tsc -b` + Vite production build (App Platform `dist/`) |
 | `npm run build:standalone` | `tsc -b` + single-file HTML under `dist-standalone/` |
 | `npm run package` | `npm run build` + `build/adoption-plan-<version>.tgz` |
+| `npm run release:upload-github-assets` | After `package` + `build:standalone`, uploads **`.tgz` + `.html`** to the GitHub release for the current `package.json` version (needs `gh`) |
 | `npm run lint` | ESLint |
 | `npm test` | Vitest (`vitest run`) |
 | `npm run preview` | Serve last production build locally |
@@ -140,9 +141,7 @@ The standalone build **inlines** `public/adoption-plan-empty.xlsx` (gold v0.9.1)
 as base64 at build time so Import/Export match the iframe behavior — **no**
 extra files beside the `.html`.
 
-**GitHub Release:** attach the standalone HTML from `npm run build:standalone`
-and release notes (GitHub Release body and/or local `docs/releases/`); see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md)
-for packaging checklist.
+**GitHub Release:** attach **`build/adoption-plan-<version>.tgz`** (from `npm run package`) **and** **`dist-standalone/cribl-adoption-plan.html`** (from `npm run build:standalone`). Use `npm run release:upload-github-assets` after the tag exists, or see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#release-checklist-github--release-assets). Do not use GitHub’s **Source code (tar.gz)** for Cribl installs.
 
 ---
 

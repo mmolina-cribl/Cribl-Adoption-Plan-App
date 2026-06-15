@@ -48,20 +48,39 @@ Before tagging a release that ships **`npm run package`**:
 
 ---
 
-## Release checklist (GitHub — on‑prem standalone HTML)
+## Release checklist (GitHub — release assets)
 
-On‑prem customers use the **single-file** build from GitHub, not the App Platform
-`.tgz`. Every **public GitHub release** they might hand to a customer **must**
-include the standalone artifact on the release page:
+Every **public GitHub release** must ship **both** installable artifacts (they are **not** in git — only produced by local builds):
 
-1. From a clean tree at the tagged commit, run **`npm run build:standalone`**
-   (output: **`dist-standalone/cribl-adoption-plan.html`** — see [`README.md`](./README.md#install-in-cribl-and-standalone-distribution)).
-2. Upload it to the GitHub release, for example:
-   `gh release upload vX.Y.Z dist-standalone/cribl-adoption-plan.html --repo <owner>/<repo>`
-   (use the same tag as the release).
+| Artifact | Command | Path |
+| -------- | ------- | ---- |
+| **Cribl App Platform** `.tgz` | `npm run package` | **`build/adoption-plan-<version>.tgz`** |
+| **On‑prem standalone** HTML | `npm run build:standalone` | **`dist-standalone/cribl-adoption-plan.html`** |
 
-`dist-standalone/` is gitignored; the HTML is **not** committed — it is only a
-build artifact and a **release asset**.
+**Do not** point admins at GitHub’s auto-generated **Source code (tar.gz)** — that is a raw git archive, not the Cribl pack, and installs will fail with **app not found**.
+
+After the tag exists (`gh release create …` or push tag), from a clean checkout **at that tag**:
+
+1. **`npm run package`** — creates the App `.tgz` under **`build/`** (same layout Cribl **Settings → Apps → Install** expects).
+2. **`npm run build:standalone`** — creates the single-file HTML under **`dist-standalone/`**.
+3. **Upload both** to the release (same tag name as `package.json` version, e.g. `v2.3.2`):
+
+   ```bash
+   npm run release:upload-github-assets
+   ```
+
+   Optional explicit tag: `node scripts/upload-github-release-assets.mjs v2.3.2`
+
+   Equivalent manual `gh` invocation:
+
+   ```bash
+   gh release upload vX.Y.Z \
+     build/adoption-plan-X.Y.Z.tgz \
+     dist-standalone/cribl-adoption-plan.html \
+     --clobber
+   ```
+
+`build/` and `dist-standalone/` are gitignored; these files are **release assets only**.
 
 ---
 
