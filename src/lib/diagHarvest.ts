@@ -8,6 +8,7 @@
  */
 import { parse as parseYaml } from 'yaml'
 import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult } from './tenantHarvest'
+import { isStockLeaderWorkerGroup } from './leaderStockGroups'
 import { extractTarGzArchive } from './diagTarGz'
 
 function isRecord(x: unknown): x is Record<string, unknown> {
@@ -207,15 +208,6 @@ function readGroupsMetaYml(files: Map<string, Uint8Array>, groupId: string): Par
   return {}
 }
 
-/** Cribl stock / template group dirs that often appear in diags with **no** per-group `inputs.yml`. */
-const STOCK_GROUP_IDS_NO_INPUTS = new Set([
-  'default',
-  'defaultHybrid',
-  'default_fleet',
-  'default_outpost',
-  'default_search',
-])
-
 function discoverGroupIds(files: Map<string, Uint8Array>): string[] {
   const ids = new Set<string>()
   for (const path of files.keys()) {
@@ -288,6 +280,10 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
 
   let skippedStock = 0
   for (const id of rawIds.sort()) {
+    if (isStockLeaderWorkerGroup({ id })) {
+      skippedStock += 1
+      continue
+    }
     const meta = readGroupsMetaYml(files, id)
     const g: MasterGroupItem = {
       id,
@@ -296,10 +292,6 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
       type: meta.type,
     }
     const inputs = collectInputsForGroup(files, id)
-    if (STOCK_GROUP_IDS_NO_INPUTS.has(id) && inputs.length === 0) {
-      skippedStock++
-      continue
-    }
     inputsByGroup[id] = inputs
     groups.push(g)
 
@@ -312,7 +304,7 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
 
   if (skippedStock > 0) {
     warnings.push(
-      `Skipped ${skippedStock} stock template group folder(s) (e.g. default / default_fleet) with no inputs.yml — these often appear from logs/state paths in diags.`,
+      `Skipped ${skippedStock} built-in Cribl group folder(s) (default / defaultHybrid / default_fleet / default_outpost) — not imported into the adoption plan.`,
     )
   }
 

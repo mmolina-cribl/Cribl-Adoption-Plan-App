@@ -82,8 +82,10 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
       <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
         Pick a Stream or Edge diagnostic archive (<span className="font-mono text-cribl-ink/90">.tar.gz</span> /{' '}
         <span className="font-mono text-cribl-ink/90">.tgz</span>) you already have on disk. We read configured **sources** from the bundle and
-        fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Everything
-        stays in your browser (nothing uploaded). For exact paths and limits, see{' '}
+        fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Built-in Cribl
+        group folders (<span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
+        <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>) are skipped so the plan lists customer
+        groups only. Everything stays in your browser (nothing uploaded). For exact paths and limits, see{' '}
         <span className="font-mono text-cribl-ink/90">docs/diag-import.md</span>.
       </p>
       <p className="m-0 mt-2 rounded-lg border border-cribl-border/80 bg-cribl-canvas/50 px-3 py-2 text-sm leading-relaxed text-cribl-muted">

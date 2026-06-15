@@ -90,7 +90,10 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
         <strong>configured sources</strong> per group from Leader{' '}
         <span className="font-mono">/m/&lt;group&gt;/system/inputs</span> (and <span className="font-mono">/inputs</span> fallback).
         Each input becomes one plan source row named by Leader input <span className="font-mono">id</span> (routing is not imported).
-        This replaces your current plan — validate in the editor before exporting.
+        Built-in Cribl groups (<span className="font-mono">default</span>,{' '}
+        <span className="font-mono">defaultHybrid</span>, <span className="font-mono">default_fleet</span>,{' '}
+        <span className="font-mono">default_outpost</span>) are skipped so the plan lists **customer-created** worker
+        groups only; stock inputs on those groups are not imported. This replaces your current plan — validate in the editor before exporting.
       </p>
       {isCriblLocalShell() ? (
         <p
@@ -125,7 +128,9 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Skipped entirely:</strong> Search-only groups (
-                <span className="font-mono">default_search</span>, <span className="font-mono">isSearch</span>).
+                <span className="font-mono">default_search</span>, <span className="font-mono">isSearch</span>) and Cribl stock groups (
+                <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
+                <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>).
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Not imported into plan rows (today):</strong> cloud region, ingest estimates,{' '}
