@@ -41,6 +41,20 @@ export type TenantHarvestResult = {
   warnings: HarvestWarning[]
 }
 
+/** Options for {@link harvestTenantTopology} and {@link harvestDiagBundle} (same shape). */
+export type TenantHarvestOptions = {
+  /**
+   * When `true`, omit Cribl stock worker groups (`default`, `defaultHybrid`, `default_fleet`, `default_outpost`).
+   * Default **`false`** — import those groups when customers run workloads there.
+   */
+  omitStockWorkerGroups?: boolean
+  /**
+   * When `true`, omit Leader inputs with `disabled: true`. Default **`true`** — fewer template rows;
+   * set `false` to import disabled inputs (each row still notes “Disabled on Leader”).
+   */
+  omitDisabledInputs?: boolean
+}
+
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
@@ -117,11 +131,20 @@ async function fetchInputsForGroup(groupId: string): Promise<LeaderInputItem[]> 
 
 /**
  * Read Stream / Edge worker-group inventory and **configured sources** (Leader inputs)
- * per group from the live Leader. Search-only groups (`default_search`, `isSearch`) and
- * Cribl **stock** groups (`default`, `defaultHybrid`, `default_fleet`, `default_outpost`) are skipped.
+ * per group from the live Leader. Search-only groups (`default_search`, `isSearch`) are always skipped.
+ *
+ * Optional {@link TenantHarvestOptions}:
+ * - **`omitStockWorkerGroups`** — omit built-in `default*` groups (default off).
+ * - **`omitDisabledInputs`** — omit `disabled` inputs (default on).
  */
-export async function harvestTenantTopology(signal?: AbortSignal): Promise<TenantHarvestResult> {
+export async function harvestTenantTopology(
+  signal?: AbortSignal,
+  options?: TenantHarvestOptions,
+): Promise<TenantHarvestResult> {
   const warnings: HarvestWarning[] = []
+  const omitStock = options?.omitStockWorkerGroups === true
+  const omitDisabled = options?.omitDisabledInputs !== false
+
   const data = await criblGetJson<{ items?: MasterGroupItem[] }>('/master/groups')
   if (signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError')
@@ -138,37 +161,52 @@ export async function harvestTenantTopology(signal?: AbortSignal): Promise<Tenan
     if (g.isSearch === true) {
       return false
     }
-    if (isStockLeaderWorkerGroup(g)) {
+    if (omitStock && isStockLeaderWorkerGroup(g)) {
       skippedStockGroups += 1
       return false
     }
     return true
   })
 
-  if (skippedStockGroups > 0) {
+  if (omitStock && skippedStockGroups > 0) {
     warnings.push(
-      `Skipped ${skippedStockGroups} built-in Cribl worker group(s) (default / defaultHybrid / default_fleet / default_outpost). Only customer-created groups are imported; stock groups still exist on the Leader.`,
+      `Omitted ${skippedStockGroups} built-in Cribl worker group(s) (default / defaultHybrid / default_fleet / default_outpost) per import option.`,
     )
   }
 
   if (groups.length === 0) {
-    warnings.push(
-      'No worker groups returned from /master/groups (after filtering Search and built-in default groups).',
-    )
+    if (omitStock && skippedStockGroups > 0) {
+      warnings.push(
+        'No worker groups remain after omitting built-in defaults — turn off that import option if your tenant uses those groups.',
+      )
+    } else {
+      warnings.push('No worker groups returned from /master/groups (after filtering Search groups).')
+    }
   }
 
   const inputsByGroup: Record<string, LeaderInputItem[]> = {}
+  let omittedDisabledInputs = 0
   for (const g of groups) {
     if (signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError')
     }
-    const inputs = await fetchInputsForGroup(g.id)
+    let inputs = await fetchInputsForGroup(g.id)
+    if (omitDisabled) {
+      omittedDisabledInputs += inputs.filter((i) => i.disabled).length
+      inputs = inputs.filter((i) => !i.disabled)
+    }
     inputsByGroup[g.id] = inputs
     if (inputs.length === 0) {
       warnings.push(
-        `No inputs (sources) returned for group "${g.id}" (tried /m/.../system/inputs and /m/.../inputs).`,
+        `No inputs (sources) returned for group "${g.id}" (tried /m/.../system/inputs and /m/.../inputs)${omitDisabled ? ' after skipping disabled inputs' : ''}.`,
       )
     }
+  }
+
+  if (omitDisabled && omittedDisabledInputs > 0) {
+    warnings.push(
+      `Omitted ${omittedDisabledInputs} disabled Leader input(s) per import option — uncheck “Skip disabled Leader inputs” to include them.`,
+    )
   }
 
   return { groups, inputsByGroup, warnings }

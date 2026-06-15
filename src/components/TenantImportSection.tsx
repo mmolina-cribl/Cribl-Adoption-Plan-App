@@ -4,6 +4,12 @@ import type { PlanState } from '../types/planTypes'
 import { PLAN_STORAGE_KEY } from '../hooks/usePlanStorage'
 import { clearImportShell } from '../lib/importShellStore'
 import { isCriblLocalShell, kvSet } from '../lib/kvStore'
+import {
+  readImportOmitDisabledInputs,
+  readImportOmitStockGroups,
+  writeImportOmitDisabledInputs,
+  writeImportOmitStockGroups,
+} from '../lib/importHarvestOptions'
 import { harvestTenantTopology } from '../lib/tenantHarvest'
 import { buildTenantImportDebugPayload, topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
 import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
@@ -28,6 +34,8 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
+  const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
+  const [skipDisabledInputs, setSkipDisabledInputs] = useState(readImportOmitDisabledInputs)
 
   const runHarvest = useCallback(async () => {
     setError(null)
@@ -36,7 +44,10 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
     setDebugCopyOk(false)
     setBusy(true)
     try {
-      const harvest = await harvestTenantTopology()
+      const harvest = await harvestTenantTopology(undefined, {
+        omitStockWorkerGroups: omitStockGroups,
+        omitDisabledInputs: skipDisabledInputs,
+      })
       const next = topologyHarvestToPlanState(harvest)
       const capturedAt = new Date().toISOString()
       const note =
@@ -60,7 +71,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
     } finally {
       setBusy(false)
     }
-  }, [setPlan])
+  }, [setPlan, omitStockGroups, skipDisabledInputs])
 
   if (!isInCriblIframe()) {
     return (
@@ -89,12 +100,48 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
         Discovers worker groups / fleets from <span className="font-mono">/master/groups</span> and lists{' '}
         <strong>configured sources</strong> per group from Leader{' '}
         <span className="font-mono">/m/&lt;group&gt;/system/inputs</span> (and <span className="font-mono">/inputs</span> fallback).
-        Each input becomes one plan source row named by Leader input <span className="font-mono">id</span> (routing is not imported).
-        Built-in Cribl groups (<span className="font-mono">default</span>,{' '}
-        <span className="font-mono">defaultHybrid</span>, <span className="font-mono">default_fleet</span>,{' '}
-        <span className="font-mono">default_outpost</span>) are skipped so the plan lists **customer-created** worker
-        groups only; stock inputs on those groups are not imported. This replaces your current plan — validate in the editor before exporting.
+        Each input becomes one plan source row named by Leader input <span className="font-mono">id</span> (routing is not imported). Use the
+        options below to trim built-in default groups or disabled inputs when you want a shorter adoption snapshot. This replaces your current
+        plan — validate in the editor before exporting.
       </p>
+      <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
+        <p className="m-0 text-xs font-medium text-cribl-ink/90">Import options</p>
+        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={skipDisabledInputs}
+            onChange={(e) => {
+              const v = e.target.checked
+              setSkipDisabledInputs(v)
+              writeImportOmitDisabledInputs(v)
+            }}
+          />
+          <span>
+            <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> (on by default). Uncheck if you use{' '}
+            <span className="font-mono text-cribl-ink/80">disabled: true</span> for collectors you still want listed.
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={omitStockGroups}
+            onChange={(e) => {
+              const v = e.target.checked
+              setOmitStockGroups(v)
+              writeImportOmitStockGroups(v)
+            }}
+          />
+          <span>
+            <strong className="text-cribl-ink/85">Omit built-in default worker groups</strong> (
+            <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
+            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Off by default — turn on when
+            those groups are only Cribl scaffolding and your workloads live in named groups.
+          </span>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>
+      </div>
       {isCriblLocalShell() ? (
         <p
           className="m-0 mt-2 rounded-lg border border-amber-200/90 bg-amber-50/90 px-3 py-2 text-xs leading-relaxed text-amber-950"
@@ -128,9 +175,11 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Skipped entirely:</strong> Search-only groups (
-                <span className="font-mono">default_search</span>, <span className="font-mono">isSearch</span>) and Cribl stock groups (
-                <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-                <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>).
+                <span className="font-mono">default_search</span>, <span className="font-mono">isSearch</span>).
+              </li>
+              <li>
+                <strong className="text-cribl-ink/85">Optional (import checkboxes):</strong> built-in default groups (
+                <span className="font-mono">default</span>, …) and disabled inputs — see options above.
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Not imported into plan rows (today):</strong> cloud region, ingest estimates,{' '}
@@ -145,8 +194,10 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
               <li>
                 <strong className="text-cribl-ink/85">Used:</strong> <span className="font-mono">id</span> (plan{' '}
                 <strong className="text-cribl-ink/85">Source</strong> name),{' '}
-                <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (each becomes one plan source row; disabled rows get a note).{' '}
-                <span className="font-mono">description</span> is kept in import debug JSON only — not copied into the source name.
+                <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (when included, each input becomes one plan
+                source row; disabled rows get a note). With <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> on (default),
+                disabled inputs are not imported. <span className="font-mono">description</span> is kept in import debug JSON only — not copied
+                into the source name.
               </li>
               <li>
                 <strong className="text-cribl-ink/85">Dropped (today):</strong> all collector-specific fields (ports, hosts, URLs, auth,

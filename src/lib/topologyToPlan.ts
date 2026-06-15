@@ -20,7 +20,7 @@ export type TenantImportDebugPayload = {
     displayLabel: string
     kind: 'stream' | 'edge'
     leaderInputsFetched: number
-    /** Plan source rows created from Leader inputs (includes disabled inputs). */
+    /** Plan source rows created from Leader inputs (after optional omit-disabled / omit-stock filters). */
     sourceRowsImported: number
   }>
   /** Raw Leader harvest (group metadata + inputs + warnings). */

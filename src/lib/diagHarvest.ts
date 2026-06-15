@@ -7,7 +7,7 @@
  * @see docs/diag-import.md
  */
 import { parse as parseYaml } from 'yaml'
-import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult } from './tenantHarvest'
+import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult, TenantHarvestOptions } from './tenantHarvest'
 import { isStockLeaderWorkerGroup } from './leaderStockGroups'
 import { extractTarGzArchive } from './diagTarGz'
 
@@ -245,8 +245,14 @@ function collectLeaderHomeScopeInputs(files: Map<string, Uint8Array>): LeaderInp
 /**
  * Parse a diagnostic bundle archive and return the same harvest shape as {@link harvestTenantTopology}.
  */
-export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<TenantHarvestResult> {
+export async function harvestDiagBundle(
+  archiveBytes: Uint8Array,
+  options?: TenantHarvestOptions,
+): Promise<TenantHarvestResult> {
   const warnings: string[] = []
+  const omitStock = options?.omitStockWorkerGroups === true
+  const omitDisabled = options?.omitDisabledInputs !== false
+
   const files = await extractTarGzArchive(archiveBytes)
   if (files.size === 0) {
     return {
@@ -257,7 +263,21 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
   }
 
   const rawIds = discoverGroupIds(files)
-  const leaderScopeInputs = collectLeaderHomeScopeInputs(files)
+  const leaderScopeRaw = collectLeaderHomeScopeInputs(files)
+
+  if (rawIds.length === 0 && leaderScopeRaw.length === 0) {
+    warnings.push(
+      'No worker-group config paths (`groups/<id>/local/` or `groups/<id>/default/`) and no Leader-scope `local/cribl/inputs.yml` — is this a Cribl Stream/Edge diagnostic bundle, or were configs excluded from the diag?',
+    )
+    return { groups: [], inputsByGroup: {}, warnings }
+  }
+
+  let omittedDisabledInputs = 0
+  let leaderScopeInputs = leaderScopeRaw
+  if (omitDisabled) {
+    omittedDisabledInputs += leaderScopeRaw.filter((i) => i.disabled).length
+    leaderScopeInputs = leaderScopeRaw.filter((i) => !i.disabled)
+  }
 
   const groups: MasterGroupItem[] = []
   const inputsByGroup: Record<string, LeaderInputItem[]> = {}
@@ -271,16 +291,9 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
     inputsByGroup[LEADER_GLOBAL_LEADER_ID] = leaderScopeInputs
   }
 
-  if (rawIds.length === 0 && leaderScopeInputs.length === 0) {
-    warnings.push(
-      'No worker-group config paths (`groups/<id>/local/` or `groups/<id>/default/`) and no Leader-scope `local/cribl/inputs.yml` — is this a Cribl Stream/Edge diagnostic bundle, or were configs excluded from the diag?',
-    )
-    return { groups: [], inputsByGroup: {}, warnings }
-  }
-
   let skippedStock = 0
   for (const id of rawIds.sort()) {
-    if (isStockLeaderWorkerGroup({ id })) {
+    if (omitStock && isStockLeaderWorkerGroup({ id })) {
       skippedStock += 1
       continue
     }
@@ -291,20 +304,30 @@ export async function harvestDiagBundle(archiveBytes: Uint8Array): Promise<Tenan
       isFleet: meta.isFleet,
       type: meta.type,
     }
-    const inputs = collectInputsForGroup(files, id)
+    let inputs = collectInputsForGroup(files, id)
+    if (omitDisabled) {
+      omittedDisabledInputs += inputs.filter((i) => i.disabled).length
+      inputs = inputs.filter((i) => !i.disabled)
+    }
     inputsByGroup[id] = inputs
     groups.push(g)
 
     if (inputs.length === 0) {
       warnings.push(
-        `No inputs parsed for group "${id}" (looked for local/default cribl/inputs.yml and inputs/*.yml under groups/).`,
+        `No inputs parsed for group "${id}" (looked for local/default cribl/inputs.yml and inputs/*.yml under groups/)${omitDisabled ? ' after skipping disabled inputs' : ''}.`,
       )
     }
   }
 
-  if (skippedStock > 0) {
+  if (omitStock && skippedStock > 0) {
     warnings.push(
-      `Skipped ${skippedStock} built-in Cribl group folder(s) (default / defaultHybrid / default_fleet / default_outpost) — not imported into the adoption plan.`,
+      `Omitted ${skippedStock} built-in Cribl group folder(s) (default / defaultHybrid / default_fleet / default_outpost) per import option.`,
+    )
+  }
+
+  if (omitDisabled && omittedDisabledInputs > 0) {
+    warnings.push(
+      `Omitted ${omittedDisabledInputs} disabled input(s) from the bundle per import option — uncheck “Skip disabled Leader inputs” to include them.`,
     )
   }
 

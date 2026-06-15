@@ -4,6 +4,12 @@ import { PLAN_STORAGE_KEY } from '../hooks/usePlanStorage'
 import { clearImportShell } from '../lib/importShellStore'
 import { kvSet } from '../lib/kvStore'
 import { harvestDiagBundle } from '../lib/diagHarvest'
+import {
+  readImportOmitDisabledInputs,
+  readImportOmitStockGroups,
+  writeImportOmitDisabledInputs,
+  writeImportOmitStockGroups,
+} from '../lib/importHarvestOptions'
 import { buildTenantImportDebugPayload, topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
 import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
 
@@ -27,6 +33,8 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
   const [pendingFile, setPendingFile] = useState<Uint8Array | null>(null)
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
+  const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
+  const [skipDisabledInputs, setSkipDisabledInputs] = useState(readImportOmitDisabledInputs)
 
   const runImport = useCallback(
     async (bytes: Uint8Array) => {
@@ -36,7 +44,10 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
       setDebugCopyOk(false)
       setBusy(true)
       try {
-        const harvest = await harvestDiagBundle(bytes)
+        const harvest = await harvestDiagBundle(bytes, {
+          omitStockWorkerGroups: omitStockGroups,
+          omitDisabledInputs: skipDisabledInputs,
+        })
         const next = topologyHarvestToPlanState(harvest)
         const capturedAt = new Date().toISOString()
         const note =
@@ -58,7 +69,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
         setBusy(false)
       }
     },
-    [setPlan],
+    [setPlan, omitStockGroups, skipDisabledInputs],
   )
 
   return (
@@ -82,12 +93,47 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
       <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
         Pick a Stream or Edge diagnostic archive (<span className="font-mono text-cribl-ink/90">.tar.gz</span> /{' '}
         <span className="font-mono text-cribl-ink/90">.tgz</span>) you already have on disk. We read configured **sources** from the bundle and
-        fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Built-in Cribl
-        group folders (<span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-        <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>) are skipped so the plan lists customer
-        groups only. Everything stays in your browser (nothing uploaded). For exact paths and limits, see{' '}
-        <span className="font-mono text-cribl-ink/90">docs/diag-import.md</span>.
+        fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Use the
+        import options below to omit built-in default group folders or disabled inputs when you want a shorter snapshot. Everything stays in your
+        browser (nothing uploaded). For exact paths and limits, see <span className="font-mono text-cribl-ink/90">docs/diag-import.md</span>.
       </p>
+      <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
+        <p className="m-0 text-xs font-medium text-cribl-ink/90">Import options</p>
+        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={skipDisabledInputs}
+            onChange={(e) => {
+              const v = e.target.checked
+              setSkipDisabledInputs(v)
+              writeImportOmitDisabledInputs(v)
+            }}
+          />
+          <span>
+            <strong className="text-cribl-ink/85">Skip disabled inputs</strong> (on by default). Uncheck to include YAML entries with{' '}
+            <span className="font-mono text-cribl-ink/80">disabled: true</span>.
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={omitStockGroups}
+            onChange={(e) => {
+              const v = e.target.checked
+              setOmitStockGroups(v)
+              writeImportOmitStockGroups(v)
+            }}
+          />
+          <span>
+            <strong className="text-cribl-ink/85">Omit built-in default group folders</strong> (
+            <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
+            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Off by default.
+          </span>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>
+      </div>
       <p className="m-0 mt-2 rounded-lg border border-cribl-border/80 bg-cribl-canvas/50 px-3 py-2 text-sm leading-relaxed text-cribl-muted">
         <strong className="text-cribl-ink/90">Cribl.Cloud:</strong> diagnostics run from the <strong className="text-cribl-ink/90">Leader</strong>, not as
         separate <strong className="text-cribl-ink/90">per-worker / per-node</strong> bundles from the Workers UI the way you often can on self-managed
