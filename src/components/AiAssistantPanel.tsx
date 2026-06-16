@@ -407,12 +407,12 @@ export function AiAssistantPanel({ plan, setPlan }: Props) {
     try {
       const ls = getSafeLocalStorage()
       if (!ls) {
-        return false
+        return true
       }
-      // Persisted `'1'` = user collapsed the rail; missing/`'0'` = expanded (default).
-      return ls.getItem(COLLAPSE_STORAGE_KEY) === '1'
+      // Persisted `'0'` = user expanded the rail; missing or `'1'` = collapsed (default).
+      return ls.getItem(COLLAPSE_STORAGE_KEY) !== '0'
     } catch {
-      return false
+      return true
     }
   })
   const [input, setInput] = useState('')

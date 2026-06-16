@@ -42,6 +42,7 @@ import {
 } from '../types/planTypes'
 import { assignWorkerGroupIds } from './workerGroupIds'
 import { buildSourceSummaryColumnMap, findColumnIndexByHeader } from './sourceSummaryColumnMap'
+import { sourceNameImpliesAttachmentDisabled } from './sourceAttachmentDisabled'
 import { isWorkerSectionTitleRow, rowIsEffectivelyEmptyForTopo } from './topologySheetLayout'
 import { buildTopologyColumnMap, buildWorkerColumnMap } from './topologyWorkbookMap'
 import { classifyV091SheetName } from './v091SheetNames'
@@ -220,11 +221,12 @@ function parseSourceSummarySheet(
     // both alias the same `physicalLocations` field on the import column map,
     // so this single read picks up whichever header the workbook uses.
     const physical = strAtMap(row, col, 'Physical location(s)') || strAtMap(row, col, 'Region(s)')
+    const sourceStr = strAtMap(row, col, 'Source')
     out.push({
       ...base,
       id: newId(),
       workerGroupId: defaultWorkerGroupId,
-      source: strAtMap(row, col, 'Source'),
+      source: sourceStr,
       securityOrObs: strAtMap(row, col, 'Security or Observability or both data?'),
       streamOrEdge: strAtMap(row, col, 'Stream or Edge?'),
       type: normalizeVolumeType(tRaw) as SourceSummaryRow['type'],
@@ -255,6 +257,7 @@ function parseSourceSummarySheet(
       onboardingEffort: strAtMap(row, col, 'Onboarding Effort'),
       politics: strAtMap(row, col, 'Politics'),
       additionalNotes: strAtMap(row, col, 'Additional notes'),
+      leaderImportedDisabled: sourceNameImpliesAttachmentDisabled(sourceStr) ? true : undefined,
       // The v0.8.6 schema's `Display name` column is the only one we
       // intentionally drop on import — every other gold column round-trips
       // through `SourceSummaryRow`. v0.9.1 reinstated `Additional notes`

@@ -28,17 +28,13 @@ export function writeImportOmitStockGroups(value: boolean): void {
   }
 }
 
-/** When true, Leader inputs with `disabled: true` are not harvested. Default true. */
+/** When true, Leader inputs with `disabled: true` are not harvested. Default true (UI “Include…” unchecked). Persisted `'0'` means include them. */
 export function readImportOmitDisabledInputs(): boolean {
   const ls = getSafeLocalStorage()
   if (!ls) {
     return true
   }
-  const v = ls.getItem(LS_OMIT_DISABLED)
-  if (v === '0') {
-    return false
-  }
-  return true
+  return ls.getItem(LS_OMIT_DISABLED) !== '0'
 }
 
 export function writeImportOmitDisabledInputs(value: boolean): void {

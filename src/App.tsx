@@ -32,6 +32,7 @@ import type { DropPosition } from './lib/useDragReorder'
 import { deriveStreamOrEdge } from './lib/workerGroupIds'
 import { parseGb } from './lib/formatRate'
 import { sumAvgDailyFromSourceSummaryForWg } from './lib/workerGroupRollup'
+import { isSourceRowAttachmentDisabled } from './lib/sourceAttachmentDisabled'
 import type { MainView } from './components/navTypes'
 import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
@@ -46,6 +47,10 @@ import {
 } from './types/planTypes'
 import { fetchAdoptionPlanEmptyBufferIfMissing } from './lib/adoptionPlanTemplateExport'
 import { hydrateImportShell } from './lib/importShellStore'
+import {
+  readShowDisabledSourcesInLists,
+  writeShowDisabledSourcesInLists,
+} from './lib/showDisabledSourcesPreference'
 
 type PostAddFlow = null | { kind: 'choice'; sourceDisplayName: string } | { kind: 'wizard' }
 
@@ -107,6 +112,14 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   const [confirmRemoveWorkerGroupId, setConfirmRemoveWorkerGroupId] = useState<string | null>(null)
   const [confirmRemoveSourceId, setConfirmRemoveSourceId] = useState<string | null>(null)
   const [postAdd, setPostAdd] = useState<PostAddFlow>(null)
+  const [showDisabledSourcesInLists, setShowDisabledSourcesInListsState] = useState(
+    readShowDisabledSourcesInLists,
+  )
+
+  const setShowDisabledSourcesInLists = useCallback((show: boolean) => {
+    setShowDisabledSourcesInListsState(show)
+    writeShowDisabledSourcesInLists(show)
+  }, [])
 
   useEffect(() => {
     void hydrateImportShell()
@@ -215,6 +228,13 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
       const target = p.sourceSummary.find((r) => r.id === id)
       if (!target) {
         return p
+      }
+      if (isSourceRowAttachmentDisabled(target)) {
+        const wantAttachOrMove =
+          newWorkerGroupId != null && String(newWorkerGroupId).trim() !== ''
+        if (wantAttachOrMove) {
+          return p
+        }
       }
       const newId = newWorkerGroupId ?? ''
       if ((target.workerGroupId || '') === newId) {
@@ -551,11 +571,28 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
         if (!cur) {
           return p
         }
+        if (k === 'workerGroupId' && isSourceRowAttachmentDisabled(cur)) {
+          const nextId = typeof v === 'string' ? v.trim() : ''
+          const curId = (cur.workerGroupId || '').trim()
+          if (nextId !== '' && nextId !== curId) {
+            return p
+          }
+        }
         return {
           ...p,
-          sourceSummary: p.sourceSummary.map((r) =>
-            r.id === id ? { ...r, [k]: v } : r,
-          ),
+          sourceSummary: p.sourceSummary.map((r) => {
+            if (r.id !== id) return r
+            const patch = { ...r, [k]: v } as SourceSummaryRow
+            if (
+              k === 'workerGroupId' &&
+              isSourceRowAttachmentDisabled(cur) &&
+              typeof v === 'string' &&
+              v.trim() === ''
+            ) {
+              return { ...patch, streamOrEdge: '' }
+            }
+            return patch
+          }),
         }
       })
     },
@@ -902,6 +939,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 <SourcesIndexView
                   plan={plan}
                   setPlan={setPlan}
+                  showDisabledSourcesInLists={showDisabledSourcesInLists}
+                  onShowDisabledSourcesInListsChange={setShowDisabledSourcesInLists}
                   onOpenSource={(id) => {
                     setActiveSourceId(id)
                     setMainView('source')
@@ -920,6 +959,8 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   setPlan={setPlan}
                   row={activeRow}
                   sourceIndex={sourceIndex >= 0 ? sourceIndex : 0}
+                  showDisabledSourcesInLists={showDisabledSourcesInLists}
+                  onShowDisabledSourcesInListsChange={setShowDisabledSourcesInLists}
                   onOpenGuidedTour={() => setPostAdd({ kind: 'wizard' })}
                   guidedEntryOpen={postAdd?.kind === 'wizard'}
                   onExitGuidedEntry={() => setPostAdd(null)}

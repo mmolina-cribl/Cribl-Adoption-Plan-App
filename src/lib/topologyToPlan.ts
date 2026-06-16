@@ -4,6 +4,7 @@ import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult } from './te
 import { assignWorkerGroupIds } from './workerGroupIds'
 import { inferSourceTileFromLeaderInput } from './leaderInputToSourceTile'
 import { leaderWorkerGroupDetailFromMetrics, leaderWorkerHostingFromCloud } from './leaderWorkerGroupMetrics'
+import { DISABLED_SOURCE_NAME_SUFFIX } from './sourceAttachmentDisabled'
 
 /** Serializable snapshot of the last successful “Import from live tenant” run (for support / QA). */
 export type TenantImportDebugPayload = {
@@ -20,7 +21,7 @@ export type TenantImportDebugPayload = {
     displayLabel: string
     kind: 'stream' | 'edge'
     leaderInputsFetched: number
-    /** Plan source rows created from Leader inputs (after optional omit-disabled / omit-stock filters). */
+    /** Plan source rows created from Leader inputs (after optional omit-stock / skip-disabled filters). */
     sourceRowsImported: number
   }>
   /** Raw Leader harvest (group metadata + inputs + warnings). */
@@ -114,9 +115,6 @@ export function leaderWorkerGroupKind(g: MasterGroupItem): 'stream' | 'edge' {
 /** Max length for plan **Source** when built from Leader input `id` / `type`. */
 const MAX_SOURCE_NAME_CHARS = 200
 
-/** Suffix for Leader inputs with `disabled: true` — appended to **Source** for UI + Excel export. */
-const DISABLED_SOURCE_NAME_SUFFIX = ' disabled'
-
 /** Adoption plan **Source** label from a Leader input: always input **`id`**, else **`type`**. */
 function leaderInputSourceLabel(inp: LeaderInputItem): string {
   const id = inp.id?.trim() ?? ''
@@ -181,6 +179,7 @@ function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputI
     onboardingEffort: '',
     politics: '',
     additionalNotes: notes.join(' · '),
+    leaderImportedDisabled: Boolean(inp.disabled),
   }
 }
 

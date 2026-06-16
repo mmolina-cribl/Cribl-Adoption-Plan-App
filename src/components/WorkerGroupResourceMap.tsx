@@ -11,6 +11,7 @@ import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { CHART_CRIBL_BLUE, CHART_CRIBL_EDGE_BLUE } from '../lib/chartColors'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
+import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
 
 /**
  * Kind-aware UI copy used inside the resource map. Fleets and worker
@@ -126,6 +127,10 @@ export function WorkerGroupResourceMap({
   className,
 }: Props) {
   const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
+  const unassignedAttachmentDisabledIds = useMemo(
+    () => new Set(unassignedSources.filter(isSourceRowAttachmentDisabled).map((r) => r.id)),
+    [unassignedSources],
+  )
   /**
    * Edge fleets get a lighter sky-blue palette across the entire
    * resource map (hub box, connector strokes, source-row icon accents,
@@ -199,9 +204,10 @@ export function WorkerGroupResourceMap({
   const beginDragFromAnchor = useCallback(
     (sourceId: string, anchor: Point) => {
       if (!interactive) return
+      if (unassignedAttachmentDisabledIds.has(sourceId)) return
       setDrag({ sourceId, anchor, cursor: anchor, overHub: false })
     },
-    [interactive],
+    [interactive, unassignedAttachmentDisabledIds],
   )
 
   const setSourceRef = useCallback((id: string, el: HTMLDivElement | null) => {
@@ -1217,7 +1223,7 @@ function UnassignedSection({
               <span className="shrink-0 rounded-md bg-cribl-card-body px-1.5 py-0.5 text-[11px] tabular-nums text-cribl-ink/80">
                 {volStr}
               </span>
-              {interactive ? (
+              {interactive && !isSourceRowAttachmentDisabled(r) ? (
                 <button
                   type="button"
                   aria-label={`Drag onto ${workerGroupName} to attach this source`}

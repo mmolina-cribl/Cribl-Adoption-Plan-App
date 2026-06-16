@@ -17,6 +17,7 @@ import {
   type DragReorder,
   type DropPosition,
 } from '../lib/useDragReorder'
+import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
 
 const itemBase =
   'w-full text-left text-sm font-medium transition rounded-lg px-3 py-2.5 border-l-2'
@@ -423,6 +424,7 @@ function SourceRowRail({
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const label = sourceLabel(row, index)
+  const attachmentDisabled = isSourceRowAttachmentDisabled(row)
   const nameKey = label.trim().toLowerCase()
   const tile = row.sourceTile?.trim()
   const src = row.source?.trim()
@@ -475,7 +477,9 @@ function SourceRowRail({
           'flex min-w-0 items-stretch overflow-hidden rounded-lg border transition',
           isActive
             ? 'border-cribl-primary bg-white shadow-sm'
-            : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
+            : attachmentDisabled
+              ? 'border-cribl-border/60 bg-cribl-card-body/40 opacity-90'
+              : 'border-cribl-border/80 bg-white/50 hover:border-cribl-border',
           isDragging ? 'opacity-50' : '',
         ].join(' ')}
       >
@@ -515,12 +519,20 @@ function SourceRowRail({
         <button
           type="button"
           onClick={onSelect}
-          className="flex min-w-0 flex-1 items-start gap-2 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium text-cribl-ink"
+          className={[
+            'flex min-w-0 flex-1 items-start gap-2 border-0 bg-transparent px-3 py-2 text-left text-sm font-medium',
+            attachmentDisabled ? 'text-cribl-muted' : 'text-cribl-ink',
+          ].join(' ')}
         >
           <KindDot kind={workerGroupKind} className="mt-1.5 shrink-0" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate">
-              {label}
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="block truncate">{label}</span>
+              {attachmentDisabled ? (
+                <span className="shrink-0 rounded-md border border-cribl-border/80 bg-cribl-card-body px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cribl-muted">
+                  Disabled
+                </span>
+              ) : null}
               {workerGroupName ? (
                 <span className="ml-1.5 text-xs font-normal text-cribl-muted">
                   · {workerGroupName}
@@ -957,9 +969,12 @@ export function PlanSidebarRail({
   const streamWgs = plan.workerGroups.filter((w) => w.kind === 'stream')
   const fleetWgs = plan.workerGroups.filter((w) => w.kind === 'edge')
   const canRemoveWg = plan.workerGroups.length > 0
-  const sources = plan.sourceSummary
-  const canRemove = sources.length > 0
-  const noSources = sources.length === 0
+  const allSources = plan.sourceSummary
+  const disabledSourceCount = allSources.filter(isSourceRowAttachmentDisabled).length
+  /** Left nav always omits sources disabled for attachment (see Sources index / source detail to include them). */
+  const sources = allSources.filter((r) => !isSourceRowAttachmentDisabled(r))
+  const canRemove = allSources.length > 0
+  const noSources = allSources.length === 0
   const [wgListOpen, setWgListOpen] = useState(true)
   const [fleetListOpen, setFleetListOpen] = useState(true)
   const [sourcesListOpen, setSourcesListOpen] = useState(true)
@@ -1099,13 +1114,13 @@ export function PlanSidebarRail({
         >
           <span className="flex items-center gap-2">
             <span>Sources</span>
-            {sources.length > 0 ? (
-              <span className="text-xs font-normal text-cribl-muted">({sources.length})</span>
+            {allSources.length > 0 ? (
+              <span className="text-xs font-normal text-cribl-muted">({allSources.length})</span>
             ) : null}
           </span>
         </NavButton>
         <NavSectionSortButtons
-          visible={sources.length > 1 && Boolean(onReorderSources)}
+          visible={allSources.length > 1 && Boolean(onReorderSources)}
           onAlphabetical={onSortSourcesAlphabetically}
           alphaAscTitle="Sort sources A–Z by name"
           alphaDescTitle="Sort sources Z–A by name"
@@ -1114,7 +1129,7 @@ export function PlanSidebarRail({
           ingestDescTitle="Sort sources by average daily volume (GB) on each row, heaviest first"
           ingestAscTitle="Sort sources by average daily volume (GB) on each row, lightest first"
         />
-        {sources.length > 0 ? (
+        {allSources.length > 0 ? (
           <ChevronToggle
             open={sourcesListOpen}
             onClick={() => setSourcesListOpen((v) => !v)}
@@ -1124,18 +1139,35 @@ export function PlanSidebarRail({
       </div>
       <AnimatedCollapse open={sourcesListOpen}>
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
-          {sources.map((r, i) => {
+          {disabledSourceCount > 0 ? (
+            <p
+              className="m-0 mb-0.5 px-1 text-[11px] leading-snug text-cribl-muted"
+              role="status"
+              title="Open the Sources tab or a source detail page to show disabled sources in those views."
+            >
+              {disabledSourceCount} disabled source{disabledSourceCount === 1 ? '' : 's'} hidden
+            </p>
+          ) : null}
+          {sources.length === 0 && allSources.length > 0 ? (
+            <p className="m-0 px-1 py-2 text-xs leading-snug text-cribl-muted">
+              Every source is disabled for attachment, so none are listed in the sidebar. Use{' '}
+              <span className="font-medium text-cribl-ink/80">Show disabled sources</span> on the Sources tab or a
+              source detail page to view them there.
+            </p>
+          ) : null}
+          {sources.map((r) => {
             const isSrc = mainView === 'source' && activeSourceId === r.id
             const wg = r.workerGroupId
               ? plan.workerGroups.find((w) => w.id === r.workerGroupId)
               : null
             const wgName = wg ? wg.wg.trim() || undefined : undefined
             const wgKind: 'stream' | 'edge' | null = wg ? wg.kind : null
+            const sourceIndex = allSources.findIndex((x) => x.id === r.id)
             return (
               <SourceRowRail
                 key={r.id}
                 row={r}
-                index={i}
+                index={sourceIndex >= 0 ? sourceIndex : 0}
                 isActive={isSrc}
                 canRemove={canRemove}
                 workerGroupName={wgName}
@@ -1434,7 +1466,9 @@ export function PlanNavMobile({
 }: Props) {
   void _onClearPlan
   void _onSelectSettings
-  const sources = plan.sourceSummary
+  const allSources = plan.sourceSummary
+  const disabledSourceCount = allSources.filter(isSourceRowAttachmentDisabled).length
+  const sources = allSources.filter((r) => !isSourceRowAttachmentDisabled(r))
   // v2.0: keep Stream WGs and Edge fleets in separate runs of chips so each
   // row's positional fallback ("WG1" / "FL1") matches its index in its own
   // section, mirroring the desktop rail.
@@ -1550,15 +1584,25 @@ export function PlanNavMobile({
       >
         + Fleet
       </button>
-      {sources.map((r, i) => {
+      {disabledSourceCount > 0 ? (
+        <span
+          className="shrink-0 rounded-full border border-cribl-border/70 bg-cribl-canvas/90 px-2 py-1 text-[10px] font-medium text-cribl-muted"
+          title="Open the Sources tab or a source detail page to show disabled sources there."
+          role="status"
+        >
+          {disabledSourceCount} disabled source{disabledSourceCount === 1 ? '' : 's'} hidden
+        </span>
+      ) : null}
+      {sources.map((r) => {
         const is = mainView === 'source' && activeSourceId === r.id
+        const sourceIndex = allSources.findIndex((x) => x.id === r.id)
         return (
           <SourceChipMobile
             key={r.id}
             row={r}
-            index={i}
+            index={sourceIndex >= 0 ? sourceIndex : 0}
             isActive={is}
-            canRemove={sources.length > 0}
+            canRemove={allSources.length > 0}
             onSelect={() => onSelectSource(r.id)}
             onRemove={() => onRemoveSource(r.id)}
             onRename={(name) => onRenameSource(r.id, name)}

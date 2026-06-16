@@ -6,15 +6,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 // @ts-expect-error pkgutil is plain JS without types
 import { servePackageTgz } from './scripts/pkgutil.mjs'
-
-function readPackageVersion(): string {
-  try {
-    const j = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string }
-    return String(j.version ?? '0.0.0')
-  } catch {
-    return '0.0.0'
-  }
-}
+import { appVersionFromPackageJsonPlugin, PROJECT_ROOT } from './vite-app-version-plugin.ts'
 
 /**
  * No-op stub for the `virtual:embedded-gold-template` module that the
@@ -99,10 +91,9 @@ const injectScriptFromQueryPlugin = (): Plugin => {
       const url = new URL(ctx.originalUrl ?? '/', 'https://localhost')
       const initFromCribl = url.searchParams.get('init')
       initScriptUrl = initScriptUrl || initFromCribl
-      const root = process.cwd()
       let appName
       try {
-        const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { name?: string }
+        const pkg = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8')) as { name?: string }
         appName = pkg.name
       } catch {
         /* ignore missing or invalid package.json */
@@ -133,10 +124,8 @@ const injectScriptFromQueryPlugin = (): Plugin => {
 }
 
 export default defineConfig({
-  define: {
-    __APP_VERSION__: JSON.stringify(readPackageVersion()),
-  },
   plugins: [
+    appVersionFromPackageJsonPlugin(),
     react(),
     tailwindcss(),
     packageEndpointPlugin(),

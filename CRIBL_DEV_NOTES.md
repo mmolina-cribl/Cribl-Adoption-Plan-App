@@ -36,9 +36,27 @@ specific **Cribl product** semver, add or refresh the row in
 
 ---
 
+## Release checklist for app semver and docs
+
+Do this whenever you bump the **shipped Adoption Plan app** version (`package.json` / root `package-lock.json` workspace entry) so **maintainer-facing** copy does not advertise the wrong tag and you do not “fix” unrelated semver strings.
+
+1. **Lockstep files** — Keep **`package.json`** `version` and the **workspace root** `packages["node_modules/<app name>"]` `version` in **`package-lock.json`** aligned (same string the `.tgz` and GitHub tag use).
+
+2. **Grep for the *previous* app version** — Search the repo for the old **`X.Y.Z`** and **`vX.Y.Z`** (for example `rg '\b2\.2\.0\b'` — substitute the semver you are replacing). Prefer limiting noise:
+   - **Ignore** hits that are **npm package versions**, not this app — common false positives in **`package-lock.json`** include unrelated packages whose semver **digits** match your pattern (e.g. **`lodash` `4.17.21`**, a transitive range like **`^2.0.0`**). Compare the **package name** and **`resolved`** URL to the app **`name`** in `package.json`; do not edit lockfile entries unless you intend to upgrade those dependencies.
+   - **Update** “current release” maintainer copy: **[`README.md`](./README.md)** (release blurb, example download URLs), any **tag examples** in this file, and add or extend the **new** **`### vX.Y.Z (GitHub Release)`** block in **[`ROADMAP.md`](./ROADMAP.md)** (move “Recently delivered” bullets under the new version as your convention dictates).
+   - **Do not rewrite** headings or packaging lines inside **older** `### v… (GitHub Release)` sections in **`ROADMAP.md`** — those document historical tags.
+   - **Packaging bullets** for the *new* release should describe build flow relative to a clear baseline (e.g. “unchanged from **v2.3.0**+”) so you do not accidentally imply a stale tag is still “current.”
+
+3. **Build** — Run **`npm run build`** (and **`npm test`** when the change is not docs-only) before tagging.
+
+---
+
 ## Release checklist (Cribl App `.tgz`)
 
 Before tagging a release that ships **`npm run package`**:
+
+Complete **[Release checklist for app semver and docs](#release-checklist-for-app-semver-and-docs)** first so **`package.json`**, README / ROADMAP, and example URLs match the tag you are validating.
 
 1. Run **`npm run package`** from a clean tree (or at least after `npm run build`).
 2. On a tenant, install via **Settings → Apps → Install** using **Import from file** with the **`.tgz`** (see [`README.md`](./README.md#install-in-cribl-and-standalone-distribution) — **Import from git** / **Import from URL** do not work for this pack). Open the app **without** importing a workbook.
@@ -50,12 +68,14 @@ Before tagging a release that ships **`npm run package`**:
 
 ## Release checklist (GitHub — release assets)
 
-Every **public GitHub release** must ship **both** installable artifacts (they are **not** in git — only produced by local builds):
+Every **public GitHub release** must ship **both** installable artifacts as **attached release assets** (they are **not** in git — only produced by local builds). **Do not** ship a release that only has the standalone **`.html`** — tenant installs require the **Cribl App bundle `.tgz`**.
 
 | Artifact | Command | Path |
 | -------- | ------- | ---- |
-| **Cribl App Platform** `.tgz` | `npm run package` | **`build/adoption-plan-<version>.tgz`** |
+| **Cribl App Platform** `.tgz` (**required** — Cribl **Apps → Install → Import from file**) | `npm run package` | **`build/adoption-plan-<version>.tgz`** |
 | **On‑prem standalone** HTML | `npm run build:standalone` | **`dist-standalone/cribl-adoption-plan.html`** |
+
+Before **`npm run package`**, confirm **[Release checklist for app semver and docs](#release-checklist-for-app-semver-and-docs)** is done for this version (README / ROADMAP / examples match **`package.json`**; no stale prior-tag copy except intentional history in older ROADMAP sections).
 
 **Do not** point admins at GitHub’s auto-generated **Source code (tar.gz)** — that is a raw git archive, not the Cribl pack, and installs will fail with **app not found**. On the tenant, **Apps → Install** must use **Import from file** with **`adoption-plan-<version>.tgz`**; **Import from git** and **Import from URL** are not supported for this app even if the URL points at a release asset.
 
@@ -63,7 +83,7 @@ After the tag exists (`gh release create …` or push tag), from a clean checkou
 
 1. **`npm run package`** — creates the App `.tgz` under **`build/`** (same layout Cribl **Settings → Apps → Install** expects).
 2. **`npm run build:standalone`** — creates the single-file HTML under **`dist-standalone/`**.
-3. **Upload both** to the release (same tag name as `package.json` version, e.g. `v2.3.2`):
+3. **Upload both files** to the release as **assets** (same tag name as `package.json` version, e.g. `v2.3.2`). **`npm run release:upload-github-assets`** uploads the **`.tgz` and `.html` together** — do not skip the **`.tgz`**. After upload, open the release on GitHub and confirm **two** downloadable assets appear (**`adoption-plan-<version>.tgz`** and **`cribl-adoption-plan.html`**, excluding GitHub’s auto-generated source archives):
 
    ```bash
    npm run release:upload-github-assets

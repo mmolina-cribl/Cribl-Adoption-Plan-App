@@ -56,6 +56,48 @@ describe('validatePlanPatchProposal', () => {
     expect(r.nextPlan.sourceSummary[0]!.streamOrEdge).toBe('Edge')
   })
 
+  it('setSourceWorkerGroup rejects attach when source is attachment-disabled', () => {
+    const plan = createEmptyPlan()
+    const wgS = defaultWorkerGroupRow('stream')
+    wgS.wg = 'S'
+    const wgE = defaultWorkerGroupRow('edge')
+    wgE.wg = 'E'
+    plan.workerGroups = [wgS, wgE]
+    const row = defaultSourceRow(0, wgS.id)
+    row.id = 'src1'
+    row.source = 'logs disabled'
+    row.leaderImportedDisabled = true
+    row.streamOrEdge = 'Stream'
+    plan.sourceSummary = [row]
+
+    const r = validatePlanPatchProposal(
+      plan,
+      [{ op: 'setSourceWorkerGroup', sourceId: 'src1', workerGroupWg: 'E' }],
+      'move disabled',
+    )
+    expect('error' in r).toBe(true)
+    if (!('error' in r)) return
+    expect(r.error).toMatch(/disabled sources cannot be attached/i)
+  })
+
+  it('setSourceWorkerGroup allows detach when source is attachment-disabled', () => {
+    const plan = createEmptyPlan()
+    const wgS = defaultWorkerGroupRow('stream')
+    wgS.wg = 'S'
+    plan.workerGroups = [wgS]
+    const row = defaultSourceRow(0, wgS.id)
+    row.id = 'src1'
+    row.source = 'x disabled'
+    row.leaderImportedDisabled = true
+    row.streamOrEdge = 'Stream'
+    plan.sourceSummary = [row]
+
+    const r = validatePlanPatchProposal(plan, [{ op: 'setSourceWorkerGroup', sourceId: 'src1' }], 'detach')
+    expect('error' in r).toBe(false)
+    if ('error' in r) return
+    expect(r.nextPlan.sourceSummary[0]!.workerGroupId).toBe('')
+  })
+
   it('rejects addSource with unknown worker group name', () => {
     const plan = createEmptyPlan()
     const r = validatePlanPatchProposal(plan, [{ op: 'addSource', source: 'x', workerGroupWg: 'nope' }], 'bad')

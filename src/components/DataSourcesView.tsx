@@ -1,6 +1,7 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
+import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
 import { SourceSummaryStack } from './sourceForm/SourceFormPanels'
 
 type Props = {
@@ -8,6 +9,8 @@ type Props = {
   setPlan: Dispatch<SetStateAction<PlanState>>
   row: SourceSummaryRow
   sourceIndex: number
+  showDisabledSourcesInLists: boolean
+  onShowDisabledSourcesInListsChange: (show: boolean) => void
   onOpenGuidedTour?: () => void
   /** When true, the full form is hidden so the guided dialog is the only place editing field IDs. */
   guidedEntryOpen?: boolean
@@ -19,10 +22,16 @@ export function DataSourcesView({
   setPlan,
   row,
   sourceIndex,
+  showDisabledSourcesInLists,
+  onShowDisabledSourcesInListsChange,
   onOpenGuidedTour,
   guidedEntryOpen,
   onExitGuidedEntry,
 }: Props) {
+  const hasAnyDisabledSource = useMemo(
+    () => plan.sourceSummary.some((r) => isSourceRowAttachmentDisabled(r)),
+    [plan.sourceSummary],
+  )
   const patch = useCallback(
     (id: string) => (k: keyof SourceSummaryRow, v: string | boolean) => {
       setPlan((p) => {
@@ -46,6 +55,19 @@ export function DataSourcesView({
 
   return (
     <div className="min-w-0">
+      {!guidedEntryOpen && hasAnyDisabledSource ? (
+        <label className="mb-4 flex max-w-2xl cursor-pointer select-none items-center gap-2 rounded-xl border border-cribl-border/80 bg-cribl-card-body px-3 py-2.5 text-sm text-cribl-ink">
+          <input
+            type="checkbox"
+            checked={showDisabledSourcesInLists}
+            onChange={(e) => onShowDisabledSourcesInListsChange(e.target.checked)}
+          />
+          <span className="text-cribl-muted">
+            Show <span className="font-medium text-cribl-ink">disabled</span> sources in the Sources index and
+            sidebar
+          </span>
+        </label>
+      ) : null}
       {guidedEntryOpen && (
         <div className="mb-5 rounded-2xl border border-cribl-border/80 bg-cribl-primary-soft/30 p-4 sm:p-5">
           <p className="m-0 text-[11px] font-semibold text-cribl-primary uppercase">Source summary</p>

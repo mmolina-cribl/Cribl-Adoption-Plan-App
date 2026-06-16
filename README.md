@@ -49,7 +49,7 @@ see `docs/adoption-plan-tool-one-pager.md` when you maintain that tree locally
 
 **Release line:** **v2.3.x** — tenant + diagnostic import, Summary / executive
 readout, AI assistant (session modes, plan patch proposals), and more; see
-GitHub **Release** notes for the tag (or `docs/releases/v2.3.0.md` locally). **v2.3.1** is a **patch**: per-WG / per-fleet **Excel** validation and color scales past row **21** when a group has **20+ sources**, plus **`propose_plan_patch`** structural ops (add/move sources and groups), digest **ids**, assistant **tool/prompt** alignment, and rollup **source counts**. Gold **v0.9.1** alignment
+GitHub **Release** notes for the tag (or `docs/releases/v2.3.0.md` locally). **v2.3.2** is a **patch**: **Sources** filters (assignment state, disabled-only, criticality/compliance/context/volume), bulk attachment-disabled toggles, **show-disabled** list preference defaulting off with a compact nav hint, wider **left rail** defaults/ceiling, and **popover menus** portaled to `document.body` so they are not clipped by the main scroll region. It also includes the **2.3.x** line’s per-WG / per-fleet **Excel** validation and color scales past row **21** for large groups, **`propose_plan_patch`** structural ops, digest **ids**, assistant alignment, and rollup **source counts**. Gold **v0.9.1** alignment
 and design history: [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091).
 
 ---
@@ -99,7 +99,7 @@ In the Cribl workspace, open **Settings → Apps → Install** (or your org’s 
 2. Deliver **`dist-standalone/cribl-adoption-plan.html`** (~2.2 MB raw / ~720 KB
    gzipped — comfortable to email), or point customers at the same asset on
    [GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)
-   (e.g. `…/releases/download/v2.3.1/cribl-adoption-plan.html`).
+   (e.g. `…/releases/download/v2.3.2/cribl-adoption-plan.html`).
 3. Customer opens the file in a modern browser (`file://` or hosted HTTPS). No
    Node, no server.
 
@@ -146,7 +146,9 @@ The standalone build **inlines** `public/adoption-plan-empty.xlsx` (gold v0.9.1)
 as base64 at build time so Import/Export match the iframe behavior — **no**
 extra files beside the `.html`.
 
-**GitHub Release:** attach **`build/adoption-plan-<version>.tgz`** (from `npm run package`) **and** **`dist-standalone/cribl-adoption-plan.html`** (from `npm run build:standalone`). Use `npm run release:upload-github-assets` after the tag exists, or see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#release-checklist-github--release-assets). Do not use GitHub’s **Source code (tar.gz)** for Cribl installs.
+**GitHub Release:** attach **`build/adoption-plan-<version>.tgz`** (from `npm run package`) **and** **`dist-standalone/cribl-adoption-plan.html`** (from `npm run build:standalone`) as **release assets** — **both** are required (the **`.tgz`** is what tenants use for **Apps → Install**; do not publish a release with only the **`.html`**). Use `npm run release:upload-github-assets` after the tag exists, or see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#release-checklist-github--release-assets). Do not use GitHub’s **Source code (tar.gz)** for Cribl installs.
+
+When you bump the **app** semver, also follow **[`CRIBL_DEV_NOTES.md` — Release checklist for app semver and docs](./CRIBL_DEV_NOTES.md#release-checklist-for-app-semver-and-docs)** (grep old version, refresh README / ROADMAP / examples, avoid `package-lock.json` dependency false positives).
 
 ---
 
@@ -390,7 +392,7 @@ For **Cribl Copilot vs BYOL** positioning, see `docs/copilot-integration-researc
 ## Versioning
 
 Semver in lockstep: **`package.json`** + **`package-lock.json`**. One version
-for both build targets.
+for both build targets. On each bump, run **[Release checklist for app semver and docs](./CRIBL_DEV_NOTES.md#release-checklist-for-app-semver-and-docs)** so docs and examples are not left on an old tag (and lockfile-only hits are not mistaken for the app version).
 
 - **2.3.x** — Tenant import, diag import, Summary / executive readout, AI modes
   + plan patches, layout polish, Credits; see **GitHub Release** notes for the

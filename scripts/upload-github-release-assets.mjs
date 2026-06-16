@@ -1,5 +1,6 @@
 /**
  * Upload Cribl App Platform pack + standalone HTML to an existing GitHub release.
+ * Both files are required release assets (tenant install uses the .tgz; do not upload only the .html).
  * Run after `npm run package` and `npm run build:standalone`.
  *
  * Usage:

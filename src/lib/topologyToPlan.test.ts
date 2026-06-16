@@ -14,6 +14,7 @@ describe('topologyHarvestToPlanState — Leader source names', () => {
     const plan = topologyHarvestToPlanState(harvest)
     expect(plan.sourceSummary).toHaveLength(1)
     expect(plan.sourceSummary[0]!.source).toBe('in_tcp disabled')
+    expect(plan.sourceSummary[0]!.leaderImportedDisabled).toBe(true)
   })
 
   it('does not append suffix when the Leader input is enabled', () => {
@@ -26,6 +27,7 @@ describe('topologyHarvestToPlanState — Leader source names', () => {
     }
     const plan = topologyHarvestToPlanState(harvest)
     expect(plan.sourceSummary[0]!.source).toBe('in_tcp')
+    expect(plan.sourceSummary[0]!.leaderImportedDisabled).not.toBe(true)
   })
 
   it('truncates base id so Source + " disabled" stays within 200 chars', () => {

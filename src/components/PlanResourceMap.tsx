@@ -20,6 +20,7 @@ import { getOnboardingStatus } from '../lib/onboardingStatus'
 import { useEntryAnimation } from '../lib/animationsPreference'
 import { SearchInput } from './SearchInput'
 import { edgeFleetUnassignedOrphans } from '../lib/fleetHierarchy'
+import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
 
 const UNASSIGNED_ID = '__unassigned__'
 /**
@@ -76,6 +77,8 @@ type SourceLeaf = {
   criticality: string
   /** True when `complianceRelated` is set on the source row. */
   isCompliance: boolean
+  /** False when the source cannot be drag-assigned (Leader-disabled / suffix). */
+  allowReassignDrag: boolean
 }
 
 type WgGroup = {
@@ -177,6 +180,7 @@ function buildSourceLeaf(row: SourceSummaryRow, index: number): SourceLeaf {
     status: getOnboardingStatus(row),
     criticality: (row.dataCriticality || '').trim(),
     isCompliance: !!row.complianceRelated,
+    allowReassignDrag: !isSourceRowAttachmentDisabled(row),
   }
 }
 
@@ -364,6 +368,11 @@ export function PlanResourceMap({
   }, [drag])
 
   const interactive = !!onReassignSource
+
+  const attachmentDisabledSourceIds = useMemo(
+    () => new Set(plan.sourceSummary.filter(isSourceRowAttachmentDisabled).map((r) => r.id)),
+    [plan.sourceSummary],
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   // These maps hold any element we measure with `getBoundingClientRect`, so
@@ -662,6 +671,7 @@ export function PlanResourceMap({
   const beginDragFromAnchor = useCallback(
     (sourceId: string, originGroupId: string, anchor: Point) => {
       if (!interactive) return
+      if (attachmentDisabledSourceIds.has(sourceId)) return
       setDrag({
         sourceId,
         originGroupId,
@@ -671,15 +681,16 @@ export function PlanResourceMap({
         overUnassignedZone: false,
       })
     },
-    [interactive],
+    [interactive, attachmentDisabledSourceIds],
   )
 
   const beginDrag = useCallback(
     (branch: Branch) => {
       if (!interactive || branch.kind !== 'source') return
+      if (attachmentDisabledSourceIds.has(branch.id)) return
       beginDragFromAnchor(branch.id, branch.groupId, branch.src)
     },
-    [interactive, beginDragFromAnchor],
+    [interactive, attachmentDisabledSourceIds, beginDragFromAnchor],
   )
 
   /**
@@ -1122,13 +1133,17 @@ export function PlanResourceMap({
               : isSummaryBranch
               ? '5 5'
               : undefined
-            const isInteractiveSource = interactive && b.kind === 'source'
+            const isInteractiveSource =
+              interactive &&
+              b.kind === 'source' &&
+              !attachmentDisabledSourceIds.has(b.id)
             // The X badge appears whenever the user is "looking at" this
             // exact source branch — either by hovering its leaf card or by
             // hovering the connector itself. Hidden during an active drag
-            // so it doesn't fight the rubber-band visual.
+            // so it doesn't fight the rubber-band visual. Detach remains
+            // available for attachment-disabled sources.
             const showDetachX =
-              isInteractiveSource && hovered === b.id && !isDragging
+              interactive && b.kind === 'source' && hovered === b.id && !isDragging
             // X badge sits flush against the source's right edge — the
             // curve's source-side tangent is horizontal, so a small
             // x-offset off `b.src` keeps it centered on the connector
@@ -2246,7 +2261,7 @@ function UnassignedSection({
               <span className="shrink-0 rounded-md bg-cribl-card-body px-1.5 py-0.5 text-[11px] tabular-nums text-cribl-ink/80">
                 {volStr}
               </span>
-              {interactive ? (
+              {interactive && s.allowReassignDrag ? (
                 <button
                   type="button"
                   aria-label="Drag to a worker group or fleet to assign this source"

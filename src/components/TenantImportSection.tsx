@@ -35,7 +35,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
   const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
-  const [skipDisabledInputs, setSkipDisabledInputs] = useState(readImportOmitDisabledInputs)
+  const [omitDisabledInputs, setOmitDisabledInputs] = useState(readImportOmitDisabledInputs)
 
   const runHarvest = useCallback(async () => {
     setError(null)
@@ -46,7 +46,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
     try {
       const harvest = await harvestTenantTopology(undefined, {
         omitStockWorkerGroups: omitStockGroups,
-        omitDisabledInputs: skipDisabledInputs,
+        omitDisabledInputs,
       })
       const next = topologyHarvestToPlanState(harvest)
       const capturedAt = new Date().toISOString()
@@ -71,7 +71,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
     } finally {
       setBusy(false)
     }
-  }, [setPlan, omitStockGroups, skipDisabledInputs])
+  }, [setPlan, omitStockGroups, omitDisabledInputs])
 
   if (!isInCriblIframe()) {
     return (
@@ -101,7 +101,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
         <strong>configured sources</strong> per group from Leader{' '}
         <span className="font-mono">/m/&lt;group&gt;/system/inputs</span> (and <span className="font-mono">/inputs</span> fallback).
         Each input becomes one plan source row named by Leader input <span className="font-mono">id</span> (routing is not imported). Use the
-        options below to trim built-in default groups or disabled inputs when you want a shorter adoption snapshot. This replaces your current
+        options below to omit built-in default groups or include disabled inputs when you need them in the plan. This replaces your current
         plan — validate in the editor before exporting.
       </p>
       <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
@@ -110,17 +110,18 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           <input
             type="checkbox"
             className="mt-0.5"
-            checked={skipDisabledInputs}
+            checked={!omitDisabledInputs}
             onChange={(e) => {
-              const v = e.target.checked
-              setSkipDisabledInputs(v)
-              writeImportOmitDisabledInputs(v)
+              const include = e.target.checked
+              const omit = !include
+              setOmitDisabledInputs(omit)
+              writeImportOmitDisabledInputs(omit)
             }}
           />
           <span>
-            <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> (on by default). Uncheck if you use{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span> for collectors you still want listed — each included row gets{' '}
-            <span className="font-mono"> disabled</span> appended to <strong className="text-cribl-ink/85">Source</strong> (UI + Excel).
+            <strong className="text-cribl-ink/85">Include disabled Leader inputs.</strong> Unchecked by default — check to import inputs with{' '}
+            <span className="font-mono text-cribl-ink/80">disabled: true</span> (each row gets <span className="font-mono"> disabled</span> on{' '}
+            <strong className="text-cribl-ink/85">Source</strong>).
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
@@ -137,8 +138,7 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           <span>
             <strong className="text-cribl-ink/85">Omit built-in default worker groups</strong> (
             <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Off by default — turn on when
-            those groups are only Cribl scaffolding and your workloads live in named groups.
+            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Unchecked by default.
           </span>
         </label>
         <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>
@@ -195,10 +195,10 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
               <li>
                 <strong className="text-cribl-ink/85">Used:</strong> <span className="font-mono">id</span> (plan{' '}
                 <strong className="text-cribl-ink/85">Source</strong> name),{' '}
-                <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (when included, each input becomes one plan
-                source row; <strong className="text-cribl-ink/85">disabled</strong> inputs get <span className="font-mono"> disabled</span>{' '}
-                appended to <strong className="text-cribl-ink/85">Source</strong> for UI and Excel). With{' '}
-                <strong className="text-cribl-ink/85">Skip disabled Leader inputs</strong> on (default), disabled inputs are not imported.{' '}
+                <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (when you check{' '}
+                <strong className="text-cribl-ink/85">Include disabled Leader inputs</strong>, each such input becomes one plan source row with{' '}
+                <span className="font-mono"> disabled</span> appended to <strong className="text-cribl-ink/85">Source</strong> for UI and Excel;
+                otherwise disabled inputs are omitted).{' '}
                 <span className="font-mono">description</span> is kept in import debug JSON only — not copied into the source name.
               </li>
               <li>

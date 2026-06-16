@@ -19,6 +19,7 @@ import {
   SelectWithEmpty,
 } from '../FormControls'
 import { getSourceDetailCardsExpanded } from '../../lib/detailCardsPreference'
+import { isSourceRowAttachmentDisabled } from '../../lib/sourceAttachmentDisabled'
 
 export type SourceSummaryFieldPatch = (k: keyof SourceSummaryRow, v: string | boolean) => void
 
@@ -490,6 +491,25 @@ function WorkerGroupAssignmentBlock({ plan, row, s }: { plan: PlanState; row: So
   if (plan.workerGroups.length < 1) {
     return (
         <p className="m-0 text-sm text-cribl-muted">Add a worker group under Worker Groups in the plan.</p>
+    )
+  }
+  if (isSourceRowAttachmentDisabled(row)) {
+    const wg = row.workerGroupId
+      ? plan.workerGroups.find((w) => w.id === row.workerGroupId)
+      : null
+    const wgLabel = wg?.wg.trim() || (row.workerGroupId ? 'Worker group' : '')
+    return (
+      <LabeledField
+        id={`s-${row.id}-wgroup`}
+        label="Assign to"
+        hint="Disabled topology inputs cannot be moved between worker groups. You can detach to unassigned from the plan resource map or worker group page."
+      >
+        <p className="m-0 max-w-md rounded-lg border border-cribl-border/70 bg-cribl-card-body/60 px-3 py-2 text-sm text-cribl-muted">
+          {row.workerGroupId
+            ? `Attached to ${wgLabel || 'a worker group or fleet'} — use Unassign on the resource map to detach only.`
+            : 'Unassigned — this disabled source cannot be attached from here.'}
+        </p>
+      </LabeledField>
     )
   }
   return (

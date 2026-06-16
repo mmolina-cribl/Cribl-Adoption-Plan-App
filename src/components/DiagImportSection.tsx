@@ -34,7 +34,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
   const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
-  const [skipDisabledInputs, setSkipDisabledInputs] = useState(readImportOmitDisabledInputs)
+  const [omitDisabledInputs, setOmitDisabledInputs] = useState(readImportOmitDisabledInputs)
 
   const runImport = useCallback(
     async (bytes: Uint8Array) => {
@@ -46,7 +46,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
       try {
         const harvest = await harvestDiagBundle(bytes, {
           omitStockWorkerGroups: omitStockGroups,
-          omitDisabledInputs: skipDisabledInputs,
+          omitDisabledInputs,
         })
         const next = topologyHarvestToPlanState(harvest)
         const capturedAt = new Date().toISOString()
@@ -69,7 +69,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
         setBusy(false)
       }
     },
-    [setPlan, omitStockGroups, skipDisabledInputs],
+    [setPlan, omitStockGroups, omitDisabledInputs],
   )
 
   return (
@@ -94,7 +94,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
         Pick a Stream or Edge diagnostic archive (<span className="font-mono text-cribl-ink/90">.tar.gz</span> /{' '}
         <span className="font-mono text-cribl-ink/90">.tgz</span>) you already have on disk. We read configured **sources** from the bundle and
         fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Use the
-        import options below to omit built-in default group folders or disabled inputs when you want a shorter snapshot. Everything stays in your
+        import options below to omit built-in default group folders or include disabled inputs when you need them in the plan. Everything stays in your
         browser (nothing uploaded). For exact paths and limits, see <span className="font-mono text-cribl-ink/90">docs/diag-import.md</span>.
       </p>
       <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
@@ -103,17 +103,18 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
           <input
             type="checkbox"
             className="mt-0.5"
-            checked={skipDisabledInputs}
+            checked={!omitDisabledInputs}
             onChange={(e) => {
-              const v = e.target.checked
-              setSkipDisabledInputs(v)
-              writeImportOmitDisabledInputs(v)
+              const include = e.target.checked
+              const omit = !include
+              setOmitDisabledInputs(omit)
+              writeImportOmitDisabledInputs(omit)
             }}
           />
           <span>
-            <strong className="text-cribl-ink/85">Skip disabled inputs</strong> (on by default). Uncheck to include YAML entries with{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span>. Those rows get <span className="font-mono"> disabled</span> appended
-            to the plan <strong className="text-cribl-ink/85">Source</strong> name (UI + Excel).
+            <strong className="text-cribl-ink/85">Include disabled inputs.</strong> Unchecked by default — check to import YAML entries with{' '}
+            <span className="font-mono text-cribl-ink/80">disabled: true</span> (each row gets <span className="font-mono"> disabled</span> on{' '}
+            <strong className="text-cribl-ink/85">Source</strong>).
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
@@ -130,7 +131,7 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
           <span>
             <strong className="text-cribl-ink/85">Omit built-in default group folders</strong> (
             <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Off by default.
+            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Unchecked by default.
           </span>
         </label>
         <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>

@@ -3,6 +3,7 @@ import { WorkerGroupEditor } from './WorkerGroupEditor'
 import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
 import { sourceLabel, type PlanState } from '../types/planTypes'
 import { sourceSummaryForWg } from '../lib/workerGroupIds'
+import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
 import { LabeledField, SectionBox } from './FormControls'
 import { EditableWorkerGroupName } from './EditableWorkerGroupName'
 import { HostingPicker } from './HostingPicker'
@@ -379,6 +380,9 @@ export function WorkerGroupDetailView({
       if (!target) {
         return p
       }
+      if (isSourceRowAttachmentDisabled(target)) {
+        return p
+      }
       const sourceName = (target.source || '').trim()
       // Stamp streamOrEdge from this WG's kind ("Stream" / "Edge").
       const newStreamOrEdge = g.kind === 'edge' ? 'Edge' : 'Stream'
@@ -435,7 +439,9 @@ export function WorkerGroupDetailView({
           sources={sources}
           totalVolumeGb={totalVol}
           childFleets={subFleets}
-          unassignedSources={plan.sourceSummary.filter((r) => !r.workerGroupId)}
+          unassignedSources={plan.sourceSummary.filter(
+            (r) => !r.workerGroupId && !isSourceRowAttachmentDisabled(r),
+          )}
           onOpenSource={onSelectSource}
           onUnassign={unassignSource}
           onAttach={assignSourceToThisGroup}
@@ -715,7 +721,7 @@ export function WorkerGroupDetailView({
         <AttachSourceCombobox
           className="mb-3"
           candidates={plan.sourceSummary
-            .filter((r) => r.workerGroupId !== g.id)
+            .filter((r) => r.workerGroupId !== g.id && !isSourceRowAttachmentDisabled(r))
             .map((r) => {
               const wg = r.workerGroupId
                 ? plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg.trim() || null

@@ -327,7 +327,7 @@ export async function harvestDiagBundle(
 
   if (omitDisabled && omittedDisabledInputs > 0) {
     warnings.push(
-      `Omitted ${omittedDisabledInputs} disabled input(s) from the bundle per import option — uncheck “Skip disabled Leader inputs” to include them.`,
+      `Omitted ${omittedDisabledInputs} disabled input(s) from the bundle per import option — check “Include disabled inputs” to include them next time.`,
     )
   }
 

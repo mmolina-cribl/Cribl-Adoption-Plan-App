@@ -51,6 +51,18 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ## Recently delivered
 
+### v2.3.2 (GitHub Release)
+
+Patch release: **Sources index UX**, **left-rail sizing**, and **popover menus** that escape overflow clipping.
+
+- **Sources — filters & sorting:** **Assignment state** dropdown (All / Unassigned / Stream / Edge) plus **Disabled only** checkbox; additional filters (**Criticality**, **Compliance**, **Source context**, **Has daily volume**); sort by **Attachment disabled**; **Filter** badge no longer counts the global “show disabled” default; **Clear filters** resets the new controls.
+- **Sources — bulk:** Mark rows **attachment-disabled** or **not disabled** (clears flag + Leader-style ` disabled` name suffix with `sourceVolume` name sync); helper **`stripAttachmentDisabledNameSuffix`** in [`sourceAttachmentDisabled.ts`](./src/lib/sourceAttachmentDisabled.ts).
+- **Show disabled in lists:** Preference defaults **off** (`readShowDisabledSourcesInLists` / KV); left nav shows a **“N sources hidden”** note instead of a toggle; **Source** detail keeps the show-disabled control.
+- **Left rail:** Default width **465px**, max **~605px** (30% above default) in [`useResizableRail.ts`](./src/hooks/useResizableRail.ts).
+- **PopoverButton:** Panel renders in a **`document.body` portal** with **`position: fixed`**, measured from the trigger, with scroll/resize listeners — **Filter / Sort / Bulk** (and Worker Groups) no longer clip inside `overflow-x-hidden` main columns.
+- **Plan patch:** Define missing **`MAX_FIELD_LEN`** clamp for `updateCseNotes` / `updateSourceField` in [`planPatchApply.ts`](./src/lib/planPatchApply.ts) (restores `tsc` / release build).
+- **Packaging:** Semver **2.3.2**; same `npm run package` / standalone build flow as **v2.3.0**+ (unchanged).
+
 ### v2.3.1 (GitHub Release)
 
 Patch release: **export parity** for large per-WG source lists, plus **AI assistant** plan-patch behavior that should have shipped with the v2.3.0 assistant surface.
@@ -141,11 +153,12 @@ Patch release: **export parity** for large per-WG source lists, plus **AI assist
 ### Unreleased (main; tag on next version bump)
 
 - **Import from diagnostic bundle:** parse Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundles in-browser (`groups/<id>/…/inputs.yml`) — see `docs/diag-import.md` (local `docs/` tree) for **Cloud vs customer-managed** bundle availability; `planProvenance.kind` **`diag`**.
-- **Pre-release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) now
-  requires skimming **Cribl Stream / Edge / What’s New** release notes before
-  tagging so `referenceData` tiles stay aligned with the product; update the
-  **Cribl product versions (alignment log)** in this file when you bump tiles or
-  doc-driven copy from those notes.
+- **Pre-release checklist:** [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) —
+  skim **Cribl Stream / Edge / What’s New** before tagging so `referenceData`
+  tiles stay aligned; refresh the **Cribl product versions (alignment log)** when
+  doc-driven copy changes. Also follow **Release checklist for app semver and
+  docs** in that file (grep prior app version, update README / ROADMAP / examples,
+  do not treat unrelated `package-lock.json` dependency versions as the app semver).
 
 ## Ongoing programs (no committed finish line)
 

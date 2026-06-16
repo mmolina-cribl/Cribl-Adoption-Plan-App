@@ -6,7 +6,7 @@
 // (useful as a feature-detect for the local-dev fallback path).
 
 declare global {
-  /** Semantic version from `package.json`, injected at Vite build (`define`). */
+  /** Semantic version from `package.json`; see `vite-app-version-plugin.ts` (and `src/appVersion.ts`). */
   const __APP_VERSION__: string
 
   interface Window {

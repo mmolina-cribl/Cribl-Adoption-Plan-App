@@ -49,8 +49,8 @@ export type TenantHarvestOptions = {
    */
   omitStockWorkerGroups?: boolean
   /**
-   * When `true`, omit Leader inputs with `disabled: true`. Default **`true`** — fewer template rows;
-   * set `false` to import disabled inputs (each row still notes “Disabled on Leader”).
+   * When `true`, omit Leader inputs with `disabled: true`. Default **`true`** — check **Include disabled…** in the UI to import them
+   * (each row gets ` disabled` on **Source** and `leaderImportedDisabled` in the plan).
    */
   omitDisabledInputs?: boolean
 }
@@ -205,7 +205,7 @@ export async function harvestTenantTopology(
 
   if (omitDisabled && omittedDisabledInputs > 0) {
     warnings.push(
-      `Omitted ${omittedDisabledInputs} disabled Leader input(s) per import option — uncheck “Skip disabled Leader inputs” to include them.`,
+      `Omitted ${omittedDisabledInputs} disabled Leader input(s) per import option — check “Include disabled Leader inputs” to include them next time.`,
     )
   }
 

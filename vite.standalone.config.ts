@@ -4,15 +4,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
-
-function readPackageVersion(): string {
-  try {
-    const j = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8')) as { version?: string }
-    return String(j.version ?? '0.0.0')
-  } catch {
-    return '0.0.0'
-  }
-}
+import { appVersionFromPackageJsonPlugin } from './vite-app-version-plugin.ts'
 
 /**
  * Standalone (on-prem) build target.
@@ -144,10 +136,8 @@ function stripFaviconLinkPlugin(): Plugin {
 const STANDALONE_OUT_DIR = 'dist-standalone'
 
 export default defineConfig({
-  define: {
-    __APP_VERSION__: JSON.stringify(readPackageVersion()),
-  },
   plugins: [
+    appVersionFromPackageJsonPlugin(),
     react(),
     tailwindcss(),
     inlineGoldTemplatePlugin(),

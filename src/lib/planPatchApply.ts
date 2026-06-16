@@ -1,9 +1,10 @@
 import type { PlanState, SourceSummaryRow, WorkerGroupKind, WorkerGroupRow } from '../types/planTypes'
 import { defaultSourceRow, defaultWorkerGroupRow } from './defaultState'
 import { syncAllSourcesStreamOrEdge } from './workerGroupIds'
-
-const MAX_FIELD_LEN = 4_000
+import { isSourceRowAttachmentDisabled } from './sourceAttachmentDisabled'
 const MAX_NAME_LEN = 512
+/** Max length for free-text patch fields (notes, blockers, etc.). */
+const MAX_FIELD_LEN = 16384
 /** Bound assistant proposals (UI + model). */
 export const MAX_PLAN_PATCH_OPS = 40
 /** Max `addSource` operations in a single proposal. */
@@ -335,7 +336,14 @@ export function validatePlanPatchProposal(plan: PlanState, operationsRaw: unknow
       if ('error' in resolved) {
         return { error: resolved.error }
       }
-      const row = { ...next.sourceSummary[idx]!, workerGroupId: resolved.id }
+      const srcRow = next.sourceSummary[idx]!
+      if (isSourceRowAttachmentDisabled(srcRow) && resolved.id !== '') {
+        return {
+          error:
+            'setSourceWorkerGroup: disabled sources cannot be attached or moved to a worker group (detach only)',
+        }
+      }
+      const row = { ...srcRow, workerGroupId: resolved.id }
       const sourceSummary = next.sourceSummary.slice()
       sourceSummary[idx] = row
       next = syncAllSourcesStreamOrEdge({ ...next, sourceSummary })

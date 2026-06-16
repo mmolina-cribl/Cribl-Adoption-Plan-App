@@ -59,12 +59,11 @@ export type SourceSummaryRow = {
    */
   additionalNotes: string
   /**
-   * The per-source `Display name` column the v0.8.6 schema carried
-   * was the one column v0.9.1 actually dropped — every other gold
-   * field round-trips through this row. The `PS Use Case Worksheet`
-   * (PR C) is a separate account-level tracker, not a replacement
-   * for these per-source fields.
+   * When true, the row came from a Leader input marked disabled (or was
+   * inferred on workbook import from the ` disabled` **Source** suffix).
+   * Such sources cannot be attached or reassigned; detach only.
    */
+  leaderImportedDisabled?: boolean
 }
 
 export type SourceVolumeRow = {

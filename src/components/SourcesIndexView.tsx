@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
+import { sourceLabel, type PlanState, type SourceSummaryRow, type WorkerGroupRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { deriveStreamOrEdge } from '../lib/workerGroupIds'
+import { isSourceRowAttachmentDisabled, stripAttachmentDisabledNameSuffix } from '../lib/sourceAttachmentDisabled'
 import { PopoverButton } from './PopoverButton'
 import { AnimatedBar } from './AnimatedBar'
 import { SearchInput } from './SearchInput'
@@ -10,6 +11,9 @@ import { SearchInput } from './SearchInput'
 type Props = {
   plan: PlanState
   setPlan: Dispatch<SetStateAction<PlanState>>
+  /** When true, rows disabled for attachment are shown in this index (default off; persisted in localStorage). */
+  showDisabledSourcesInLists: boolean
+  onShowDisabledSourcesInListsChange: (show: boolean) => void
   onOpenSource: (id: string) => void
   /** Same as left-nav + Add source — opens the new-source name dialog. */
   onAddSource?: () => void
@@ -28,6 +32,46 @@ type SortBy =
   | 'onboardStart'
   | 'onboardEnd'
   | 'onboardCompleted'
+  | 'attachmentDisabled'
+
+type AttachmentKindFilter = 'all' | 'unassigned' | 'stream' | 'edge'
+
+type ComplianceFilterChoice = 'all' | 'yes' | 'no'
+
+type ContextFilterChoice = 'all' | 'onPrem' | 'cloud' | 'unset'
+
+type CriticalityFilterChoice = 'all' | 'high' | 'medium' | 'low' | 'unset'
+
+function workerGroupKindForSource(s: SourceSummaryRow, workerGroups: WorkerGroupRow[]): 'stream' | 'edge' | null {
+  const id = (s.workerGroupId || '').trim()
+  if (!id) {
+    return null
+  }
+  const wg = workerGroups.find((w) => w.id === id)
+  if (!wg) {
+    return null
+  }
+  return wg.kind
+}
+
+function matchesAttachmentKind(
+  s: SourceSummaryRow,
+  filter: AttachmentKindFilter,
+  workerGroups: WorkerGroupRow[],
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true
+    case 'unassigned':
+      return !(s.workerGroupId || '').trim()
+    case 'stream':
+      return workerGroupKindForSource(s, workerGroups) === 'stream'
+    case 'edge':
+      return workerGroupKindForSource(s, workerGroups) === 'edge'
+    default:
+      return true
+  }
+}
 
 type SortDir = 'asc' | 'desc'
 
@@ -49,6 +93,7 @@ const SORT_OPTIONS: { id: SortBy; label: string; defaultDir: SortDir }[] = [
   { id: 'onboardStart', label: 'Onboarding start', defaultDir: 'asc' },
   { id: 'onboardEnd', label: 'Onboarding end', defaultDir: 'asc' },
   { id: 'onboardCompleted', label: 'Onboarding completed', defaultDir: 'desc' },
+  { id: 'attachmentDisabled', label: 'Attachment disabled', defaultDir: 'desc' },
 ]
 
 function critOrd(c: string): number {
@@ -65,10 +110,22 @@ function parseDate(s: string | undefined): number {
   return Number.isFinite(t) ? t : Number.NaN
 }
 
-export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: Props) {
+export function SourcesIndexView({
+  plan,
+  setPlan,
+  showDisabledSourcesInLists,
+  onShowDisabledSourcesInListsChange,
+  onOpenSource,
+  onAddSource,
+}: Props) {
   const [q, setQ] = useState('')
-  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
+  const [disabledOnly, setDisabledOnly] = useState(false)
+  const [attachmentKindFilter, setAttachmentKindFilter] = useState<AttachmentKindFilter>('all')
   const [onlyHighPriority, setOnlyHighPriority] = useState(false)
+  const [complianceFilter, setComplianceFilter] = useState<ComplianceFilterChoice>('all')
+  const [contextFilter, setContextFilter] = useState<ContextFilterChoice>('all')
+  const [criticalityFilter, setCriticalityFilter] = useState<CriticalityFilterChoice>('all')
+  const [onlyWithDailyVolume, setOnlyWithDailyVolume] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [filterOpen, setFilterOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -76,6 +133,11 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
   const [sortBy, setSortBy] = useState<SortBy>('default')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const sources = plan.sourceSummary
+
+  const hasAnyDisabledSource = useMemo(
+    () => sources.some((s) => isSourceRowAttachmentDisabled(s)),
+    [sources],
+  )
 
   // Prune selection when sources change (e.g. after a bulk delete or
   // an external edit). Cheaper than wrapping every state mutation.
@@ -95,16 +157,69 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return sources
-      .filter((s) => (!onlyUnassigned ? true : !s.workerGroupId))
+      .filter((s) => (showDisabledSourcesInLists ? true : !isSourceRowAttachmentDisabled(s)))
+      .filter((s) => (disabledOnly ? isSourceRowAttachmentDisabled(s) : true))
+      .filter((s) => matchesAttachmentKind(s, attachmentKindFilter, plan.workerGroups))
       .filter(
         (s) => (!onlyHighPriority ? true : /^high$/i.test((s.dataCriticality || '').trim()) || s.complianceRelated),
       )
+      .filter((s) => {
+        if (complianceFilter === 'all') {
+          return true
+        }
+        if (complianceFilter === 'yes') {
+          return s.complianceRelated
+        }
+        return !s.complianceRelated
+      })
+      .filter((s) => {
+        if (contextFilter === 'all') {
+          return true
+        }
+        const t = (s.type || '').trim()
+        if (contextFilter === 'onPrem') {
+          return t === 'On-Prem'
+        }
+        if (contextFilter === 'cloud') {
+          return t === 'Cloud/Internet'
+        }
+        return !t
+      })
+      .filter((s) => {
+        if (criticalityFilter === 'all') {
+          return true
+        }
+        const c = (s.dataCriticality || '').trim().toLowerCase()
+        if (criticalityFilter === 'unset') {
+          return !c
+        }
+        return c === criticalityFilter
+      })
+      .filter((s) => {
+        if (!onlyWithDailyVolume) {
+          return true
+        }
+        const v = parseGb(s.avgDailyGb)
+        return Number.isFinite(v) && v > 0
+      })
       .filter((s) => {
         const src = (s.source || '').toLowerCase()
         const tile = (s.sourceTile || '').toLowerCase()
         return !needle || src.includes(needle) || tile.includes(needle)
       })
-  }, [q, sources, onlyUnassigned, onlyHighPriority])
+  }, [
+    q,
+    sources,
+    plan.workerGroups,
+    onlyHighPriority,
+    showDisabledSourcesInLists,
+    disabledOnly,
+    attachmentKindFilter,
+    complianceFilter,
+    contextFilter,
+    criticalityFilter,
+    onlyWithDailyVolume,
+  ])
 
   const visibleIds = useMemo(() => filtered.map((s) => s.id), [filtered])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
@@ -182,6 +297,8 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
           return numericMissingLast(a, b, (r) => parseDate(r.targetOnboardEnd))
         case 'onboardCompleted':
           return numericMissingLast(a, b, (r) => parseDate(r.onboardingCompletedOn))
+        case 'attachmentDisabled':
+          return dir * (Number(isSourceRowAttachmentDisabled(a)) - Number(isSourceRowAttachmentDisabled(b)))
         default:
           return 0
       }
@@ -194,7 +311,14 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
   const sortBadge = sortBy === 'default' ? 0 : 1
 
   const activeFilterCount =
-    (onlyUnassigned ? 1 : 0) + (onlyHighPriority ? 1 : 0) + (q.trim() ? 1 : 0)
+    (disabledOnly ? 1 : 0) +
+    (attachmentKindFilter !== 'all' ? 1 : 0) +
+    (onlyHighPriority ? 1 : 0) +
+    (complianceFilter !== 'all' ? 1 : 0) +
+    (contextFilter !== 'all' ? 1 : 0) +
+    (criticalityFilter !== 'all' ? 1 : 0) +
+    (onlyWithDailyVolume ? 1 : 0) +
+    (q.trim() ? 1 : 0)
 
   const toggleOne = (id: string) => {
     setSelected((prev) => {
@@ -220,9 +344,15 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
   }
 
   const clearFilters = () => {
-    setOnlyUnassigned(false)
+    setDisabledOnly(false)
+    setAttachmentKindFilter('all')
     setOnlyHighPriority(false)
+    setComplianceFilter('all')
+    setContextFilter('all')
+    setCriticalityFilter('all')
+    setOnlyWithDailyVolume(false)
     setQ('')
+    onShowDisabledSourcesInListsChange(true)
   }
 
   const clearSelection = () => setSelected(new Set())
@@ -265,7 +395,9 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
     // or clear it when the bulk action detaches sources. v2.0 dropped the
     // wizard step for this field — see workerGroupIds.deriveStreamOrEdge.
     const streamOrEdge = deriveStreamOrEdge(workerGroupId, plan.workerGroups)
-    bulkPatch((r) => ({ ...r, workerGroupId, streamOrEdge }))
+    bulkPatch((r) =>
+      isSourceRowAttachmentDisabled(r) ? r : { ...r, workerGroupId, streamOrEdge },
+    )
   }
 
   const bulkSetCriticality = (value: string) => {
@@ -278,6 +410,41 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
 
   const bulkSetType = (value: SourceSummaryRow['type']) => {
     bulkPatch((r) => ({ ...r, type: value }))
+  }
+
+  const bulkMarkAttachmentDisabled = () => {
+    bulkPatch((r) => ({ ...r, leaderImportedDisabled: true }))
+  }
+
+  const bulkMarkAttachmentEnabled = () => {
+    setPlan((p) => {
+      const targetIds = selected
+      const renames = new Map<string, string>()
+      const nextSummary = p.sourceSummary.map((r) => {
+        if (!targetIds.has(r.id)) {
+          return r
+        }
+        const oldTrim = (r.source || '').trim()
+        const cleared: SourceSummaryRow = { ...r, leaderImportedDisabled: undefined }
+        const stripped = stripAttachmentDisabledNameSuffix(cleared.source)
+        const next: SourceSummaryRow =
+          stripped !== cleared.source ? { ...cleared, source: stripped } : cleared
+        const newTrim = (next.source || '').trim()
+        if (oldTrim && newTrim && oldTrim !== newTrim) {
+          renames.set(oldTrim, newTrim)
+        }
+        return next
+      })
+      let sourceVolume = p.sourceVolume
+      for (const [from, to] of renames) {
+        sourceVolume = sourceVolume.map((v) => ((v.source || '').trim() === from ? { ...v, source: to } : v))
+      }
+      return {
+        ...p,
+        sourceSummary: nextSummary,
+        sourceVolume,
+      }
+    })
   }
 
   const bulkDelete = () => {
@@ -332,7 +499,17 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
             ariaLabel="Search sources"
             className="w-full sm:w-72"
           />
-          <div className="flex items-center gap-2 self-end">
+          {hasAnyDisabledSource ? (
+            <label className="flex shrink-0 cursor-pointer select-none items-center gap-2 self-center rounded-lg border border-cribl-border/80 bg-white px-2.5 py-2 text-xs text-cribl-ink shadow-ctrl sm:self-auto">
+              <input
+                type="checkbox"
+                checked={showDisabledSourcesInLists}
+                onChange={(e) => onShowDisabledSourcesInListsChange(e.target.checked)}
+              />
+              <span className="whitespace-nowrap">Show disabled</span>
+            </label>
+          ) : null}
+          <div className="flex shrink-0 items-center gap-2 self-end">
             <PopoverButton
               label="Filter"
               badge={activeFilterCount}
@@ -343,16 +520,48 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
                 setSortOpen(false)
               }}
             >
-              <div className="space-y-3">
+              <div className="w-full space-y-3">
                 <p className="m-0 text-xs font-semibold uppercase tracking-wider text-cribl-muted">Filters</p>
-                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
-                  <input
-                    type="checkbox"
-                    checked={onlyUnassigned}
-                    onChange={(e) => setOnlyUnassigned(e.target.checked)}
-                  />
-                  Unassigned only
-                </label>
+                {hasAnyDisabledSource ? (
+                  <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                    <input
+                      type="checkbox"
+                      checked={showDisabledSourcesInLists}
+                      onChange={(e) => onShowDisabledSourcesInListsChange(e.target.checked)}
+                    />
+                    Show disabled sources
+                  </label>
+                ) : null}
+                {hasAnyDisabledSource ? (
+                  <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                    <input
+                      type="checkbox"
+                      checked={disabledOnly}
+                      onChange={(e) => setDisabledOnly(e.target.checked)}
+                    />
+                    Disabled only
+                  </label>
+                ) : null}
+                <div>
+                  <label
+                    htmlFor="src-filter-assignment-state"
+                    className="m-0 mb-1.5 block text-xs font-semibold uppercase tracking-wider text-cribl-muted"
+                  >
+                    Assignment state
+                  </label>
+                  <select
+                    id="src-filter-assignment-state"
+                    value={attachmentKindFilter}
+                    onChange={(e) => setAttachmentKindFilter(e.target.value as AttachmentKindFilter)}
+                    className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                    aria-label="Filter by assignment to a worker group or fleet"
+                  >
+                    <option value="all">All</option>
+                    <option value="unassigned">Unassigned (no worker group / fleet)</option>
+                    <option value="stream">Attached to Stream worker group</option>
+                    <option value="edge">Attached to Edge fleet</option>
+                  </select>
+                </div>
                 <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
                   <input
                     type="checkbox"
@@ -360,6 +569,74 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
                     onChange={(e) => setOnlyHighPriority(e.target.checked)}
                   />
                   High priority only
+                </label>
+                <div>
+                  <label
+                    htmlFor="src-filter-criticality"
+                    className="m-0 mb-1.5 block text-xs font-semibold uppercase tracking-wider text-cribl-muted"
+                  >
+                    Criticality
+                  </label>
+                  <select
+                    id="src-filter-criticality"
+                    value={criticalityFilter}
+                    onChange={(e) => setCriticalityFilter(e.target.value as CriticalityFilterChoice)}
+                    className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                    aria-label="Filter by data criticality"
+                  >
+                    <option value="all">All</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                    <option value="unset">Not set</option>
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="src-filter-compliance"
+                    className="m-0 mb-1.5 block text-xs font-semibold uppercase tracking-wider text-cribl-muted"
+                  >
+                    Compliance
+                  </label>
+                  <select
+                    id="src-filter-compliance"
+                    value={complianceFilter}
+                    onChange={(e) => setComplianceFilter(e.target.value as ComplianceFilterChoice)}
+                    className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                    aria-label="Filter by compliance flag"
+                  >
+                    <option value="all">All</option>
+                    <option value="yes">Compliance-related</option>
+                    <option value="no">Not marked compliance</option>
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="src-filter-context"
+                    className="m-0 mb-1.5 block text-xs font-semibold uppercase tracking-wider text-cribl-muted"
+                  >
+                    Source context
+                  </label>
+                  <select
+                    id="src-filter-context"
+                    value={contextFilter}
+                    onChange={(e) => setContextFilter(e.target.value as ContextFilterChoice)}
+                    className="h-9 w-full rounded-lg border border-cribl-border bg-white px-2 text-sm"
+                    aria-label="Filter by on-prem vs cloud context"
+                  >
+                    <option value="all">All</option>
+                    <option value="onPrem">On-Prem</option>
+                    <option value="cloud">Cloud / Internet</option>
+                    <option value="unset">Not set</option>
+                  </select>
+                </div>
+                <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-cribl-ink">
+                  <input
+                    type="checkbox"
+                    checked={onlyWithDailyVolume}
+                    onChange={(e) => setOnlyWithDailyVolume(e.target.checked)}
+                  />
+                  Has daily volume (GB/d {'>'} 0)
                 </label>
                 {q.trim() ? (
                   <p className="m-0 rounded-md bg-cribl-card-body px-2 py-1.5 text-xs text-cribl-muted">
@@ -478,9 +755,23 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
                 {sortBy !== 'default' ? (
                   <div className="border-t border-cribl-border/70 pt-3">
                     <p className="m-0 mb-2 text-xs text-cribl-muted">
-                      Sorted by <span className="text-cribl-ink">{sortLabel}</span>{' '}
-                      ({sortDir === 'asc' ? 'A → Z / low → high' : 'Z → A / high → low'}).
-                      Missing values always sort last.
+                      Sorted by <span className="text-cribl-ink">{sortLabel}</span>
+                      {sortBy === 'attachmentDisabled' ? (
+                        <>
+                          {' '}
+                          (
+                          {sortDir === 'desc'
+                            ? 'Disabled first, then not disabled'
+                            : 'Not disabled first, then disabled'}
+                          ).
+                        </>
+                      ) : (
+                        <>
+                          {' '}
+                          ({sortDir === 'asc' ? 'A → Z / low → high' : 'Z → A / high → low'}). Missing values always
+                          sort last.
+                        </>
+                      )}
                     </p>
                     <button
                       type="button"
@@ -601,6 +892,36 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
                     </select>
                   </div>
 
+                  <div className="space-y-2 border-t border-cribl-border/70 pt-3">
+                    <p className="m-0 text-xs font-semibold uppercase tracking-wider text-cribl-muted">
+                      Attachment disabled
+                    </p>
+                    <p className="m-0 text-xs leading-snug text-cribl-muted">
+                      Disabled rows cannot be assigned or moved between worker groups from the plan UI.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => bulkMarkAttachmentDisabled()}
+                        className="h-9 w-full rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl hover:bg-cribl-elevate"
+                      >
+                        Mark selected as disabled (no attach)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => bulkMarkAttachmentEnabled()}
+                        className="h-9 w-full rounded-lg border border-cribl-border bg-white px-3 text-sm font-medium text-cribl-ink shadow-ctrl hover:bg-cribl-elevate"
+                      >
+                        Mark selected as not disabled
+                      </button>
+                    </div>
+                    <p className="m-0 text-[11px] leading-snug text-cribl-muted">
+                      &quot;Not disabled&quot; clears the stored import flag and removes a trailing{' '}
+                      <span className="font-mono text-cribl-ink/80"> disabled</span> suffix on the Source name when
+                      it matches the Leader convention (ingest rows are renamed to match).
+                    </p>
+                  </div>
+
                   <div className="flex flex-wrap gap-2 border-t border-cribl-border/70 pt-3">
                     <button
                       type="button"
@@ -637,6 +958,15 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
       {sources.length === 0 ? (
         <p className="m-0 rounded-xl border border-dashed border-cribl-border/90 bg-cribl-card-body px-4 py-6 text-center text-sm text-cribl-muted">
           No sources yet — use <strong>New source</strong> above or <strong>+ Add source</strong> in the left nav.
+        </p>
+      ) : filtered.length === 0 &&
+        sources.length > 0 &&
+        !showDisabledSourcesInLists &&
+        sources.every((s) => isSourceRowAttachmentDisabled(s)) ? (
+        <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">
+          All sources are disabled and are currently hidden. Turn on{' '}
+          <span className="font-medium text-cribl-ink">Show disabled sources</span> (toolbar or Filter menu) to see
+          them.
         </p>
       ) : filtered.length === 0 ? (
         <p className="m-0 rounded-xl border border-cribl-border/80 bg-white px-4 py-6 text-center text-sm text-cribl-muted">
@@ -716,11 +1046,18 @@ export function SourcesIndexView({ plan, setPlan, onOpenSource, onAddSource }: P
                     />
                   </label>
                   <div className="min-w-0 flex-1 p-1">
-                    <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
                       <p className="m-0 min-w-0 truncate text-sm font-semibold text-cribl-ink">{name}</p>
-                      {volStr ? (
-                        <span className="shrink-0 text-xs tabular-nums text-cribl-muted">{volStr}</span>
-                      ) : null}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {isSourceRowAttachmentDisabled(s) ? (
+                          <span className="rounded border border-cribl-border/80 bg-cribl-card-body px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cribl-muted">
+                            Disabled
+                          </span>
+                        ) : null}
+                        {volStr ? (
+                          <span className="shrink-0 text-xs tabular-nums text-cribl-muted">{volStr}</span>
+                        ) : null}
+                      </div>
                     </div>
                     {subtitle ? <p className="m-0 mt-1 text-xs text-cribl-muted">{subtitle}</p> : null}
                     <div

@@ -4,10 +4,10 @@ import { kvGet, kvSet } from '../lib/kvStore'
 const W_KEY = 'prefs/rail/px'
 const C_KEY = 'prefs/rail/collapsed'
 
-/** Desktop plan rail width (px). Tuned ~20% narrower than the prior generation. */
-const DEFAULT_W = 290
+/** Desktop plan rail width (px). Default matches the prior max; max is 30% wider than default. */
+const DEFAULT_W = 465
 const MIN_W = 194
-const MAX_W = 465
+const MAX_W = Math.round(DEFAULT_W * 1.3)
 
 function clampW(n: number) {
   return Math.min(MAX_W, Math.max(MIN_W, Math.round(n)))
