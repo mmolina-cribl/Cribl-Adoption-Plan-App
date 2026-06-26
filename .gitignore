@@ -14,6 +14,10 @@ dist-standalone
 build
 *.local
 
+# Customer diagnostic bundles and other archives (import at runtime only)
+*.tar.gz
+*.tgz
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
