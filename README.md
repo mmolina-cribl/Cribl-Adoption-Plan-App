@@ -47,7 +47,7 @@ see `docs/adoption-plan-tool-one-pager.md` when you maintain that tree locally
 > groups and fleets, the sources feeding them, and the daily volume each one
 > contributes.”
 
-**Release line:** **v3.0.1** — **Environment** routing map (tenant + diagnostic
+**Release line:** **v3.0.0** — **Environment** routing map (tenant + diagnostic
 import), unified **Import** with overwrite review, and the **v2.3.x** foundation
 (tenant/diag topology import, Summary / executive readout, AI assistant, Sources
 UX, gold **v0.9.1** export). See GitHub **Release** notes for the tag. Gold **v0.9.1** alignment
@@ -100,7 +100,7 @@ In the Cribl workspace, open **Settings → Apps → Install** (or your org’s 
 2. Deliver **`dist-standalone/cribl-adoption-plan.html`** (~2.2 MB raw / ~720 KB
    gzipped — comfortable to email), or point customers at the same asset on
    [GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)
-   (e.g. `…/releases/download/v3.0.1/cribl-adoption-plan.html`).
+   (e.g. `…/releases/download/v3.0.0/cribl-adoption-plan.html`).
 3. Customer opens the file in a modern browser (`file://` or hosted HTTPS). No
    Node, no server.
 

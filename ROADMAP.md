@@ -51,12 +51,6 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ## Recently delivered
 
-### v3.0.1 (GitHub Release)
-
-Patch release — **repo hygiene** only (same app bits as **v3.0.0**).
-
-- **`.gitignore`:** Explicitly ignore `*.tar.gz` and `*.tgz` so customer diagnostic bundles are never committed by mistake.
-
 ### v3.0.0 (GitHub Release)
 
 Major release: **Environment** routing visualization and import-time routing harvest.
