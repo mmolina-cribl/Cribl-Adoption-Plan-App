@@ -9,7 +9,7 @@
  * The in-memory `memory: ArrayBuffer | null` is the synchronous read path for
  * Export's click handler. KV is the persistent backing store: hydrated into
  * `memory` on app start, written back on every successful import, deleted on
- * "Clear plan".
+ * "Reset Plan".
  *
  * KV stores text only, so the ArrayBuffer is base64-encoded on write and
  * decoded on read. For typical .xlsx files (a few hundred KB to a few MB)
@@ -17,7 +17,7 @@
  * Very large workbooks (~50MB+) may want a different transport eventually.
  */
 
-import { kvDelete, kvGet, kvSet } from './kvStore'
+import { kvDelete, kvGetPreference, kvSet } from './kvStore'
 
 const KEY = 'import-shell'
 
@@ -61,7 +61,7 @@ export function setImportShellFromBytes(bytes: Uint8Array) {
 
 /** On app start, restore import shell from KV so Export still works after a refresh. */
 export async function hydrateImportShell(): Promise<void> {
-  const b64 = await kvGet<string | null>(KEY, null)
+  const b64 = await kvGetPreference<string | null>(KEY, null)
   if (typeof b64 !== 'string' || b64.length === 0) {
     memory = null
     return

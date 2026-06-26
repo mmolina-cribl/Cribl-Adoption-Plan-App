@@ -1,21 +1,25 @@
 import { useCallback, useId, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type { PlanState } from '../types/planTypes'
-import { PLAN_STORAGE_KEY } from '../hooks/usePlanStorage'
-import { clearImportShell } from '../lib/importShellStore'
-import { kvSet } from '../lib/kvStore'
-import { harvestDiagBundle } from '../lib/diagHarvest'
+import type { CriblEnvironmentSnapshot } from '../lib/criblEnvironmentTypes'
+import { hasExistingPlanData } from '../lib/hasExistingPlanData'
+import { buildImportOverwriteDiff, type ImportOverwriteDiff } from '../lib/importOverwriteDiff'
+import { importDiagTopology } from '../lib/importTopology'
 import {
   readImportOmitDisabledInputs,
   readImportOmitStockGroups,
-  writeImportOmitDisabledInputs,
-  writeImportOmitStockGroups,
 } from '../lib/importHarvestOptions'
-import { buildTenantImportDebugPayload, topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
-import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
+import { applyPendingImport, type PendingImport } from '../lib/pendingImport'
+import { topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
+import { ImportHarvestOptions } from './ImportHarvestOptions'
+import { ImportOverwriteReviewDialog } from './ImportOverwriteReviewDialog'
 
 type Props = {
+  plan: PlanState
+  environmentSnapshot: CriblEnvironmentSnapshot | null
   setPlan: Dispatch<SetStateAction<PlanState>>
-  hasExistingPlanData: boolean
+  setEnvironmentSnapshot: (s: CriblEnvironmentSnapshot | null) => void
+  embedded?: boolean
+  onViewEnvironment?: () => void
 }
 
 /**
@@ -23,18 +27,54 @@ type Props = {
  * (`.tar.gz` / `.tgz`). Parses bundle config in the browser — no Leader API.
  * UI: short plain-language copy; details in `docs/diag-import.md`.
  */
-export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
+export function DiagImportSection({
+  plan,
+  environmentSnapshot,
+  setPlan,
+  setEnvironmentSnapshot,
+  embedded,
+  onViewEnvironment,
+}: Props) {
   const id = useId()
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [pendingFile, setPendingFile] = useState<Uint8Array | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [importDiff, setImportDiff] = useState<ImportOverwriteDiff | null>(null)
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
   const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
   const [omitDisabledInputs, setOmitDisabledInputs] = useState(readImportOmitDisabledInputs)
+
+  const clearReview = useCallback(() => {
+    setReviewOpen(false)
+    setImportDiff(null)
+    setPendingImport(null)
+  }, [])
+
+  const applyImport = useCallback(
+    async (pending: PendingImport) => {
+      setError(null)
+      setOk(null)
+      setImportDebug(null)
+      setDebugCopyOk(false)
+      setBusy(true)
+      try {
+        const result = await applyPendingImport(pending, { setPlan, setEnvironmentSnapshot })
+        if (result.importDebug) {
+          setImportDebug(result.importDebug)
+        }
+        setOk(result.message)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Diagnostic import failed.')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [setPlan, setEnvironmentSnapshot],
+  )
 
   const runImport = useCallback(
     async (bytes: Uint8Array) => {
@@ -44,127 +84,106 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
       setDebugCopyOk(false)
       setBusy(true)
       try {
-        const harvest = await harvestDiagBundle(bytes, {
+        const options = {
           omitStockWorkerGroups: omitStockGroups,
           omitDisabledInputs,
-        })
-        const next = topologyHarvestToPlanState(harvest)
-        const capturedAt = new Date().toISOString()
-        const note =
-          harvest.warnings.length > 0 ? `Diag import notes: ${harvest.warnings.join(' ')}` : undefined
-        const planWithProvenance: PlanState = {
-          ...next,
-          planProvenance: { kind: 'diag', capturedAt, note },
         }
-        setPlan(planWithProvenance)
-        await kvSet(PLAN_STORAGE_KEY, planWithProvenance)
-        setImportDebug(buildTenantImportDebugPayload(capturedAt, harvest, planWithProvenance))
-        clearImportShell()
-        setOk(
-          'Plan replaced from diagnostic bundle. Review worker groups, fleets, and sources before exporting — routing is not imported.',
-        )
+        const { capturedAt, harvest, environment } = await importDiagTopology(bytes, options)
+        const nextPlan = topologyHarvestToPlanState(harvest)
+
+        if (hasExistingPlanData(plan)) {
+          const diff = buildImportOverwriteDiff({
+            importKind: 'diag',
+            currentPlan: plan,
+            nextPlan,
+            currentEnvironment: environmentSnapshot,
+            nextEnvironment: environment,
+            harvestWarnings: harvest.warnings,
+          })
+          setPendingImport({
+            kind: 'topology',
+            plan: nextPlan,
+            environment,
+            capturedAt,
+            harvest,
+            harvestWarnings: harvest.warnings,
+            importKind: 'diag',
+          })
+          setImportDiff(diff)
+          setReviewOpen(true)
+          return
+        }
+
+        await applyImport({
+          kind: 'topology',
+          plan: nextPlan,
+          environment,
+          capturedAt,
+          harvest,
+          harvestWarnings: harvest.warnings,
+          importKind: 'diag',
+        })
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Diagnostic import failed.')
       } finally {
         setBusy(false)
       }
     },
-    [setPlan, omitStockGroups, omitDisabledInputs],
+    [applyImport, environmentSnapshot, omitDisabledInputs, omitStockGroups, plan],
   )
 
+  const Wrapper = embedded ? 'div' : 'section'
+
   return (
-    <section className="rounded-xl border border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
-      <ConfirmImportOverwriteDialog
-        open={confirmOpen}
-        onCancel={() => {
-          setConfirmOpen(false)
-          setPendingFile(null)
-        }}
-        onConfirm={() => {
-          const bytes = pendingFile
-          setConfirmOpen(false)
-          setPendingFile(null)
-          if (bytes) {
-            void runImport(bytes)
+    <Wrapper className={embedded ? undefined : 'rounded-xl border border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5'}>
+      <ImportOverwriteReviewDialog
+        open={reviewOpen}
+        diff={importDiff}
+        busy={busy}
+        onCancel={clearReview}
+        onAccept={() => {
+          const pending = pendingImport
+          clearReview()
+          if (pending) {
+            void applyImport(pending)
           }
         }}
       />
-      <h3 className="m-0 text-sm font-semibold text-cribl-ink">Import from diagnostic bundle</h3>
-      <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
-        Pick a Stream or Edge diagnostic archive (<span className="font-mono text-cribl-ink/90">.tar.gz</span> /{' '}
-        <span className="font-mono text-cribl-ink/90">.tgz</span>) you already have on disk. We read configured **sources** from the bundle and
-        fill worker groups / fleets in the plan — <strong className="text-cribl-ink/90">pipelines and routing are not imported.</strong> Use the
-        import options below to omit built-in default group folders or include disabled inputs when you need them in the plan. Everything stays in your
-        browser (nothing uploaded). For exact paths and limits, see <span className="font-mono text-cribl-ink/90">docs/diag-import.md</span>.
+      {!embedded ? <h3 className="m-0 text-sm font-semibold text-cribl-ink">Import from diagnostic bundle</h3> : null}
+      <p className="m-0 mt-2 text-sm text-cribl-muted">
+        Upload a Cribl diagnostic bundle (<span className="font-mono text-cribl-ink/80">.tar.gz</span>) from the
+        customer&apos;s environment. We load their worker groups, fleets, and data sources into this plan, plus routing
+        for the Environment page — read entirely in your browser, with no connection to their Leader.
       </p>
-      <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
-        <p className="m-0 text-xs font-medium text-cribl-ink/90">Import options</p>
-        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={!omitDisabledInputs}
-            onChange={(e) => {
-              const include = e.target.checked
-              const omit = !include
-              setOmitDisabledInputs(omit)
-              writeImportOmitDisabledInputs(omit)
-            }}
-          />
-          <span>
-            <strong className="text-cribl-ink/85">Include disabled inputs.</strong> Unchecked by default — check to import YAML entries with{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span> (each row gets <span className="font-mono"> disabled</span> on{' '}
-            <strong className="text-cribl-ink/85">Source</strong>).
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={omitStockGroups}
-            onChange={(e) => {
-              const v = e.target.checked
-              setOmitStockGroups(v)
-              writeImportOmitStockGroups(v)
-            }}
-          />
-          <span>
-            <strong className="text-cribl-ink/85">Omit built-in default group folders</strong> (
-            <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Unchecked by default.
-          </span>
-        </label>
-        <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>
+      <div className="mt-3">
+        <ImportHarvestOptions
+          omitStockGroups={omitStockGroups}
+          setOmitStockGroups={setOmitStockGroups}
+          omitDisabledInputs={omitDisabledInputs}
+          setOmitDisabledInputs={setOmitDisabledInputs}
+        />
       </div>
-      <p className="m-0 mt-2 rounded-lg border border-cribl-border/80 bg-cribl-canvas/50 px-3 py-2 text-sm leading-relaxed text-cribl-muted">
-        <strong className="text-cribl-ink/90">Cribl.Cloud:</strong> diagnostics run from the <strong className="text-cribl-ink/90">Leader</strong>, not as
-        separate <strong className="text-cribl-ink/90">per-worker / per-node</strong> bundles from the Workers UI the way you often can on self-managed
-        Stream — so a file that lists every worker group’s on-disk config is harder to come by. <strong className="text-cribl-ink/90">Import from live
-        tenant</strong> (when shown) is usually the better fit on Cloud.
-      </p>
-      <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
-        <strong className="text-cribl-ink/90">Self-managed:</strong> exported bundles from a Leader or Worker often work best; Worker exports
-        usually give clearer per–worker-group results than Leader-only archives (which may show mostly **Leader (global)**).
-      </p>
       <details className="mt-3 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2">
-        <summary className="cursor-pointer select-none text-sm font-medium text-cribl-ink outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/35">
-          Browser requirements &amp; privacy
-        </summary>
-        <div className="mt-2 space-y-2 border-t border-cribl-border/50 pt-2 text-xs leading-relaxed text-cribl-muted">
-          <p className="m-0">
-            <strong className="text-cribl-ink/90">Decompression:</strong> uses the platform <span className="font-mono">DecompressionStream(&apos;gzip&apos;)</span>{' '}
-            API. Very old browsers may not support in-tab gzip — use a current Chrome, Edge, or Firefox.
-          </p>
-          <p className="m-0">
-            <strong className="text-cribl-ink/90">Sensitive data:</strong> diagnostic bundles can still contain hostnames, paths, or collector
-            settings. Only import bundles you are allowed to handle under your customer&apos;s policy; treat the debug JSON as potentially sensitive.
-          </p>
-        </div>
+        <summary className="cursor-pointer text-sm font-medium text-cribl-ink">Browser &amp; privacy</summary>
+        <p className="m-0 mt-2 border-t border-cribl-border/50 pt-2 text-xs text-cribl-muted">
+          Uses in-browser gzip decompression. Bundles may contain sensitive hostnames or paths — handle per customer policy.
+        </p>
       </details>
       {ok && (
-        <p className="m-0 mt-3 rounded-lg border border-cribl-primary/30 bg-cribl-primary-soft px-3 py-2 text-sm text-cribl-primary-ink" role="status">
-          {ok}
-        </p>
+        <div className="m-0 mt-3 space-y-2">
+          <p className="m-0 rounded-lg border border-cribl-primary/30 bg-cribl-primary-soft px-3 py-2 text-sm text-cribl-primary-ink" role="status">
+            {ok}
+          </p>
+          {onViewEnvironment ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-cribl-primary hover:underline"
+              onClick={() => onViewEnvironment()}
+            >
+              View routing in Environment →
+            </button>
+          ) : null}
+        </div>
       )}
       {error && (
         <p className="m-0 mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900" role="alert">
@@ -228,11 +247,6 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
           try {
             const ab = await f.arrayBuffer()
             const bytes = new Uint8Array(ab)
-            if (hasExistingPlanData) {
-              setPendingFile(bytes)
-              setConfirmOpen(true)
-              return
-            }
             void runImport(bytes)
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not read that file.')
@@ -246,12 +260,12 @@ export function DiagImportSection({ setPlan, hasExistingPlanData }: Props) {
           onClick={() => fileRef.current?.click()}
           className="inline-flex h-10 min-w-[12rem] items-center justify-center rounded-lg bg-cribl-navy px-4 text-sm font-semibold text-white shadow-[0_1px_0_rgba(0,0,0,0.1)] transition hover:bg-cribl-navy-mid disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? 'Reading bundle…' : 'Choose .tar.gz / .tgz'}
+          {busy ? 'Reading bundle…' : 'Choose diagnostic bundle'}
         </button>
         <label htmlFor={id + '-diag'} className="text-xs text-cribl-muted">
-          Replaces the current plan (same as Excel import).
+          Shows a change summary before replacing plan data.
         </label>
       </div>
-    </section>
+    </Wrapper>
   )
 }

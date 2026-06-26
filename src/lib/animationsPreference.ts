@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { kvGet, kvSet } from './kvStore'
+import { kvGetPreference, kvSet } from './kvStore'
 
 /**
  * Per-user "Animations enabled" preference.
@@ -28,13 +28,20 @@ const DEFAULT_ENABLED = true
 
 let enabled: boolean = DEFAULT_ENABLED
 const listeners = new Set<(v: boolean) => void>()
+let hydrateStarted = false
 
-void (async () => {
-  enabled = await kvGet<boolean>(KEY, DEFAULT_ENABLED)
-  for (const fn of listeners) {
-    fn(enabled)
+function ensureAnimationsPreferenceHydrated(): void {
+  if (hydrateStarted) {
+    return
   }
-})()
+  hydrateStarted = true
+  void (async () => {
+    enabled = await kvGetPreference<boolean>(KEY, DEFAULT_ENABLED)
+    for (const fn of listeners) {
+      fn(enabled)
+    }
+  })()
+}
 
 export function getAnimationsEnabled(): boolean {
   return enabled
@@ -58,6 +65,7 @@ export function setAnimationsEnabled(v: boolean): void {
 export function useAnimationsEnabled(): boolean {
   const [, force] = useState(0)
   useEffect(() => {
+    ensureAnimationsPreferenceHydrated()
     const fn = () => force((n) => n + 1)
     listeners.add(fn)
     return () => {

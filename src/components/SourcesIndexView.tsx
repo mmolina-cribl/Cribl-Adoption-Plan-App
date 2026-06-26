@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { sourceLabel, type PlanState, type SourceSummaryRow, type WorkerGroupRow } from '../types/planTypes'
+import { type PlanState, type SourceSummaryRow, type WorkerGroupRow } from '../types/planTypes'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { deriveStreamOrEdge } from '../lib/workerGroupIds'
-import { isSourceRowAttachmentDisabled, stripAttachmentDisabledNameSuffix } from '../lib/sourceAttachmentDisabled'
+import { isSourceRowAttachmentDisabled, sourceDisplayLabel, stripAttachmentDisabledNameSuffix } from '../lib/sourceAttachmentDisabled'
 import { PopoverButton } from './PopoverButton'
 import { AnimatedBar } from './AnimatedBar'
 import { SearchInput } from './SearchInput'
@@ -991,7 +991,7 @@ export function SourcesIndexView({
             // Look up the row's index in the original sourceSummary so the
             // "Source N" fallback stays stable across filter/sort.
             const originalIndex = plan.sourceSummary.findIndex((r) => r.id === s.id)
-            const name = sourceLabel(s, originalIndex >= 0 ? originalIndex : 0)
+            const name = sourceDisplayLabel(s, originalIndex >= 0 ? originalIndex : 0)
             const tile = s.sourceTile?.trim()
             const v = parseGb(s.avgDailyGb)
             const volStr = Number.isFinite(v) ? formatGbOrTbPerDayStr(v) : ''

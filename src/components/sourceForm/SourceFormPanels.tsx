@@ -7,7 +7,8 @@ import {
 } from '../../data/referenceData'
 import { PencilIcon } from '../PencilIcon'
 import { AssistantMessageRich } from '../AssistantMessageRich'
-import { sourceLabel, type PlanState, type SourceSummaryRow } from '../../types/planTypes'
+import { type PlanState, type SourceSummaryRow } from '../../types/planTypes'
+import { isSourceRowAttachmentDisabled, sourceDisplayLabel, stripAttachmentDisabledNameSuffix } from '../../lib/sourceAttachmentDisabled'
 import {
   CheckboxLabeled,
   ComboboxText,
@@ -18,8 +19,7 @@ import {
   SectionBox,
   SelectWithEmpty,
 } from '../FormControls'
-import { getSourceDetailCardsExpanded } from '../../lib/detailCardsPreference'
-import { isSourceRowAttachmentDisabled } from '../../lib/sourceAttachmentDisabled'
+import { getSourceDetailCardsExpanded, ensureDetailCardsPreferenceHydrated } from '../../lib/detailCardsPreference'
 
 export type SourceSummaryFieldPatch = (k: keyof SourceSummaryRow, v: string | boolean) => void
 
@@ -84,7 +84,7 @@ export function PrimaryDataPointsBlock({ row, s }: Base) {
       >
         <input
           id={`s-${row.id}-src`}
-          value={row.source}
+          value={stripAttachmentDisabledNameSuffix(row.source) || row.source}
           disabled
           className="cursor-not-allowed bg-cribl-canvas"
         />
@@ -542,8 +542,12 @@ export function SourceSummaryStack({ plan, row, s, sourceIndex, onOpenGuidedTour
   // uses the Source name as the row title. The header inline-edit now writes
   // directly to `source`; the disabled "Source" field inside Primary Data
   // Points mirrors the same value so both spots stay in sync.
-  const label = sourceLabel(row, sourceIndex)
+  const label = sourceDisplayLabel(row, sourceIndex)
   const expandByDefault = getSourceDetailCardsExpanded()
+
+  useEffect(() => {
+    ensureDetailCardsPreferenceHydrated()
+  }, [])
 
   useEffect(() => {
     if (!editing) {

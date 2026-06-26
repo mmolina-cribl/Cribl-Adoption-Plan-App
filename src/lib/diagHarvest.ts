@@ -1,14 +1,17 @@
 /**
  * Bootstrap plan topology from a **Cribl diagnostic bundle** (`.tar.gz` / `.tgz`).
  *
- * Reads `groups/<groupId>/local/cribl/inputs.yml` (and `default/`, `inputs/*.yml` fallbacks)
- * the same way the Leader exposes configured inputs — offline, in the browser.
+ * Reads per-group config under `groups/<groupId>/`:
+ *   - Stream worker groups: `local|default/cribl/inputs.yml` (+ `inputs/*.yml`)
+ *   - Edge fleets: `local|default/edge/inputs.yml` (+ `inputs/*.yml`)
+ *
+ * Leader-global config outside `groups/` is intentionally **not** imported.
  *
  * @see docs/diag-import.md
  */
 import { parse as parseYaml } from 'yaml'
 import type { LeaderInputItem, MasterGroupItem, TenantHarvestResult, TenantHarvestOptions } from './tenantHarvest'
-import { isStockLeaderWorkerGroup } from './leaderStockGroups'
+import { isLeaderOutpostGroup, isLeaderSearchGroup, isStockLeaderWorkerGroup } from './leaderStockGroups'
 import { extractTarGzArchive } from './diagTarGz'
 
 function isRecord(x: unknown): x is Record<string, unknown> {
@@ -110,12 +113,25 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, '/').replace(/^\.\/+/, '')
 }
 
+function groupPathNeedle(groupId: string): string {
+  return `groups/${groupId}/`
+}
+
+function pathUnderGroup(normalizedPath: string, groupId: string): boolean {
+  const needle = groupPathNeedle(groupId)
+  return normalizedPath.includes(`/${needle}`) || normalizedPath.startsWith(needle)
+}
+
+function pathEndsWith(normalizedPath: string, suffix: string): boolean {
+  return normalizedPath.endsWith(suffix) || normalizedPath.endsWith(`/${suffix}`)
+}
+
 /**
  * True if path is under a real worker-group config tree (`…/groups/<id>/local/` or `…/default/`),
  * not a stray match like `…/groups/default/log/…`.
  */
 export function groupConfigPathPrefix(normalizedPath: string): string | null {
-  const m = normalizedPath.match(/\/groups\/([^/]+)\/(local|default)\//)
+  const m = normalizedPath.match(/(?:^|\/)groups\/([^/]+)\/(local|default)\//)
   return m ? m[1]! : null
 }
 
@@ -138,34 +154,132 @@ function mergeInputsYamlTexts(parts: string[]): LeaderInputItem[] {
   return [...byId.values()]
 }
 
-function collectInputsForGroup(files: Map<string, Uint8Array>, groupId: string): LeaderInputItem[] {
+type ConfigTier = 'default' | 'local'
+type ConfigProduct = 'cribl' | 'edge'
+
+const INPUT_FILE_PRIORITY: Record<`${ConfigTier}-${ConfigProduct}`, number> = {
+  'default-cribl': 20,
+  'default-edge': 25,
+  'local-cribl': 40,
+  'local-edge': 45,
+}
+
+const INPUT_DIR_BASE_PRIORITY: Record<`${ConfigTier}-${ConfigProduct}`, number> = {
+  'default-cribl': 35,
+  'default-edge': 38,
+  'local-cribl': 60,
+  'local-edge': 65,
+}
+
+/** Merge Stream (`cribl`) and Edge fleet (`edge`) inputs for one Leader group id. */
+export function collectInputsForGroup(files: Map<string, Uint8Array>, groupId: string): LeaderInputItem[] {
   type Hit = { priority: number; text: string }
   const hits: Hit[] = []
+
   for (const [path, data] of files) {
     const p = normalizePath(path)
-    if (!p.includes(`/groups/${groupId}/`)) {
+    if (!pathUnderGroup(p, groupId)) {
       continue
     }
     const text = textFromEntry(data)
-    if (p.endsWith(`/groups/${groupId}/default/cribl/inputs.yml`) || p.endsWith(`/groups/${groupId}/default/cribl/inputs.yaml`)) {
-      hits.push({ priority: 20, text })
-      continue
+    for (const tier of ['default', 'local'] as const) {
+      for (const product of ['cribl', 'edge'] as const) {
+        const inputsBase = groupPathNeedle(groupId) + `${tier}/${product}/inputs`
+        if (pathEndsWith(p, `${inputsBase}.yml`) || pathEndsWith(p, `${inputsBase}.yaml`)) {
+          hits.push({ priority: INPUT_FILE_PRIORITY[`${tier}-${product}`], text })
+          continue
+        }
+        const dirNeedle = `${inputsBase}/`
+        if ((p.includes(`/${dirNeedle}`) || p.includes(dirNeedle)) && (p.endsWith('.yml') || p.endsWith('.yaml'))) {
+          const tie = (p.split('/').pop() ?? '').length / 1000
+          hits.push({ priority: INPUT_DIR_BASE_PRIORITY[`${tier}-${product}`] + tie, text })
+        }
+      }
     }
-    if (p.endsWith(`/groups/${groupId}/local/cribl/inputs.yml`) || p.endsWith(`/groups/${groupId}/local/cribl/inputs.yaml`)) {
-      hits.push({ priority: 40, text })
+  }
+
+  hits.sort((a, b) => a.priority - b.priority)
+  return mergeInputsYamlTexts(hits.map((h) => h.text))
+}
+
+function readLeaderGroupsMetaEntry(files: Map<string, Uint8Array>, groupId: string): Partial<MasterGroupItem> {
+  for (const suffix of ['local/cribl/groups.yml', 'default/cribl/groups.yml'] as const) {
+    for (const [path, data] of files) {
+      const p = normalizePath(path)
+      if (!p.endsWith(suffix)) {
+        continue
+      }
+      let doc: unknown
+      try {
+        doc = parseYaml(textFromEntry(data), { maxAliasCount: 100 })
+      } catch {
+        continue
+      }
+      if (!isRecord(doc)) {
+        continue
+      }
+      const entry = doc[groupId]
+      if (!isRecord(entry)) {
+        continue
+      }
+      const meta: Partial<MasterGroupItem> = {}
+      if (typeof entry.description === 'string') {
+        meta.description = entry.description
+      }
+      if (typeof entry.name === 'string' && !meta.description) {
+        meta.description = entry.name
+      }
+      if (entry.isFleet === true) {
+        meta.isFleet = true
+      }
+      if (entry.isSearch === true) {
+        meta.isSearch = true
+      }
+      if (typeof entry.type === 'string') {
+        meta.type = entry.type
+      }
+      return meta
+    }
+  }
+  return {}
+}
+
+/** Leader `groups.yml` entry plus per-group `groups.yml` when present. */
+export function readDiagGroupMeta(files: Map<string, Uint8Array>, groupId: string): Partial<MasterGroupItem> {
+  return { ...readLeaderGroupsMetaEntry(files, groupId), ...readGroupsMetaYml(files, groupId) }
+}
+
+/** Diag paths for Cribl Search / Lakehouse engine groups (not Stream routing). */
+export function groupHasLakehouseSearchPaths(files: Map<string, Uint8Array>, groupId: string): boolean {
+  const needle = groupPathNeedle(groupId)
+  for (const path of files.keys()) {
+    const p = normalizePath(path)
+    if (!pathUnderGroup(p, groupId)) {
       continue
     }
     if (
-      (p.includes(`/groups/${groupId}/default/cribl/inputs/`) || p.includes(`/groups/${groupId}/local/cribl/inputs/`)) &&
-      (p.endsWith('.yml') || p.endsWith('.yaml'))
+      /\/cribl\/local-search-engines\.ya?ml$/.test(p) ||
+      /\/cribl\/local_search\.ya?ml$/.test(p) ||
+      /\/cribl\/search\.ya?ml$/.test(p)
     ) {
-      const base = p.includes('/local/cribl/inputs/') ? 60 : 35
-      const tie = (p.split('/').pop() ?? '').length / 1000
-      hits.push({ priority: base + tie, text })
+      return true
+    }
+    if (p.includes(`${needle}local/cribl/datasets.yml`) || p.includes(`${needle}default/cribl/datasets.yml`)) {
+      const text = textFromEntry(files.get(path)!)
+      if (text.includes('lake_house_engine') || text.includes('provider: lakehouse')) {
+        return true
+      }
     }
   }
-  hits.sort((a, b) => a.priority - b.priority)
-  return mergeInputsYamlTexts(hits.map((h) => h.text))
+  return false
+}
+
+export function isDiagSearchGroup(files: Map<string, Uint8Array>, groupId: string): boolean {
+  const meta = readDiagGroupMeta(files, groupId)
+  if (isLeaderSearchGroup({ id: groupId, ...meta })) {
+    return true
+  }
+  return groupHasLakehouseSearchPaths(files, groupId)
 }
 
 function readGroupsMetaYml(files: Map<string, Uint8Array>, groupId: string): Partial<MasterGroupItem> {
@@ -199,6 +313,9 @@ function readGroupsMetaYml(files: Map<string, Uint8Array>, groupId: string): Par
       if (doc.isFleet === true) {
         meta.isFleet = true
       }
+      if (doc.isSearch === true) {
+        meta.isSearch = true
+      }
       if (typeof doc.type === 'string') {
         meta.type = doc.type
       }
@@ -212,48 +329,74 @@ function discoverGroupIds(files: Map<string, Uint8Array>): string[] {
   const ids = new Set<string>()
   for (const path of files.keys()) {
     const gid = groupConfigPathPrefix(normalizePath(path))
-    if (gid && gid !== 'default_search') {
+    if (gid) {
       ids.add(gid)
     }
   }
   return [...ids].filter((id) => id.length > 0)
 }
 
-const LEADER_GLOBAL_LEADER_ID = '__diag_leader_scope__'
+/** @internal exported for environment harvest */
+export function discoverDiagGroupIds(files: Map<string, Uint8Array>): string[] {
+  return discoverGroupIds(files)
+}
 
-/** `$CRIBL_HOME/local/cribl/inputs.yml` (and `default/`) — **not** under `groups/`. */
-function collectLeaderHomeScopeInputs(files: Map<string, Uint8Array>): LeaderInputItem[] {
-  type Hit = { priority: number; text: string }
-  const hits: Hit[] = []
-  for (const [path, data] of files) {
+/** True when the bundle has Edge fleet `inputs.yml` (or split files) under this group. */
+export function groupHasEdgeInputPaths(files: Map<string, Uint8Array>, groupId: string): boolean {
+  for (const path of files.keys()) {
     const p = normalizePath(path)
-    if (p.includes('/groups/')) {
+    if (!pathUnderGroup(p, groupId)) {
       continue
     }
-    if (p.endsWith('/default/cribl/inputs.yml') || p.endsWith('/default/cribl/inputs.yaml')) {
-      hits.push({ priority: 15, text: textFromEntry(data) })
-      continue
-    }
-    if (p.endsWith('/local/cribl/inputs.yml') || p.endsWith('/local/cribl/inputs.yaml')) {
-      hits.push({ priority: 35, text: textFromEntry(data) })
+    const edgeDefault = `${groupPathNeedle(groupId)}default/edge/inputs`
+    const edgeLocal = `${groupPathNeedle(groupId)}local/edge/inputs`
+    if (
+      (p.includes(edgeDefault) || p.includes(edgeLocal)) &&
+      (p.endsWith('.yml') || p.endsWith('.yaml'))
+    ) {
+      return true
     }
   }
-  hits.sort((a, b) => a.priority - b.priority)
-  return mergeInputsYamlTexts(hits.map((h) => h.text))
+  return false
+}
+
+/** Fill `isFleet` / `type` when `groups.yml` is missing from the diag. */
+export function inferDiagGroupMeta(
+  files: Map<string, Uint8Array>,
+  groupId: string,
+  meta: Partial<MasterGroupItem>,
+): Partial<MasterGroupItem> {
+  const result: Partial<MasterGroupItem> = { ...meta }
+  if (result.isFleet === true) {
+    return result
+  }
+  if (groupHasEdgeInputPaths(files, groupId)) {
+    result.isFleet = true
+    if (!result.type) {
+      result.type = 'edge'
+    }
+    return result
+  }
+  if (groupId === 'default_fleet') {
+    result.isFleet = true
+    if (!result.type) {
+      result.type = 'edge'
+    }
+  }
+  return result
 }
 
 /**
- * Parse a diagnostic bundle archive and return the same harvest shape as {@link harvestTenantTopology}.
+ * Parse an extracted diag file map (test seam) or call via {@link harvestDiagBundle}.
  */
-export async function harvestDiagBundle(
-  archiveBytes: Uint8Array,
+export function harvestDiagFromFiles(
+  files: Map<string, Uint8Array>,
   options?: TenantHarvestOptions,
-): Promise<TenantHarvestResult> {
+): TenantHarvestResult {
   const warnings: string[] = []
   const omitStock = options?.omitStockWorkerGroups === true
   const omitDisabled = options?.omitDisabledInputs !== false
 
-  const files = await extractTarGzArchive(archiveBytes)
   if (files.size === 0) {
     return {
       groups: [],
@@ -263,47 +406,51 @@ export async function harvestDiagBundle(
   }
 
   const rawIds = discoverGroupIds(files)
-  const leaderScopeRaw = collectLeaderHomeScopeInputs(files)
 
-  if (rawIds.length === 0 && leaderScopeRaw.length === 0) {
+  if (rawIds.length === 0) {
     warnings.push(
-      'No worker-group config paths (`groups/<id>/local/` or `groups/<id>/default/`) and no Leader-scope `local/cribl/inputs.yml` — is this a Cribl Stream/Edge diagnostic bundle, or were configs excluded from the diag?',
+      'No worker-group config paths found (`groups/<id>/local/` or `groups/<id>/default/`) — is this a Cribl Stream/Edge diagnostic bundle, or were configs excluded from the diag?',
     )
     return { groups: [], inputsByGroup: {}, warnings }
   }
 
   let omittedDisabledInputs = 0
-  let leaderScopeInputs = leaderScopeRaw
-  if (omitDisabled) {
-    omittedDisabledInputs += leaderScopeRaw.filter((i) => i.disabled).length
-    leaderScopeInputs = leaderScopeRaw.filter((i) => !i.disabled)
-  }
-
   const groups: MasterGroupItem[] = []
   const inputsByGroup: Record<string, LeaderInputItem[]> = {}
 
-  if (leaderScopeInputs.length > 0) {
-    groups.push({
-      id: LEADER_GLOBAL_LEADER_ID,
-      description: 'Leader (global)',
-      type: 'stream',
-    })
-    inputsByGroup[LEADER_GLOBAL_LEADER_ID] = leaderScopeInputs
-  }
-
   let skippedStock = 0
+  let skippedOutpost = 0
+  let skippedSearch = 0
+
   for (const id of rawIds.sort()) {
+    const metaFromFile = readDiagGroupMeta(files, id)
+    if (isLeaderOutpostGroup({ id, type: metaFromFile.type })) {
+      skippedOutpost += 1
+      warnings.push(`Skipped Outpost group "${id}" — not imported into adoption plans.`)
+      continue
+    }
+
+    if (isDiagSearchGroup(files, id)) {
+      skippedSearch += 1
+      warnings.push(
+        `Skipped Search / Lakehouse engine group "${id}" — not a Stream worker group or Edge fleet.`,
+      )
+      continue
+    }
+
     if (omitStock && isStockLeaderWorkerGroup({ id })) {
       skippedStock += 1
       continue
     }
-    const meta = readGroupsMetaYml(files, id)
+
+    const meta = inferDiagGroupMeta(files, id, metaFromFile)
     const g: MasterGroupItem = {
       id,
       description: meta.description,
       isFleet: meta.isFleet,
       type: meta.type,
     }
+
     let inputs = collectInputsForGroup(files, id)
     if (omitDisabled) {
       omittedDisabledInputs += inputs.filter((i) => i.disabled).length
@@ -314,14 +461,26 @@ export async function harvestDiagBundle(
 
     if (inputs.length === 0) {
       warnings.push(
-        `No inputs parsed for group "${id}" (looked for local/default cribl/inputs.yml and inputs/*.yml under groups/)${omitDisabled ? ' after skipping disabled inputs' : ''}.`,
+        `No inputs parsed for group "${id}" (looked for local/default cribl/edge inputs.yml and inputs/*.yml under groups/)${omitDisabled ? ' after skipping disabled inputs' : ''}.`,
       )
     }
   }
 
+  if (skippedOutpost > 0) {
+    warnings.push(
+      `Skipped ${skippedOutpost} Outpost group folder(s) — Outpost topology is not imported into adoption plans.`,
+    )
+  }
+
+  if (skippedSearch > 0) {
+    warnings.push(
+      `Skipped ${skippedSearch} Search / Lakehouse engine group folder(s) — use Cribl Search for lakehouse routing, not adoption-plan worker groups.`,
+    )
+  }
+
   if (omitStock && skippedStock > 0) {
     warnings.push(
-      `Omitted ${skippedStock} built-in Cribl group folder(s) (default / defaultHybrid / default_fleet / default_outpost) per import option.`,
+      `Omitted ${skippedStock} built-in Cribl group folder(s) (default / defaultHybrid / default_fleet) per import option.`,
     )
   }
 
@@ -331,7 +490,6 @@ export async function harvestDiagBundle(
     )
   }
 
-  // Drop groups that have zero inputs AND no meaningful metadata (often empty stub dirs)
   const pruned = groups.filter((g) => {
     const inputs = inputsByGroup[g.id] ?? []
     if (inputs.length > 0) {
@@ -348,9 +506,20 @@ export async function harvestDiagBundle(
 
   if (pruned.length === 0) {
     warnings.push(
-      'No parsable inputs.yml content found under `groups/<id>/local|default/cribl/` or Leader `local/cribl/inputs.yml` — bundle may omit configs, use a different on-disk layout, or inputs may live only on workers (try a Worker Node diag).',
+      'No parsable inputs.yml content found under `groups/<id>/local|default/cribl|edge/` — bundle may omit configs, use a different on-disk layout, or inputs may live only on workers (try a Worker Node diag).',
     )
   }
 
   return { groups: pruned, inputsByGroup: prunedInputs, warnings }
+}
+
+/**
+ * Parse a diagnostic bundle archive and return the same harvest shape as {@link harvestTenantTopology}.
+ */
+export async function harvestDiagBundle(
+  archiveBytes: Uint8Array,
+  options?: TenantHarvestOptions,
+): Promise<TenantHarvestResult> {
+  const files = await extractTarGzArchive(archiveBytes)
+  return harvestDiagFromFiles(files, options)
 }

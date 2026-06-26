@@ -78,7 +78,7 @@ export function buildTenantImportDebugPayload(
 
   const perGroup = harvest.groups.map((g) => {
     const inputs = harvest.inputsByGroup[g.id] ?? []
-    const displayLabel = (g.description ?? '').trim() || g.id
+    const displayLabel = g.id
     const kind = leaderWorkerGroupKind(g)
     return {
       criblGroupId: g.id,
@@ -184,7 +184,7 @@ function syntheticSourceFromLeaderInput(workerGroupId: string, inp: LeaderInputI
 }
 
 function workerGroupRowFromGroup(g: MasterGroupItem): WorkerGroupRow {
-  const name = (g.description ?? '').trim() || g.id
+  const name = g.id
   const kind = leaderWorkerGroupKind(g)
   const workerDetail = leaderWorkerGroupDetailFromMetrics({
     estimatedIngestRate: g.estimatedIngestRate,

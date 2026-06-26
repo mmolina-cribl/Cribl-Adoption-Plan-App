@@ -37,6 +37,7 @@ export type ExecutiveSummaryAiContext = {
   workerGroups: Array<{ name: string; kind: 'stream' | 'edge' }>
   sourceInventorySample: Array<{
     name: string
+    state: 'Enabled' | 'Disabled'
     avgDailyGb: string
     workerGroup: string
     streamOrEdge: string
@@ -63,6 +64,7 @@ function buildPayload(plan: PlanState, snap: ExecutiveSnapshot, maxSourceRows: n
   const totalSources = snap.sources.length
   const sourceRows = snap.sources.slice(0, maxSourceRows).map((s) => ({
     name: sliceStr(s.name, 120),
+    state: s.state,
     avgDailyGb: sliceStr(s.vol, 24),
     workerGroup: sliceStr(s.wg, 64),
     streamOrEdge: sliceStr(s.streamOrEdge, 40),

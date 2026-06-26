@@ -78,6 +78,7 @@ import {
   PS_USE_CASE_WORKSHEET_FIRST_ROW,
 } from './psUseCaseLayout'
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
+import { sourceNameForAdoptionPlanExport } from './sourceAttachmentDisabled'
 import { resolveAllSheetNames } from './v091SheetNames'
 import {
   effectiveDiskOneDayGbForWg,
@@ -642,7 +643,7 @@ function fillOverviewSheet(
     const wgName = sheetNameByWgId.get(s.workerGroupId)
       ? plan.workerGroups.find((w) => w.id === s.workerGroupId)?.wg ?? ''
       : ''
-    row.getCell(1).value = s.source
+    row.getCell(1).value = sourceNameForAdoptionPlanExport(s)
     const avg = parseNumber(s.avgDailyGb)
     row.getCell(2).value = avg === '' ? null : avg
     row.getCell(3).value = s.physicalLocations

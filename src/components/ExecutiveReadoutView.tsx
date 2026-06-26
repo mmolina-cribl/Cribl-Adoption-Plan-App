@@ -3,8 +3,8 @@ import type { PlanState } from '../types/planTypes'
 import {
   buildExecutiveSnapshot,
   downloadExecutiveSummaryMarkdown,
+  downloadExecutiveSourcesInventoryXlsx,
 } from '../lib/executiveSnapshot'
-import { downloadXlsxForPlan } from '../lib/exportWorkbook'
 import { buildExecutiveSummaryAiContextJson } from '../lib/executiveSummaryAiContext'
 import { buildExecutiveSummaryAiBoldContext } from '../lib/executiveSummaryAiMarkdownPost'
 import { runExecutiveSummaryAiMarkdown } from '../lib/aiAssistantOpenAi'
@@ -44,7 +44,7 @@ function NarrativeEmphasis({ text }: { text: string }) {
  */
 export function ExecutiveReadoutView({ plan, setPlan }: Props) {
   const snap = buildExecutiveSnapshot(plan)
-  const [workbookError, setWorkbookError] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiErr, setAiErr] = useState<string | null>(null)
   const [openAiKeyPresent, setOpenAiKeyPresent] = useState<boolean | null>(null)
@@ -333,10 +333,11 @@ export function ExecutiveReadoutView({ plan, setPlan }: Props) {
                 <thead>
                   <tr className="border-b border-cribl-border text-xs uppercase text-cribl-muted">
                     <th className="py-1.5 pr-2 font-medium">Source</th>
+                    <th className="py-1.5 pr-2 font-medium">Tile</th>
+                    <th className="py-1.5 pr-2 font-medium">State</th>
                     <th className="py-1.5 pr-2 font-medium">GB/d</th>
                     <th className="py-1.5 pr-2 font-medium">WG / fleet</th>
                     <th className="py-1.5 pr-2 font-medium">Stream/Edge</th>
-                    <th className="py-1.5 pr-2 font-medium">Tile</th>
                     <th className="py-1.5 font-medium">Blockers</th>
                   </tr>
                 </thead>
@@ -356,10 +357,11 @@ export function ExecutiveReadoutView({ plan, setPlan }: Props) {
                         }
                       >
                         <td className="max-w-[14rem] py-1.5 pr-2 align-top break-words">{s.name}</td>
+                        <td className="max-w-[10rem] py-1.5 pr-2 align-top break-words text-cribl-muted">{s.sourceTile}</td>
+                        <td className="py-1.5 pr-2 align-top text-cribl-muted">{s.state}</td>
                         <td className="py-1.5 pr-2 align-top font-mono text-xs">{s.vol}</td>
                         <td className="max-w-[12rem] py-1.5 pr-2 align-top break-words text-cribl-muted">{s.wg}</td>
                         <td className="py-1.5 pr-2 align-top text-cribl-muted">{s.streamOrEdge}</td>
-                        <td className="max-w-[10rem] py-1.5 pr-2 align-top break-words text-cribl-muted">{s.sourceTile}</td>
                         <td className="max-w-[18rem] whitespace-pre-wrap py-1.5 align-top break-words text-cribl-ink/90">
                           {s.blockers}
                         </td>
@@ -389,10 +391,11 @@ export function ExecutiveReadoutView({ plan, setPlan }: Props) {
       <footer className="border-t border-cribl-border pt-4 text-xs text-cribl-muted">
         <p className="m-0 max-w-3xl leading-relaxed">
           This page is a read-only snapshot of the adoption plan in your browser.{' '}
-          <span className="font-medium text-cribl-ink/80">Download summary</span> exports the same content as Markdown;{' '}
-          <span className="font-medium text-cribl-ink/80">Download workbook</span> produces the full v0.9.1 Excel package
-          (all sheets). The same file is available from <span className="font-medium text-cribl-ink/80">Export</span> in
-          the sidebar (below <span className="font-medium text-cribl-ink/80">Import</span>).
+          <span className="font-medium text-cribl-ink/80">Download summary</span> exports the narrative and tables as Markdown;{' '}
+          <span className="font-medium text-cribl-ink/80">Download sources inventory</span> exports the source table
+          above as a single Excel sheet. The full v0.9.1 adoption-plan workbook is available from{' '}
+          <span className="font-medium text-cribl-ink/80">Export</span> in the sidebar (below{' '}
+          <span className="font-medium text-cribl-ink/80">Import</span>).
         </p>
       </footer>
 
@@ -407,22 +410,20 @@ export function ExecutiveReadoutView({ plan, setPlan }: Props) {
         <button
           type="button"
           onClick={() => {
-            setWorkbookError(null)
-            void (async () => {
-              try {
-                await downloadXlsxForPlan(plan)
-              } catch (e) {
-                setWorkbookError(e instanceof Error ? e.message : 'Export failed. Try again.')
-              }
-            })()
+            setExportError(null)
+            try {
+              downloadExecutiveSourcesInventoryXlsx(snap)
+            } catch (e) {
+              setExportError(e instanceof Error ? e.message : 'Export failed. Try again.')
+            }
           }}
           className="inline-flex h-9 items-center justify-center rounded-lg bg-cribl-navy px-4 text-sm font-semibold text-white shadow-ctrl"
         >
-          Download workbook (.xlsx)
+          Download sources inventory (.xlsx)
         </button>
-        {workbookError && (
+        {exportError && (
           <p className="m-0 w-full text-sm text-rose-700" role="alert">
-            {workbookError}
+            {exportError}
           </p>
         )}
       </div>

@@ -44,10 +44,11 @@ export function ConfirmClearDialog({ open, onCancel, onConfirm }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id={titleId} className="m-0 text-base font-semibold text-cribl-ink sm:text-lg">
-          Clear this plan?
+          Reset this plan?
         </h2>
         <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
-          This will remove all sources, worker groups, volume rows, and notes from this browser.
+          This will remove all sources, worker groups, volume rows, notes, and the Environment routing snapshot from
+          this browser.
         </p>
         <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
           You can always re-import an existing adoption plan <span className="font-medium text-cribl-ink/90">.xlsx</span>{' '}
@@ -66,7 +67,7 @@ export function ConfirmClearDialog({ open, onCancel, onConfirm }: Props) {
             onClick={onConfirm}
             className="h-10 flex-1 rounded-lg border border-rose-200 bg-rose-600 px-3 text-sm font-semibold text-white shadow-ctrl hover:bg-rose-700 sm:flex-none"
           >
-            Clear all data
+            Reset plan
           </button>
         </div>
       </div>

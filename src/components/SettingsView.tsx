@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from '../lib/postAddPreference'
+import { clearPostAddPreference, getPostAddPreference, setPostAddPreference, whenPostAddPreferenceHydrated } from '../lib/postAddPreference'
 import {
   getSourceDetailCardsExpanded,
   getWorkerGroupDetailCardsExpanded,
   setSourceDetailCardsExpanded,
   setWorkerGroupDetailCardsExpanded,
+  whenDetailCardsPreferenceHydrated,
 } from '../lib/detailCardsPreference'
 import {
-  getAnimationsEnabled,
   setAnimationsEnabled,
   useAnimationsEnabled,
 } from '../lib/animationsPreference'
@@ -58,14 +58,16 @@ export function SettingsView() {
   }, [])
 
   useEffect(() => {
-    const v = getPostAddPreference()
-    setValue(v ?? 'ask')
-    setSourceExpanded(getSourceDetailCardsExpanded())
-    setWgExpanded(getWorkerGroupDetailCardsExpanded())
-    // Touch the getter once so callers in tests or older builds that
-    // expect the cached value to be ready after a paint don't hit the
-    // unhydrated default.
-    void getAnimationsEnabled()
+    let cancelled = false
+    void Promise.all([whenPostAddPreferenceHydrated(), whenDetailCardsPreferenceHydrated()]).then(() => {
+      if (cancelled) return
+      setValue(getPostAddPreference() ?? 'ask')
+      setSourceExpanded(getSourceDetailCardsExpanded())
+      setWgExpanded(getWorkerGroupDetailCardsExpanded())
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {

@@ -2,6 +2,10 @@ import * as XLSX from 'xlsx'
 import { getInputDataRows, TEMPLATE_INSTRUCTIONS } from '../data/referenceData'
 import type { PlanState, SourceSummaryRow } from '../types/planTypes'
 import {
+  sourceNameForAdoptionPlanExport,
+  sourceNameForAdoptionPlanExportFromLabel,
+} from './sourceAttachmentDisabled'
+import {
   effectiveDiskOneDayGbForWg,
   effectiveIngestEgressGbdForWg,
   effectiveThroughputGbdForWg,
@@ -68,7 +72,7 @@ function dataOptimizationPercentForExcel(s: string): number | string {
  */
 function sourceSummaryRowToExportArray(s: SourceSummaryRow): (string | number | boolean | Date)[] {
   return [
-    s.source,
+    sourceNameForAdoptionPlanExport(s),
     s.securityOrObs,
     s.streamOrEdge,
     s.sourceTile,
@@ -122,7 +126,7 @@ export function sourceSummaryValueForHeaderName(
     case 'Display name':
       return ''
     case 'Source':
-      return s.source
+      return sourceNameForAdoptionPlanExport(s)
     case 'Type':
       return s.type
     case 'Physical location(s)':
@@ -320,8 +324,8 @@ export function buildSourcesAoaFirst(plan: PlanState) {
     .map((r) => ({ r, label: String(r.source ?? '').trim() }))
     .filter(({ label }) => label !== '')
     .filter(({ label }) => !seen.has(label.toLowerCase()))
-    .map(({ r, label }) => ({
-      source: label,
+    .map(({ r }) => ({
+      source: sourceNameForAdoptionPlanExport(r),
       dailyVolumeGb: String(r.avgDailyGb ?? '').trim(),
       type: r.type ?? '',
       region: String(r.physicalLocations ?? '').trim(),
@@ -341,7 +345,7 @@ export function buildSourcesAoaFirst(plan: PlanState) {
   for (let i = 0; i < sCount; i += 1) {
     const s = sources[i]!
     aoa[2 + i] = [
-      s.source,
+      sourceNameForAdoptionPlanExportFromLabel(String(s.source ?? '')),
       s.dailyVolumeGb ? Number(s.dailyVolumeGb) : '',
       s.type,
       s.region,

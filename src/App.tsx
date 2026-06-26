@@ -10,6 +10,7 @@ import { ExportWorkbookView } from './components/ExportWorkbookView'
 import { ExecutiveReadoutView } from './components/ExecutiveReadoutView'
 import { AiAssistantPanel } from './components/AiAssistantPanel'
 import { ImportWorkbookView } from './components/ImportWorkbookView'
+import { EnvironmentView } from './components/EnvironmentView'
 import { PlanDataOverview } from './components/PlanDataOverview'
 import { WorkerGroupDetailView } from './components/WorkerGroupDetailView'
 import { WorkerGroupsIndexView } from './components/WorkerGroupsIndexView'
@@ -37,7 +38,8 @@ import type { MainView } from './components/navTypes'
 import { PlanNavMobile, PlanSidebarRail } from './components/PlanSidebar'
 import { useResizableRail } from './hooks/useResizableRail'
 import { usePlanStorage } from './hooks/usePlanStorage'
-import { clearPostAddPreference, getPostAddPreference, setPostAddPreference } from './lib/postAddPreference'
+import { useEnvironmentSnapshot } from './hooks/useEnvironmentSnapshot'
+import { clearPostAddPreference, getPostAddPreference, setPostAddPreference, whenPostAddPreferenceHydrated } from './lib/postAddPreference'
 import {
   newId,
   sourceLabel,
@@ -89,6 +91,7 @@ function App() {
 }
 
 function AppContent({ plan, setPlan, reset }: AppContentProps) {
+  const { snapshot: environmentSnapshot, setSnapshot: setEnvironmentSnapshot } = useEnvironmentSnapshot()
   const { width: railW, beginResize, collapsed: railCollapsed, toggleCollapse: toggleRail, minW } =
     useResizableRail()
   // First-load lands on the Plan dashboard — the topology + resource
@@ -99,6 +102,11 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
   // so a CSE / customer who lands here still has an obvious next step
   // without us pre-empting the plan view.
   const [mainView, setMainView] = useState<MainView>('overview')
+
+  const goToEnvironment = useCallback(() => {
+    setMainView('environment')
+  }, [])
+
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
   const [activeWorkerGroupId, setActiveWorkerGroupId] = useState<string | null>(null)
   const [addSourceOpen, setAddSourceOpen] = useState(false)
@@ -186,14 +194,16 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
     })
     setActiveSourceId(id)
     setMainView('source')
-    const pref = getPostAddPreference()
-    if (pref === 'wizard') {
-      setPostAdd({ kind: 'wizard' })
-    } else if (pref === 'manual') {
-      setPostAdd(null)
-    } else {
-      setPostAdd({ kind: 'choice', sourceDisplayName: name })
-    }
+    void whenPostAddPreferenceHydrated().then(() => {
+      const pref = getPostAddPreference()
+      if (pref === 'wizard') {
+        setPostAdd({ kind: 'wizard' })
+      } else if (pref === 'manual') {
+        setPostAdd(null)
+      } else {
+        setPostAdd({ kind: 'choice', sourceDisplayName: name })
+      }
+    })
   }
 
   const removeSource = (id: string) => {
@@ -608,6 +618,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
           setConfirmClearOpen(false)
           setPostAdd(null)
           clearPostAddPreference()
+          setEnvironmentSnapshot(null)
           reset()
         }}
       />
@@ -779,6 +790,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                   onSortFleetWorkerGroupsAlphabetically={sortEdgeFleetsAlphabeticallyInPlan}
                   onSortFleetWorkerGroupsByIngest={sortEdgeFleetsByIngestInPlan}
                   onSelectImport={() => setMainView('import')}
+                  onSelectEnvironment={() => goToEnvironment()}
                   onSelectExport={() => setMainView('export')}
                   onClearPlan={() => setConfirmClearOpen(true)}
                 />
@@ -869,6 +881,7 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 onRenameSource={updateSourceName}
                 onReorderSources={reorderSources}
                 onSelectImport={() => setMainView('import')}
+                onSelectEnvironment={() => goToEnvironment()}
                 onSelectExport={() => setMainView('export')}
                 onClearPlan={() => setConfirmClearOpen(true)}
               />
@@ -1007,7 +1020,23 @@ function AppContent({ plan, setPlan, reset }: AppContentProps) {
                 </p>
               )}
 
-              {mainView === 'import' && <ImportWorkbookView plan={plan} setPlan={setPlan} />}
+              {mainView === 'import' && (
+                <ImportWorkbookView
+                  plan={plan}
+                  environmentSnapshot={environmentSnapshot}
+                  setPlan={setPlan}
+                  setEnvironmentSnapshot={setEnvironmentSnapshot}
+                  onViewEnvironment={goToEnvironment}
+                />
+              )}
+
+              {mainView === 'environment' && (
+                <EnvironmentView
+                  snapshot={environmentSnapshot}
+                  planProvenance={plan.planProvenance}
+                  onGoToImport={() => setMainView('import')}
+                />
+              )}
 
               {mainView === 'export' && <ExportWorkbookView plan={plan} />}
               <footer className="mt-8 text-center text-xs text-cribl-muted/80">

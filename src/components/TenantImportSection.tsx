@@ -1,22 +1,27 @@
 import { useCallback, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { PlanState } from '../types/planTypes'
-import { PLAN_STORAGE_KEY } from '../hooks/usePlanStorage'
-import { clearImportShell } from '../lib/importShellStore'
-import { isCriblLocalShell, kvSet } from '../lib/kvStore'
+import type { CriblEnvironmentSnapshot } from '../lib/criblEnvironmentTypes'
+import { isCriblLocalShell } from '../lib/kvStore'
 import {
   readImportOmitDisabledInputs,
   readImportOmitStockGroups,
-  writeImportOmitDisabledInputs,
-  writeImportOmitStockGroups,
 } from '../lib/importHarvestOptions'
-import { harvestTenantTopology } from '../lib/tenantHarvest'
-import { buildTenantImportDebugPayload, topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
-import { ConfirmImportOverwriteDialog } from './ConfirmImportOverwriteDialog'
+import { hasExistingPlanData } from '../lib/hasExistingPlanData'
+import { buildImportOverwriteDiff, type ImportOverwriteDiff } from '../lib/importOverwriteDiff'
+import { importTenantTopology } from '../lib/importTopology'
+import { applyPendingImport, type PendingImport } from '../lib/pendingImport'
+import { topologyHarvestToPlanState, type TenantImportDebugPayload } from '../lib/topologyToPlan'
+import { ImportHarvestOptions } from './ImportHarvestOptions'
+import { ImportOverwriteReviewDialog } from './ImportOverwriteReviewDialog'
 
 type Props = {
+  plan: PlanState
+  environmentSnapshot: CriblEnvironmentSnapshot | null
   setPlan: Dispatch<SetStateAction<PlanState>>
-  hasExistingPlanData: boolean
+  setEnvironmentSnapshot: (s: CriblEnvironmentSnapshot | null) => void
+  embedded?: boolean
+  onViewEnvironment?: () => void
 }
 
 function isInCriblIframe(): boolean {
@@ -27,15 +32,52 @@ function isInCriblIframe(): boolean {
  * Bootstrap plan topology from the live Cribl Leader (Stream worker groups / fleets
  * and configured **sources** from Leader inputs). App Platform only.
  */
-export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
+export function TenantImportSection({
+  plan,
+  environmentSnapshot,
+  setPlan,
+  setEnvironmentSnapshot,
+  embedded,
+  onViewEnvironment,
+}: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
-  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [importDiff, setImportDiff] = useState<ImportOverwriteDiff | null>(null)
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
   const [importDebug, setImportDebug] = useState<TenantImportDebugPayload | null>(null)
   const [debugCopyOk, setDebugCopyOk] = useState(false)
   const [omitStockGroups, setOmitStockGroups] = useState(readImportOmitStockGroups)
   const [omitDisabledInputs, setOmitDisabledInputs] = useState(readImportOmitDisabledInputs)
+
+  const clearReview = useCallback(() => {
+    setReviewOpen(false)
+    setImportDiff(null)
+    setPendingImport(null)
+  }, [])
+
+  const applyImport = useCallback(
+    async (pending: PendingImport) => {
+      setError(null)
+      setOk(null)
+      setImportDebug(null)
+      setDebugCopyOk(false)
+      setBusy(true)
+      try {
+        const result = await applyPendingImport(pending, { setPlan, setEnvironmentSnapshot })
+        if (result.importDebug) {
+          setImportDebug(result.importDebug)
+        }
+        setOk(result.message)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Tenant import failed.')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [setPlan, setEnvironmentSnapshot],
+  )
 
   const runHarvest = useCallback(async () => {
     setError(null)
@@ -44,104 +86,87 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
     setDebugCopyOk(false)
     setBusy(true)
     try {
-      const harvest = await harvestTenantTopology(undefined, {
+      const options = {
         omitStockWorkerGroups: omitStockGroups,
         omitDisabledInputs,
-      })
-      const next = topologyHarvestToPlanState(harvest)
-      const capturedAt = new Date().toISOString()
-      const note =
-        harvest.warnings.length > 0 ? `Harvest notes: ${harvest.warnings.join(' ')}` : undefined
-      const planWithProvenance: PlanState = {
-        ...next,
-        planProvenance: { kind: 'tenant', capturedAt, note },
       }
-      setPlan(planWithProvenance)
-      // Ensure the plan reaches pack KV / localStorage before the user refreshes;
-      // the global persist effect also saves, but this awaits the PUT so a quick
-      // reload is less likely to race an in-flight write.
-      await kvSet(PLAN_STORAGE_KEY, planWithProvenance)
-      setImportDebug(buildTenantImportDebugPayload(capturedAt, harvest, planWithProvenance))
-      clearImportShell()
-      setOk(
-        'Plan replaced with topology from your Cribl tenant. Review worker groups, fleets, and imported sources (from Leader inputs) before exporting.',
-      )
+      const { capturedAt, harvest, environment } = await importTenantTopology(options)
+      const nextPlan = topologyHarvestToPlanState(harvest)
+
+      if (hasExistingPlanData(plan)) {
+        const diff = buildImportOverwriteDiff({
+          importKind: 'tenant',
+          currentPlan: plan,
+          nextPlan,
+          currentEnvironment: environmentSnapshot,
+          nextEnvironment: environment,
+          harvestWarnings: harvest.warnings,
+        })
+        setPendingImport({
+          kind: 'topology',
+          plan: nextPlan,
+          environment,
+          capturedAt,
+          harvest,
+          harvestWarnings: harvest.warnings,
+          importKind: 'tenant',
+        })
+        setImportDiff(diff)
+        setReviewOpen(true)
+        return
+      }
+
+      await applyImport({
+        kind: 'topology',
+        plan: nextPlan,
+        environment,
+        capturedAt,
+        harvest,
+        harvestWarnings: harvest.warnings,
+        importKind: 'tenant',
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Tenant import failed.')
     } finally {
       setBusy(false)
     }
-  }, [setPlan, omitStockGroups, omitDisabledInputs])
+  }, [applyImport, environmentSnapshot, omitDisabledInputs, omitStockGroups, plan])
 
   if (!isInCriblIframe()) {
-    return (
-      <section className="rounded-xl border border-dashed border-cribl-border/90 bg-cribl-canvas/50 p-4">
-        <h3 className="m-0 text-sm font-semibold text-cribl-ink">Import from live tenant</h3>
-        <p className="m-0 mt-2 text-sm text-cribl-muted">
-          Available when this app runs inside the Cribl App Platform (<span className="font-mono">CRIBL_API_URL</span>{' '}
-          is set). For standalone use, import an <span className="font-mono">.xlsx</span> instead.
-        </p>
-      </section>
-    )
+    return null
   }
 
+  const shell = embedded ? 'div' : 'section'
+  const Wrapper = shell as 'div'
+
   return (
-    <section className="rounded-xl border border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5">
-      <ConfirmImportOverwriteDialog
-        open={confirmOpen}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => {
-          setConfirmOpen(false)
-          void runHarvest()
+    <Wrapper className={embedded ? undefined : 'rounded-xl border border-cribl-border/80 bg-white p-4 shadow-ctrl sm:p-5'}>
+      <ImportOverwriteReviewDialog
+        open={reviewOpen}
+        diff={importDiff}
+        busy={busy}
+        onCancel={clearReview}
+        onAccept={() => {
+          const pending = pendingImport
+          clearReview()
+          if (pending) {
+            void applyImport(pending)
+          }
         }}
       />
-      <h3 className="m-0 text-sm font-semibold text-cribl-ink">Import from live tenant</h3>
-      <p className="m-0 mt-2 text-sm leading-relaxed text-cribl-muted">
-        Discovers worker groups / fleets from <span className="font-mono">/master/groups</span> and lists{' '}
-        <strong>configured sources</strong> per group from Leader{' '}
-        <span className="font-mono">/m/&lt;group&gt;/system/inputs</span> (and <span className="font-mono">/inputs</span> fallback).
-        Each input becomes one plan source row named by Leader input <span className="font-mono">id</span> (routing is not imported). Use the
-        options below to omit built-in default groups or include disabled inputs when you need them in the plan. This replaces your current
-        plan — validate in the editor before exporting.
+      {!embedded ? (
+        <h3 className="m-0 text-sm font-semibold text-cribl-ink">Import from live tenant</h3>
+      ) : null}
+      <p className="m-0 mt-2 text-sm text-cribl-muted">
+        Pull worker groups, fleets, and configured sources from this Leader. Routing is available on the Environment page after import.
       </p>
-      <div className="mt-3 space-y-2.5 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2.5">
-        <p className="m-0 text-xs font-medium text-cribl-ink/90">Import options</p>
-        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={!omitDisabledInputs}
-            onChange={(e) => {
-              const include = e.target.checked
-              const omit = !include
-              setOmitDisabledInputs(omit)
-              writeImportOmitDisabledInputs(omit)
-            }}
-          />
-          <span>
-            <strong className="text-cribl-ink/85">Include disabled Leader inputs.</strong> Unchecked by default — check to import inputs with{' '}
-            <span className="font-mono text-cribl-ink/80">disabled: true</span> (each row gets <span className="font-mono"> disabled</span> on{' '}
-            <strong className="text-cribl-ink/85">Source</strong>).
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-cribl-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={omitStockGroups}
-            onChange={(e) => {
-              const v = e.target.checked
-              setOmitStockGroups(v)
-              writeImportOmitStockGroups(v)
-            }}
-          />
-          <span>
-            <strong className="text-cribl-ink/85">Omit built-in default worker groups</strong> (
-            <span className="font-mono">default</span>, <span className="font-mono">defaultHybrid</span>,{' '}
-            <span className="font-mono">default_fleet</span>, <span className="font-mono">default_outpost</span>). Unchecked by default.
-          </span>
-        </label>
-        <p className="m-0 text-[10px] leading-snug text-cribl-muted/85">These choices are saved in this browser for the next import.</p>
+      <div className="mt-3">
+        <ImportHarvestOptions
+          omitStockGroups={omitStockGroups}
+          setOmitStockGroups={setOmitStockGroups}
+          omitDisabledInputs={omitDisabledInputs}
+          setOmitDisabledInputs={setOmitDisabledInputs}
+        />
       </div>
       {isCriblLocalShell() ? (
         <p
@@ -154,76 +179,21 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           <span className="font-mono">.xlsx</span> as your snapshot (see <span className="font-mono">CRIBL_DEV_NOTES.md</span>).
         </p>
       ) : null}
-      <details className="mt-3 rounded-lg border border-cribl-border/70 bg-cribl-canvas/40 px-3 py-2">
-        <summary className="cursor-pointer select-none text-sm font-medium text-cribl-ink outline-none focus-visible:ring-2 focus-visible:ring-cribl-primary/35">
-          What the Leader can expose vs what this import uses
-        </summary>
-        <div className="mt-2 space-y-3 border-t border-cribl-border/50 pt-2 text-xs leading-relaxed text-cribl-muted">
-          <p className="m-0">
-            <strong className="text-cribl-ink/90">APIs we call:</strong>{' '}
-            <span className="font-mono text-cribl-ink/85">GET /master/groups</span>, then for each group{' '}
-            <span className="font-mono text-cribl-ink/85">GET /m/&lt;group&gt;/system/inputs</span> (fallback{' '}
-            <span className="font-mono text-cribl-ink/85">/m/&lt;group&gt;/inputs</span>). We do{' '}
-            <strong className="text-cribl-ink/90">not</strong> call routes, pipelines, destinations, deployments, or metrics APIs.
-          </p>
-          <div>
-            <p className="m-0 font-medium text-cribl-ink/90">Worker groups</p>
-            <ul className="m-0 mt-1 list-inside list-disc space-y-0.5">
-              <li>
-                <strong className="text-cribl-ink/85">Used:</strong> <span className="font-mono">id</span>,{' '}
-                <span className="font-mono">description</span> (or <span className="font-mono">id</span> for the name),{' '}
-                <span className="font-mono">isFleet</span>, <span className="font-mono">type</span> (e.g. outpost/edge → Edge column).
-              </li>
-              <li>
-                <strong className="text-cribl-ink/85">Skipped entirely:</strong> Search-only groups (
-                <span className="font-mono">default_search</span>, <span className="font-mono">isSearch</span>).
-              </li>
-              <li>
-                <strong className="text-cribl-ink/85">Optional (import checkboxes):</strong> built-in default groups (
-                <span className="font-mono">default</span>, …) and disabled inputs — see options above.
-              </li>
-              <li>
-                <strong className="text-cribl-ink/85">Not imported into plan rows (today):</strong> cloud region, ingest estimates,{' '}
-                <span className="font-mono">configVersion</span>, tags, provisioning flags — Leader may send them; we leave matching workbook
-                fields empty unless you fill them later.
-              </li>
-            </ul>
-          </div>
-          <div>
-            <p className="m-0 font-medium text-cribl-ink/90">Configured sources (Leader “inputs”)</p>
-            <ul className="m-0 mt-1 list-inside list-disc space-y-0.5">
-              <li>
-                <strong className="text-cribl-ink/85">Used:</strong> <span className="font-mono">id</span> (plan{' '}
-                <strong className="text-cribl-ink/85">Source</strong> name),{' '}
-                <span className="font-mono">type</span>, <span className="font-mono">disabled</span> (when you check{' '}
-                <strong className="text-cribl-ink/85">Include disabled Leader inputs</strong>, each such input becomes one plan source row with{' '}
-                <span className="font-mono"> disabled</span> appended to <strong className="text-cribl-ink/85">Source</strong> for UI and Excel;
-                otherwise disabled inputs are omitted).{' '}
-                <span className="font-mono">description</span> is kept in import debug JSON only — not copied into the source name.
-              </li>
-              <li>
-                <strong className="text-cribl-ink/85">Dropped (today):</strong> all collector-specific fields (ports, hosts, URLs, auth,
-                TLS, etc.). They stay in the tenant but are not copied into the adoption plan model.
-              </li>
-              <li>
-                <strong className="text-cribl-ink/85">Routing:</strong> pipeline use case and destinations are{' '}
-                <strong className="text-cribl-ink/90">not</strong> imported — those fields stay blank until you edit or use Excel
-                (destinations from the tenant may be supported later).
-              </li>
-            </ul>
-          </div>
-          <p className="m-0 text-cribl-ink/80">
-            <strong>Full checklist</strong> (tables, “not fetched”, workbook mapping): see{' '}
-            <span className="font-mono text-cribl-ink/90">docs/tenant-import-leader-data.md</span> in the Adoption Plan repository.
-            After import, <strong className="text-cribl-ink/90">Import debug → Copy full JSON</strong> shows what was returned for groups and
-            the normalized input list per group.
-          </p>
-        </div>
-      </details>
       {ok && (
-        <p className="m-0 mt-3 rounded-lg border border-cribl-primary/30 bg-cribl-primary-soft px-3 py-2 text-sm text-cribl-primary-ink" role="status">
-          {ok}
-        </p>
+        <div className="m-0 mt-3 space-y-2">
+          <p className="m-0 rounded-lg border border-cribl-primary/30 bg-cribl-primary-soft px-3 py-2 text-sm text-cribl-primary-ink" role="status">
+            {ok}
+          </p>
+          {onViewEnvironment ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-cribl-primary hover:underline"
+              onClick={() => onViewEnvironment()}
+            >
+              View routing in Environment →
+            </button>
+          ) : null}
+        </div>
       )}
       {error && (
         <p className="m-0 mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900" role="alert">
@@ -356,10 +326,6 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           type="button"
           disabled={busy}
           onClick={() => {
-            if (hasExistingPlanData) {
-              setConfirmOpen(true)
-              return
-            }
             void runHarvest()
           }}
           className="inline-flex h-10 min-w-[12rem] items-center justify-center rounded-lg bg-cribl-navy px-4 text-sm font-semibold text-white shadow-[0_1px_0_rgba(0,0,0,0.1)] transition hover:bg-cribl-navy-mid disabled:cursor-not-allowed disabled:opacity-50"
@@ -367,6 +333,6 @@ export function TenantImportSection({ setPlan, hasExistingPlanData }: Props) {
           {busy ? 'Reading tenant…' : 'Bootstrap from tenant'}
         </button>
       </div>
-    </section>
+    </Wrapper>
   )
 }

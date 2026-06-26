@@ -178,6 +178,7 @@ type Props = {
   /** Sort Edge fleets by ingest among peers (roots, then sub-fleets per parent). */
   onSortFleetWorkerGroupsByIngest?: (direction: 'desc' | 'asc') => void
   onSelectImport: () => void
+  onSelectEnvironment: () => void
   onSelectExport: () => void
   onClearPlan: () => void
   className?: string
@@ -958,6 +959,7 @@ export function PlanSidebarRail({
   onSortFleetWorkerGroupsAlphabetically,
   onSortFleetWorkerGroupsByIngest,
   onSelectImport,
+  onSelectEnvironment,
   onSelectExport,
   onClearPlan,
   className = '',
@@ -975,14 +977,14 @@ export function PlanSidebarRail({
   const sources = allSources.filter((r) => !isSourceRowAttachmentDisabled(r))
   const canRemove = allSources.length > 0
   const noSources = allSources.length === 0
-  const [wgListOpen, setWgListOpen] = useState(true)
-  const [fleetListOpen, setFleetListOpen] = useState(true)
-  const [sourcesListOpen, setSourcesListOpen] = useState(true)
-  /** Desktop rail: when false, the indented Plan sub-items (Summary, Activation) are hidden. */
+  const [wgListOpen, setWgListOpen] = useState(false)
+  const [fleetListOpen, setFleetListOpen] = useState(false)
+  const [sourcesListOpen, setSourcesListOpen] = useState(false)
+  /** Desktop rail: when false, the indented Plan sub-items (Environment, Summary, Activation) are hidden. */
   const [planSectionOpen, setPlanSectionOpen] = useState(true)
 
   useEffect(() => {
-    if (mainView === 'activation' || mainView === 'execBrief') {
+    if (mainView === 'activation' || mainView === 'execBrief' || mainView === 'environment') {
       setPlanSectionOpen(true)
     }
   }, [mainView])
@@ -1011,9 +1013,10 @@ export function PlanSidebarRail({
 
   return (
     <nav
-      className={`flex flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
+      className={`flex min-h-full flex-col gap-0.5 pl-2 pr-0 pb-2 pt-0 ${className}`}
       aria-label="Plan, Worker Groups, Fleets, and Sources"
     >
+      <div className="min-h-0 flex-1">
       <div className="mt-2 flex items-center gap-1">
         <NavButton
           active={mainView === 'overview'}
@@ -1030,6 +1033,14 @@ export function PlanSidebarRail({
       </div>
       <AnimatedCollapse open={planSectionOpen}>
         <div className="ml-2 mt-0.5 flex flex-col gap-0.5">
+          <NavButton
+            active={mainView === 'environment'}
+            onClick={onSelectEnvironment}
+            title="Visualize configured routing from tenant or diagnostic snapshot"
+            className="mt-0.5"
+          >
+            Environment
+          </NavButton>
           <NavButton
             active={mainView === 'execBrief'}
             onClick={onSelectExecBrief}
@@ -1194,38 +1205,37 @@ export function PlanSidebarRail({
           </div>
         </div>
       </AnimatedCollapse>
+      </div>
 
-      <NavButton
-        active={mainView === 'import'}
-        onClick={onSelectImport}
-        title="Load from an .xlsx file"
-        className="mt-3"
-      >
-        Import
-      </NavButton>
-      <NavButton
-        active={mainView === 'export'}
-        onClick={onSelectExport}
-        title="Download a file you can share"
-      >
-        Export
-      </NavButton>
-
-      <NavButton
-        active={mainView === 'settings'}
-        onClick={onSelectSettings}
-        className="mt-3"
-      >
-        Settings
-      </NavButton>
+      <div className="mt-auto shrink-0 border-t border-cribl-border/60 pt-3">
+        <div className="flex flex-col gap-0.5">
+          <NavButton
+            active={mainView === 'import'}
+            onClick={onSelectImport}
+            title="Load a plan from tenant, diagnostic bundle, or Excel"
+          >
+            Import
+          </NavButton>
+          <NavButton
+            active={mainView === 'export'}
+            onClick={onSelectExport}
+            title="Download a file you can share"
+          >
+            Export
+          </NavButton>
+          <NavButton active={mainView === 'settings'} onClick={onSelectSettings}>
+            Settings
+          </NavButton>
+        </div>
+      </div>
 
       <NavButton
         active={false}
         onClick={onClearPlan}
-        title="Clear all data in this plan"
-        className="mt-3"
+        title="Reset all data in this plan"
+        className="mt-2 shrink-0"
       >
-        Clear plan…
+        Reset Plan
       </NavButton>
     </nav>
   )
@@ -1460,6 +1470,7 @@ export function PlanNavMobile({
   onRemoveSource,
   onRenameSource,
   onSelectImport,
+  onSelectEnvironment,
   onSelectExport,
   onClearPlan: _onClearPlan,
   className = '',
@@ -1488,7 +1499,7 @@ export function PlanNavMobile({
     >
       {/*
        * Mobile chip order mirrors the desktop rail: Overview (Plan), then
-       * Summary, then Activation under Plan. Keeping the same order as the
+       * Environment, Summary, then Activation under Plan. Keeping the same order as the
        * desktop indent preserves parity between layouts.
        */}
       <button
@@ -1497,6 +1508,19 @@ export function PlanNavMobile({
         onClick={onSelectOverview}
       >
         Overview
+      </button>
+      <button
+        type="button"
+        className={[
+          'shrink-0 rounded-full border px-2.5 py-1.5 text-xs font-medium transition',
+          mainView === 'environment'
+            ? 'border-cribl-primary/50 bg-cribl-primary-soft/90 text-cribl-ink'
+            : 'border-cribl-border/80 bg-cribl-canvas/90 text-cribl-muted hover:border-cribl-border hover:text-cribl-ink',
+        ].join(' ')}
+        onClick={onSelectEnvironment}
+        title="Environment routing map"
+      >
+        Environment
       </button>
       <button
         type="button"
@@ -1618,7 +1642,7 @@ export function PlanNavMobile({
             : 'border-cribl-border/80 bg-cribl-canvas/90 text-cribl-muted hover:border-cribl-border hover:text-cribl-ink',
         ].join(' ')}
         onClick={onSelectImport}
-        title="Import from an Excel file"
+        title="Import a plan"
       >
         Import
       </button>

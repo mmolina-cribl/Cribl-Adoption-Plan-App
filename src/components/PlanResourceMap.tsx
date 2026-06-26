@@ -184,6 +184,11 @@ function buildSourceLeaf(row: SourceSummaryRow, index: number): SourceLeaf {
   }
 }
 
+/** Resource maps hide Leader-disabled / attachment-disabled rows unless toggled on. */
+function sourceVisibleInResourceMap(row: SourceSummaryRow, showDisabled: boolean): boolean {
+  return showDisabled || !isSourceRowAttachmentDisabled(row)
+}
+
 /**
  * Tailwind classes for the colored criticality badge. Mirrors the
  * worker-group resource map so the same source looks consistent in
@@ -277,6 +282,8 @@ export function PlanResourceMap({
    */
   const { animated: entryAnimated, enabled: animEnabled } = useEntryAnimation()
   const [pathsDrawn, setPathsDrawn] = useState<boolean>(() => !animEnabled)
+  /** Hide Leader-disabled / attachment-disabled sources unless the user opts in. */
+  const [showDisabledInResourceMap, setShowDisabledInResourceMap] = useState(false)
   useEffect(() => {
     if (!animEnabled) {
       // Pref turned off mid-life: settle to the post-draw state via
@@ -307,7 +314,11 @@ export function PlanResourceMap({
 
     const buildWgGroup = (wg: WorkerGroupRow): WgGroup => {
       const sources = plan.sourceSummary
-        .filter((r) => r.workerGroupId === wg.id)
+        .filter(
+          (r) =>
+            r.workerGroupId === wg.id &&
+            sourceVisibleInResourceMap(r, showDisabledInResourceMap),
+        )
         .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
         .sort((a, b) => b.volumeGb - a.volumeGb)
       const totalGb = sources.reduce((acc, s) => acc + s.volumeGb, 0)
@@ -341,17 +352,22 @@ export function PlanResourceMap({
     const groups: WgGroup[] = columnWgs.map((wg) => buildWgGroup(wg))
 
     const unassignedSources = plan.sourceSummary
-      .filter((r) => !r.workerGroupId)
+      .filter((r) => !r.workerGroupId && sourceVisibleInResourceMap(r, showDisabledInResourceMap))
       .map((r) => buildSourceLeaf(r, indexById.get(r.id) ?? 0))
       .sort((a, b) => b.volumeGb - a.volumeGb)
 
     const unassignedFleets = edgeFleetUnassignedOrphans(plan.workerGroups, plan.sourceSummary)
 
     return { groups, unassignedSources, unassignedFleets }
-  }, [plan.workerGroups, plan.sourceSummary])
+  }, [plan.workerGroups, plan.sourceSummary, showDisabledInResourceMap])
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [hovered, setHovered] = useState<string | null>(null)
+
+  const disabledSourceCountInPlan = useMemo(
+    () => plan.sourceSummary.filter(isSourceRowAttachmentDisabled).length,
+    [plan.sourceSummary],
+  )
 
   /**
    * Drag-to-reassign state. While a source branch (or unassigned drag
@@ -1036,6 +1052,20 @@ export function PlanResourceMap({
           >
             Collapse all
           </button>
+          {disabledSourceCountInPlan > 0 ? (
+            <label className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-cribl-border bg-white px-2 text-[11px] text-cribl-ink/90">
+              <input
+                type="checkbox"
+                className="size-3.5 rounded border-cribl-border text-cribl-primary"
+                checked={showDisabledInResourceMap}
+                onChange={(e) => setShowDisabledInResourceMap(e.target.checked)}
+              />
+              <span>Show disabled</span>
+              {!showDisabledInResourceMap ? (
+                <span className="text-cribl-muted">({disabledSourceCountInPlan} hidden)</span>
+              ) : null}
+            </label>
+          ) : null}
           {onAddWorkerGroup ? (
             <button
               type="button"
@@ -1137,13 +1167,14 @@ export function PlanResourceMap({
               interactive &&
               b.kind === 'source' &&
               !attachmentDisabledSourceIds.has(b.id)
+            const branchHovered =
+              b.kind === 'source' && (hovered === b.id || delayedHovered === b.id)
             // The X badge appears whenever the user is "looking at" this
-            // exact source branch — either by hovering its leaf card or by
-            // hovering the connector itself. Hidden during an active drag
-            // so it doesn't fight the rubber-band visual. Detach remains
-            // available for attachment-disabled sources.
+            // exact source branch — leaf card, connector, or detach hit zone.
+            // `delayedHovered` keeps the X visible briefly when the pointer
+            // leaves the card toward the badge (see HOVER_CLOSE_COOLDOWN_MS).
             const showDetachX =
-              interactive && b.kind === 'source' && hovered === b.id && !isDragging
+              interactive && b.kind === 'source' && branchHovered && !isDragging
             // X badge sits flush against the source's right edge — the
             // curve's source-side tangent is horizontal, so a small
             // x-offset off `b.src` keeps it centered on the connector
@@ -1212,6 +1243,25 @@ export function PlanResourceMap({
                       e.stopPropagation()
                       beginDrag(b)
                     }}
+                  />
+                ) : interactive && b.kind === 'source' ? (
+                  <path
+                    d={b.d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={hitWidth}
+                    strokeLinecap="round"
+                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                  />
+                ) : null}
+                {interactive && b.kind === 'source' ? (
+                  <circle
+                    cx={detachX}
+                    cy={detachY}
+                    r={14}
+                    fill="transparent"
+                    style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                    aria-hidden
                   />
                 ) : null}
                 {showDetachX ? (

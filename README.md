@@ -47,9 +47,10 @@ see `docs/adoption-plan-tool-one-pager.md` when you maintain that tree locally
 > groups and fleets, the sources feeding them, and the daily volume each one
 > contributes.”
 
-**Release line:** **v2.3.x** — tenant + diagnostic import, Summary / executive
-readout, AI assistant (session modes, plan patch proposals), and more; see
-GitHub **Release** notes for the tag (or `docs/releases/v2.3.0.md` locally). **v2.3.2** is a **patch**: **Sources** filters (assignment state, disabled-only, criticality/compliance/context/volume), bulk attachment-disabled toggles, **show-disabled** list preference defaulting off with a compact nav hint, wider **left rail** defaults/ceiling, and **popover menus** portaled to `document.body` so they are not clipped by the main scroll region. It also includes the **2.3.x** line’s per-WG / per-fleet **Excel** validation and color scales past row **21** for large groups, **`propose_plan_patch`** structural ops, digest **ids**, assistant alignment, and rollup **source counts**. Gold **v0.9.1** alignment
+**Release line:** **v3.0.0** — **Environment** routing map (tenant + diagnostic
+import), unified **Import** with overwrite review, and the **v2.3.x** foundation
+(tenant/diag topology import, Summary / executive readout, AI assistant, Sources
+UX, gold **v0.9.1** export). See GitHub **Release** notes for the tag. Gold **v0.9.1** alignment
 and design history: [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#v20-schema-rewrite-gold-v091).
 
 ---
@@ -99,7 +100,7 @@ In the Cribl workspace, open **Settings → Apps → Install** (or your org’s 
 2. Deliver **`dist-standalone/cribl-adoption-plan.html`** (~2.2 MB raw / ~720 KB
    gzipped — comfortable to email), or point customers at the same asset on
    [GitHub Releases](https://github.com/mmolina-cribl/Cribl-Adoption-Plan-App/releases)
-   (e.g. `…/releases/download/v2.3.2/cribl-adoption-plan.html`).
+   (e.g. `…/releases/download/v3.0.0/cribl-adoption-plan.html`).
 3. Customer opens the file in a modern browser (`file://` or hosted HTTPS). No
    Node, no server.
 
@@ -148,7 +149,7 @@ extra files beside the `.html`.
 
 **GitHub Release:** attach **`build/adoption-plan-<version>.tgz`** (from `npm run package`) **and** **`dist-standalone/cribl-adoption-plan.html`** (from `npm run build:standalone`) as **release assets** — **both** are required (the **`.tgz`** is what tenants use for **Apps → Install**; do not publish a release with only the **`.html`**). Use `npm run release:upload-github-assets` after the tag exists, or see [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md#release-checklist-github--release-assets). Do not use GitHub’s **Source code (tar.gz)** for Cribl installs.
 
-When you bump the **app** semver, also follow **[`CRIBL_DEV_NOTES.md` — Release checklist for app semver and docs](./CRIBL_DEV_NOTES.md#release-checklist-for-app-semver-and-docs)** (grep old version, refresh README / ROADMAP / examples, avoid `package-lock.json` dependency false positives).
+When you bump the **app** semver, also follow **[`CRIBL_DEV_NOTES.md` — Release checklist for app semver and docs](./CRIBL_DEV_NOTES.md#release-checklist-for-app-semver-and-docs)** (grep old version, refresh README / ROADMAP / examples, avoid `package-lock.json` dependency false positives). After each public GitHub release, post a **short, user-facing** blurb from **`docs/slack-update-posts.md`** (local **`docs/`** tree) and add a section there for the next ship when you draft it.
 
 ---
 
@@ -169,6 +170,9 @@ Add tests alongside modules under `src/` when behavior is non-trivial.
   onboarding status (Planned / In Progress / Complete).
 - **Interactive resource maps** — Drag sources onto worker groups / detach;
   plan-wide and per-WG views with search.
+- **Environment** — Read-only routing map (sources → routes → pipelines →
+  destinations) from your last tenant or diagnostic import; drill into worker
+  groups, fleets, and packs. Separate from plan edits — re-import to refresh.
 - **Worker groups** — Capacity (ingest / egress / throughput / 1-day storage),
   worker count, hosting taxonomy, topology detail; bulk actions on the index.
 - **Sources** — Volume, criticality, compliance, onboarding window, tile
@@ -183,10 +187,12 @@ Add tests alongside modules under `src/` when behavior is non-trivial.
   hosting hints from `estimatedIngestRate` / `cloud` / `onPrem`; Leader input
   **`description`** → source **additional notes**. **Import debug** shows counts,
   tables, warnings, JSON. Routing (pipelines / destinations) is **not** imported.
-  Field matrix: `docs/tenant-import-leader-data.md` (local `docs/` tree).
-- **Import from diagnostic bundle** — **File → Import** accepts Stream/Edge
-  **`.tar.gz` / `.tgz`** and parses `groups/<id>/…/inputs.yml` in the browser.
-  Cloud vs self-managed nuance: `docs/diag-import.md` (local `docs/` tree).
+  Field matrix: `docs/tenant-import-leader-data.md` (local `docs/` tree). Also
+  harvests a routing snapshot for **Environment** (read-only; stored in pack KV).
+- **Import from diagnostic bundle** — **File → Import** accepts a customer
+  **`.tar.gz` / `.tgz`** diagnostic bundle and loads topology plus routing for
+  **Environment**. Cloud vs self-managed nuance: `docs/diag-import.md` (local
+  `docs/` tree).
 - **Activation** (Plan nav) — PS Use Case Worksheet aligned to Excel.
 - **Summary** (Plan nav) — Executive narrative, provenance, full inventory;
   **Download summary (.md)** and **Download workbook (.xlsx)**. Optional
@@ -369,6 +375,7 @@ notes) to **GitHub Releases** or an internal wiki.
 | [`AGENTS.md`](./AGENTS.md) | Cribl App Platform developer guide (KV, `proxies.yml`, iframe globals) |
 | [`CRIBL_DEV_NOTES.md`](./CRIBL_DEV_NOTES.md) | Engineering decisions, packaging, known issues (`__local__` shell) |
 | [`ROADMAP.md`](./ROADMAP.md) | Themes and exploration backlog |
+| **`docs/slack-update-posts.md`** (local) | Short internal Slack blurbs per release (install links + user-visible highlights; not full release notes) |
 
 ---
 
@@ -394,9 +401,11 @@ For **Cribl Copilot vs BYOL** positioning, see `docs/copilot-integration-researc
 Semver in lockstep: **`package.json`** + **`package-lock.json`**. One version
 for both build targets. On each bump, run **[Release checklist for app semver and docs](./CRIBL_DEV_NOTES.md#release-checklist-for-app-semver-and-docs)** so docs and examples are not left on an old tag (and lockfile-only hits are not mistaken for the app version).
 
-- **2.3.x** — Tenant import, diag import, Summary / executive readout, AI modes
-  + plan patches, layout polish, Credits; see **GitHub Release** notes for the
-  tag and [`ROADMAP.md`](./ROADMAP.md) (local `docs/releases/v2.3.0.md` if you maintain it).
+- **3.0.x** — **Environment** routing visualization, unified import + overwrite
+  review, routing harvest on tenant/diag import; see **GitHub Release** notes and
+  [`ROADMAP.md`](./ROADMAP.md).
+- **2.3.x** — Tenant/diag topology import, Summary / executive readout, AI modes
+  + plan patches, Sources UX, export parity; see git tags **v2.3.0**–**v2.3.2**.
 - **2.0.x** — Gold v0.9.1 (`wg-*` / `fl-*`), overviews, PS Use Case Worksheet,
   Activation, resource maps, standalone HTML, OOXML export fidelity.
 - **1.x** — Earlier interactive maps, tiles, bulk actions, topology — see git tags.

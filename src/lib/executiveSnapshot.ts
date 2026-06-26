@@ -1,6 +1,8 @@
 import type { ExecutiveSummaryAi, PlanState, WorkerGroupRow } from '../types/planTypes'
 import { sourceLabel } from '../types/planTypes'
+import * as XLSX from 'xlsx'
 import { parseGb } from './formatRate'
+import { isSourceRowAttachmentDisabled, stripAttachmentDisabledNameSuffix } from './sourceAttachmentDisabled'
 
 export type ExecutiveReadoutNarrativeSection = {
   title: string
@@ -11,6 +13,8 @@ export type ExecutiveReadoutNarrativeSection = {
 export type ExecutiveSourceRow = {
   id: string
   name: string
+  /** Leader-disabled / attachment-disabled vs active in the plan editor. */
+  state: 'Enabled' | 'Disabled'
   vol: string
   wg: string
   streamOrEdge: string
@@ -59,7 +63,7 @@ function provenanceCopy(plan: PlanState): { label: string; detail: string; cavea
   }
   if (p.kind === 'diag') {
     const caveats: string[] = [
-      'Topology was parsed from a **diagnostic bundle** snapshot — it reflects on-disk config at capture time, not live Leader APIs.',
+      'Topology was parsed from a **diagnostic bundle** snapshot (per-group `groups/<id>/…` config) — it reflects on-disk config at capture time, not live Leader APIs.',
       'Sources come from `inputs.yml` (and `inputs/*.yml`) under each `groups/<id>/` tree; routing is not imported.',
       'If the bundle omitted `groups/*` configs or used an unexpected layout, some groups or sources may be missing — compare with the tenant or Excel.',
       '**Cribl.Cloud** diagnostics are **Leader-centric**; **per-worker / per-node** bundle workflows differ from self-managed Stream — **Import from live tenant** is often the easiest way to hydrate the full plan on Cloud.',
@@ -88,7 +92,8 @@ function buildExecutiveSourceRows(plan: PlanState): ExecutiveSourceRow[] {
     const wgLabel = wg ? wgDisplayName(wg) : '—'
     return {
       id: r.id,
-      name: sourceLabel(r, i),
+      name: sourceLabel({ source: stripAttachmentDisabledNameSuffix(r.source) }, i),
+      state: (isSourceRowAttachmentDisabled(r) ? 'Disabled' : 'Enabled') as ExecutiveSourceRow['state'],
       vol: (r.avgDailyGb ?? '').trim() || '—',
       wg: wgLabel,
       streamOrEdge: (r.streamOrEdge ?? '').trim() || '—',
@@ -126,7 +131,7 @@ function buildExecutiveSummaryNarrative(args: {
     title: 'Overview',
     paragraphs: [
       `This readout distills the adoption plan for *${customerName}* into a stakeholder-ready overview.`,
-      `It reflects *Stream* and *Edge* worker groups, every planned data source in the tables below, *PS Activation* framing, and risks captured in source *Blockers*. Use *Download summary (.md)* on this page for a portable copy, or *Download workbook (.xlsx)* for the full gold-template Excel handoff.`,
+      `It reflects *Stream* and *Edge* worker groups, every planned data source in the tables below, *PS Activation* framing, and risks captured in source *Blockers*. Use *Download summary (.md)* for a portable narrative copy, or *Download sources inventory (.xlsx)* for the full source table as a single Excel sheet.`,
     ],
   })
 
@@ -273,13 +278,13 @@ export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot, ai?: Execut
   } else {
     lines.push('*Rows sorted by average daily GB (largest first).*')
     lines.push('')
-    lines.push('| Source | GB/d | Worker group / fleet | Stream/Edge | Source tile | Blockers |')
-    lines.push('| --- | --- | --- | --- | --- | --- |')
+    lines.push('| Source | Tile | State | GB/d | Worker group / fleet | Stream/Edge | Blockers |')
+    lines.push('| --- | --- | --- | --- | --- | --- | --- |')
     for (const s of snap.sources) {
       const esc = (cell: string) =>
         cell.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
       lines.push(
-        `| ${esc(s.name)} | ${esc(s.vol)} | ${esc(s.wg)} | ${esc(s.streamOrEdge)} | ${esc(s.sourceTile)} | ${esc(s.blockers)} |`,
+        `| ${esc(s.name)} | ${esc(s.sourceTile)} | ${s.state} | ${esc(s.vol)} | ${esc(s.wg)} | ${esc(s.streamOrEdge)} | ${esc(s.blockers)} |`,
       )
     }
   }
@@ -303,6 +308,64 @@ export function executiveSnapshotToMarkdown(snap: ExecutiveSnapshot, ai?: Execut
 function sanitizeFilenameBase(name: string): string {
   const t = name.trim() || 'Adoption-plan'
   return t.replace(/[^\w\s-]+/g, '').replace(/\s+/g, '-').slice(0, 80) || 'Adoption-plan'
+}
+
+function inventoryCell(value: string): string {
+  return value === '—' ? '' : value
+}
+
+/** Header row + one row per source for the Summary sources inventory export. */
+export function buildExecutiveSourcesInventoryAoA(snap: ExecutiveSnapshot): string[][] {
+  const header = ['Source', 'Tile', 'State', 'GB/d', 'WG / fleet', 'Stream/Edge', 'Blockers']
+  const rows = snap.sources.map((s) => [
+    s.name,
+    inventoryCell(s.sourceTile),
+    s.state,
+    inventoryCell(s.vol),
+    inventoryCell(s.wg),
+    inventoryCell(s.streamOrEdge),
+    inventoryCell(s.blockers),
+  ])
+  return [header, ...rows]
+}
+
+const SOURCES_INVENTORY_SHEET_NAME = 'Sources (full inventory)'
+
+/** Trigger a browser download of the Sources (full inventory) table as a one-sheet .xlsx. */
+export function downloadExecutiveSourcesInventoryXlsx(snap: ExecutiveSnapshot): void {
+  const ws = XLSX.utils.aoa_to_sheet(buildExecutiveSourcesInventoryAoA(snap))
+  ws['!cols'] = [
+    { wch: 28 },
+    { wch: 18 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 40 },
+  ]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, SOURCES_INVENTORY_SHEET_NAME)
+  if (!wb.Props) wb.Props = {}
+  wb.Props.Title = `${snap.customerName} — sources inventory`
+  if (snap.customerName.trim()) {
+    wb.Props.Subject = snap.customerName.trim()
+  }
+  const stamp = new Date().toISOString().slice(0, 10)
+  const base = sanitizeFilenameBase(snap.customerName)
+  const filename = `${base}-sources-inventory-${stamp}.xlsx`
+  const ab = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+  const blob = new Blob([ab], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 /** Trigger a browser download of the Markdown summary. */

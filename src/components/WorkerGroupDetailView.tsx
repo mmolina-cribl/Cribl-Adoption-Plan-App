@@ -1,4 +1,4 @@
-import { useState, useMemo, type Dispatch, type SetStateAction } from 'react'
+import { useState, useMemo, useEffect, type Dispatch, type SetStateAction } from 'react'
 import { WorkerGroupEditor } from './WorkerGroupEditor'
 import { usePatchWorkerGroup } from '../hooks/usePatchWorkerGroup'
 import { sourceLabel, type PlanState } from '../types/planTypes'
@@ -12,7 +12,7 @@ import { baselineNodesForThroughput } from '../lib/sizing'
 import { sourceRowProgress } from '../lib/planDashboardStats'
 import { formatGbOrTbPerDayStr, parseGb } from '../lib/formatRate'
 import { ConfirmRemoveWorkerGroupDialog } from './ConfirmRemoveWorkerGroupDialog'
-import { getWorkerGroupDetailCardsExpanded } from '../lib/detailCardsPreference'
+import { getWorkerGroupDetailCardsExpanded, ensureDetailCardsPreferenceHydrated } from '../lib/detailCardsPreference'
 import { CHART_CRIBL_BLUE } from '../lib/chartColors'
 import { AttachSourceCombobox } from './AttachSourceCombobox'
 import { WorkerGroupResourceMap } from './WorkerGroupResourceMap'
@@ -185,6 +185,10 @@ export function WorkerGroupDetailView({
   const s = usePatchWorkerGroup(setPlan, groupId)
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false)
   const expandByDefault = getWorkerGroupDetailCardsExpanded()
+
+  useEffect(() => {
+    ensureDetailCardsPreferenceHydrated()
+  }, [])
   // Must run before any early return: after remove, `groupId` can briefly
   // point at a deleted row while plan has already updated — same hook count
   // every render avoids a Rules-of-Hooks crash (blank page).

@@ -3,6 +3,7 @@ import type { SourceSummaryRow } from '../types/planTypes'
 import {
   DISABLED_SOURCE_NAME_SUFFIX,
   isSourceRowAttachmentDisabled,
+  sourceNameForAdoptionPlanExport,
   sourceNameImpliesAttachmentDisabled,
   stripAttachmentDisabledNameSuffix,
 } from './sourceAttachmentDisabled'
@@ -50,6 +51,7 @@ describe('sourceAttachmentDisabled', () => {
   it('detects suffix case-insensitively', () => {
     expect(sourceNameImpliesAttachmentDisabled(`foo${DISABLED_SOURCE_NAME_SUFFIX}`)).toBe(true)
     expect(sourceNameImpliesAttachmentDisabled('foo DISABLED')).toBe(true)
+    expect(sourceNameImpliesAttachmentDisabled('foo (DISABLED)')).toBe(true)
     expect(sourceNameImpliesAttachmentDisabled('foo')).toBe(false)
   })
 
@@ -62,7 +64,16 @@ describe('sourceAttachmentDisabled', () => {
   it('stripAttachmentDisabledNameSuffix removes Leader-style suffix only when implied', () => {
     expect(stripAttachmentDisabledNameSuffix('mySource disabled')).toBe('mySource')
     expect(stripAttachmentDisabledNameSuffix('mySource DISABLED')).toBe('mySource')
+    expect(stripAttachmentDisabledNameSuffix('mySource (DISABLED)')).toBe('mySource')
     expect(stripAttachmentDisabledNameSuffix('normal')).toBe('normal')
     expect(stripAttachmentDisabledNameSuffix('no trailing')).toBe('no trailing')
+  })
+
+  it('sourceNameForAdoptionPlanExport writes (DISABLED) for attachment-disabled rows', () => {
+    expect(sourceNameForAdoptionPlanExport(row({ source: 'in_elastic disabled' }))).toBe('in_elastic (DISABLED)')
+    expect(sourceNameForAdoptionPlanExport(row({ leaderImportedDisabled: true, source: 'in_syslog' }))).toBe(
+      'in_syslog (DISABLED)',
+    )
+    expect(sourceNameForAdoptionPlanExport(row({ source: 'active' }))).toBe('active')
   })
 })

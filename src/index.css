@@ -203,3 +203,17 @@
     break-inside: avoid;
   }
 }
+
+/* Environment map — smooth node motion when the viewport recenters */
+.environment-map-flow .react-flow__node {
+  transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.environment-map-flow .react-flow__node.dragging {
+  transition: none;
+}
+
+.environment-map-flow .react-flow__edge,
+.environment-map-flow .react-flow__edge-interaction {
+  pointer-events: none;
+}

@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { sourceLabel, type PlanState, type SourceSummaryRow } from '../types/planTypes'
-import { isSourceRowAttachmentDisabled } from '../lib/sourceAttachmentDisabled'
+import { type PlanState, type SourceSummaryRow } from '../types/planTypes'
+import { isSourceRowAttachmentDisabled, sourceDisplayLabel } from '../lib/sourceAttachmentDisabled'
 import { SourceSummaryStack } from './sourceForm/SourceFormPanels'
 
 type Props = {
@@ -51,7 +51,7 @@ export function DataSourcesView({
   )
 
   const s = patch(row.id)
-  const displayLabel = sourceLabel(row, sourceIndex)
+  const displayLabel = sourceDisplayLabel(row, sourceIndex)
 
   return (
     <div className="min-w-0">

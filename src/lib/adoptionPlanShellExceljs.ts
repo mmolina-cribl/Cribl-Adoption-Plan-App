@@ -18,6 +18,10 @@ import type { PlanState, SourceVolumeRow, WorkerGroupRow } from '../types/planTy
 import { buildTopologyColumnMap, buildWorkerColumnMap } from './topologyWorkbookMap'
 import { scanCopySourcesWgFromAoa } from './topologySheetLayout'
 import { sourceSummaryValueForHeaderName, titleForAdoptionPlanExport } from './exportWorkbook'
+import {
+  sourceNameForAdoptionPlanExport,
+  sourceNameForAdoptionPlanExportFromLabel,
+} from './sourceAttachmentDisabled'
 import { buildSourceSummaryColumnMap } from './sourceSummaryColumnMap'
 import { mergeOoxmlStylePartsFromOriginal } from './shellOoxmlStyleMerge'
 import {
@@ -33,12 +37,12 @@ function sourcesForTopology(plan: PlanState): SourceVolumeRow[] {
     .map((r) => ({ r, label: String(r.source ?? '').trim() }))
     .filter(({ label }) => label !== '')
     .filter(({ label }) => !seen.has(label.toLowerCase()))
-    .map(({ r, label }) => {
+    .map(({ r }) => {
       const wgName = plan.workerGroups.find((w) => w.id === r.workerGroupId)?.wg ?? ''
       return {
         id: '',
         workerGroupId: r.workerGroupId ?? '',
-        source: label,
+        source: sourceNameForAdoptionPlanExport(r),
         dailyVolumeGb: String(r.avgDailyGb ?? '').trim(),
         type: r.type ?? '',
         region: String(r.physicalLocations ?? '').trim(),
@@ -114,7 +118,7 @@ function parseNumberLoose(s: string | undefined): number | null {
 function sourceVolumeValueForHeaderName(name: string, s: SourceVolumeRow): string | number {
   switch (name) {
     case 'Source':
-      return s.source
+      return sourceNameForAdoptionPlanExportFromLabel(s.source)
     case 'Daily Volume (GB/day)':
       return parseNumberLoose(s.dailyVolumeGb) ?? ''
     case 'Type':

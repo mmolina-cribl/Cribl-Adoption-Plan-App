@@ -1,4 +1,4 @@
-import { kvDelete, kvGet, kvSet } from './kvStore'
+import { kvDelete, kvGetPreference, kvSet } from './kvStore'
 
 const KEY = 'prefs/post-add'
 
@@ -14,10 +14,21 @@ export type PostAddDefaultChoice = 'wizard' | 'manual'
 // default for a setting that's only consulted inside a click handler (well
 // after mount).
 let cached: PostAddDefaultChoice | null = null
+let hydratePromise: Promise<void> | null = null
 
-void (async () => {
-  cached = await kvGet<PostAddDefaultChoice | null>(KEY, null)
-})()
+export function ensurePostAddPreferenceHydrated(): void {
+  if (hydratePromise) {
+    return
+  }
+  hydratePromise = (async () => {
+    cached = await kvGetPreference<PostAddDefaultChoice | null>(KEY, null)
+  })()
+}
+
+export function whenPostAddPreferenceHydrated(): Promise<void> {
+  ensurePostAddPreferenceHydrated()
+  return hydratePromise ?? Promise.resolve()
+}
 
 /**
  * If set, the "How do you want to get started?" step is skipped for new sources.

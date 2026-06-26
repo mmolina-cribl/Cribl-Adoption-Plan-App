@@ -17,3 +17,4 @@ export type MainView =
   | 'source'
   | 'import'
   | 'export'
+  | 'environment'

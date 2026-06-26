@@ -84,6 +84,162 @@ function namespaced(key: string): string {
   return `users/${getCurrentUserId()}/${key}`
 }
 
+function kvKeyPresentInLocalStorage(nsKey: string): boolean {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return false
+  }
+  try {
+    return ls.getItem(localStorageKey(nsKey)) !== null
+  } catch {
+    return false
+  }
+}
+
+/** Pack KV keys we know exist remotely (successful GET/PUT). */
+const remoteKvKeysPresent = new Set<string>()
+/** Keys that returned 404 this session — skip repeat GET/DELETE round-trips. */
+const remoteKvKeysAbsent = new Set<string>()
+/** Coalesce parallel GETs for the same pack key (e.g. React Strict Mode double-mount). */
+const kvGetInFlight = new Map<string, Promise<unknown>>()
+
+const KV_ABSENT_LS_PREFIX = 'cribl-kv-absent:'
+const KV_TOUCHED_LS_PREFIX = 'cribl-kv-touched:'
+
+function persistedKvAbsentKey(nsKey: string): string {
+  return `${KV_ABSENT_LS_PREFIX}${nsKey}`
+}
+
+function persistedKvTouchedKey(nsKey: string): string {
+  return `${KV_TOUCHED_LS_PREFIX}${nsKey}`
+}
+
+function readPersistedKvAbsent(nsKey: string): boolean {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return false
+  }
+  try {
+    return ls.getItem(persistedKvAbsentKey(nsKey)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writePersistedKvAbsent(nsKey: string, absent: boolean): void {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return
+  }
+  try {
+    const key = persistedKvAbsentKey(nsKey)
+    if (absent) {
+      ls.setItem(key, '1')
+    } else {
+      ls.removeItem(key)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function readKvTouched(nsKey: string): boolean {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return false
+  }
+  try {
+    return ls.getItem(persistedKvTouchedKey(nsKey)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeKvTouched(nsKey: string, touched: boolean): void {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return
+  }
+  try {
+    const key = persistedKvTouchedKey(nsKey)
+    if (touched) {
+      ls.setItem(key, '1')
+    } else {
+      ls.removeItem(key)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function markRemoteKvKeyPresent(nsKey: string): void {
+  remoteKvKeysPresent.add(nsKey)
+  remoteKvKeysAbsent.delete(nsKey)
+  writePersistedKvAbsent(nsKey, false)
+  writeKvTouched(nsKey, true)
+}
+
+function markRemoteKvKeyAbsent(nsKey: string): void {
+  remoteKvKeysPresent.delete(nsKey)
+  remoteKvKeysAbsent.add(nsKey)
+  writePersistedKvAbsent(nsKey, true)
+}
+
+function isRemoteKvKeyKnownAbsent(nsKey: string): boolean {
+  if (remoteKvKeysPresent.has(nsKey) || kvKeyPresentInLocalStorage(nsKey)) {
+    return false
+  }
+  if (remoteKvKeysAbsent.has(nsKey)) {
+    return true
+  }
+  if (readPersistedKvAbsent(nsKey)) {
+    remoteKvKeysAbsent.add(nsKey)
+    return true
+  }
+  return false
+}
+
+/**
+ * Optional prefs / import shell: skip a pack GET when this browser already
+ * learned the key is absent, or when the user has never saved it here (avoids
+ * noisy 404s for unset keys on installed packs).
+ */
+function shouldSkipSpeculativeKvGet(nsKey: string): boolean {
+  if (isRemoteKvKeyKnownAbsent(nsKey)) {
+    return true
+  }
+  if (readKvTouched(nsKey) || kvKeyPresentInLocalStorage(nsKey)) {
+    return false
+  }
+  return true
+}
+
+function shouldSkipRemoteKvDelete(nsKey: string): boolean {
+  if (isRemoteKvKeyKnownAbsent(nsKey)) {
+    return true
+  }
+  return !remoteKvKeysPresent.has(nsKey) && !kvKeyPresentInLocalStorage(nsKey)
+}
+
+/**
+ * Clear a pack KV key remotely. Uses PUT with an empty body instead of DELETE
+ * because the Cribl App Platform fetch proxy / service worker can throw
+ * `Response with null body status cannot have body` when DELETE returns 204.
+ */
+async function kvRemoteEraseKey(base: string, keyPath: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${base}/kvstore/${keyPath}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain' },
+      body: '',
+    })
+    return r.ok
+  } catch (e) {
+    console.warn(`[kvStore] PUT (erase) ${keyPath} threw:`, e)
+    return false
+  }
+}
+
 function isInCriblIframe(): boolean {
   return criblApiBase() != null
 }
@@ -297,9 +453,60 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
     return lsGet(nsKey, fallback)
   }
 
+  if (isRemoteKvKeyKnownAbsent(nsKey)) {
+    if (genericKvShouldMirrorToBrowser()) {
+      return lsGet(nsKey, fallback)
+    }
+    return fallback
+  }
+
+  const inflight = kvGetInFlight.get(nsKey)
+  if (inflight) {
+    return inflight as Promise<T>
+  }
+
+  const promise = kvGetRemote<T>(base, nsKey, fallback)
+  kvGetInFlight.set(nsKey, promise)
+  try {
+    return await promise
+  } finally {
+    kvGetInFlight.delete(nsKey)
+  }
+}
+
+/**
+ * Read an optional UI preference or other non-critical key. Uses the same
+ * failure model as {@link kvGet}, but skips the pack round-trip when this
+ * browser already knows the key is absent or has never written it (so unset
+ * prefs do not produce console 404 noise on installed packs).
+ */
+export async function kvGetPreference<T>(key: string, fallback: T): Promise<T> {
+  const nsKey = namespaced(key)
+
+  if (!isInCriblIframe()) {
+    return lsGet(nsKey, fallback)
+  }
+  if (isCriblLocalShell()) {
+    return lsGet(nsKey, fallback)
+  }
+  const base = criblApiBase()
+  if (!base) {
+    return lsGet(nsKey, fallback)
+  }
+  if (shouldSkipSpeculativeKvGet(nsKey)) {
+    if (genericKvShouldMirrorToBrowser()) {
+      return lsGet(nsKey, fallback)
+    }
+    return fallback
+  }
+  return kvGet(key, fallback)
+}
+
+async function kvGetRemote<T>(base: string, nsKey: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(`${base}/kvstore/${nsKey}`)
     if (r.status === 404) {
+      markRemoteKvKeyAbsent(nsKey)
       if (genericKvShouldMirrorToBrowser()) {
         return lsGet(nsKey, fallback)
       }
@@ -318,11 +525,13 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
     }
     const text = await r.text()
     if (!text) {
+      markRemoteKvKeyAbsent(nsKey)
       if (genericKvShouldMirrorToBrowser()) {
         return lsGet(nsKey, fallback)
       }
       return fallback
     }
+    markRemoteKvKeyPresent(nsKey)
     try {
       return JSON.parse(text) as T
     } catch {
@@ -350,17 +559,20 @@ export async function kvSet<T>(key: string, value: T): Promise<void> {
 
   if (!isInCriblIframe()) {
     lsSet(nsKey, value)
+    markRemoteKvKeyPresent(nsKey)
     return
   }
 
   if (isCriblLocalShell()) {
     lsSet(nsKey, value)
+    markRemoteKvKeyPresent(nsKey)
     return
   }
 
   const base = criblApiBase()
   if (!base) {
     lsSet(nsKey, value)
+    markRemoteKvKeyPresent(nsKey)
     return
   }
 
@@ -378,20 +590,24 @@ export async function kvSet<T>(key: string, value: T): Promise<void> {
       }
       if (isKvUnknownLocalAppResponse(body) || genericKvShouldMirrorToBrowser()) {
         lsSet(nsKey, value)
+        markRemoteKvKeyPresent(nsKey)
       }
       return
     }
+    markRemoteKvKeyPresent(nsKey)
   } catch (e) {
     console.warn(`[kvStore] PUT ${nsKey} threw:`, e)
     if (genericKvShouldMirrorToBrowser()) {
       lsSet(nsKey, value)
+      markRemoteKvKeyPresent(nsKey)
     }
   }
 }
 
 /**
- * Delete a key from KV. 404 (already absent) is treated as success.
- * Other errors are logged and swallowed.
+ * Remove a key from KV. Uses PUT with an empty body on installed packs (DELETE
+ * can trip the platform fetch proxy on 204). 404 on GET is treated as absent.
+ * Errors are logged and swallowed.
  */
 export async function kvDelete(key: string): Promise<void> {
   const nsKey = namespaced(key)
@@ -412,17 +628,27 @@ export async function kvDelete(key: string): Promise<void> {
     return
   }
 
+  if (shouldSkipRemoteKvDelete(nsKey)) {
+    lsDelete(nsKey)
+    markRemoteKvKeyAbsent(nsKey)
+    writeKvTouched(nsKey, false)
+    return
+  }
+
   try {
-    const r = await fetch(`${base}/kvstore/${nsKey}`, {
-      method: 'DELETE',
-    })
-    if (!r.ok && r.status !== 404) {
-      const body = await r.text().catch(() => '')
-      console.warn(`[kvStore] DELETE ${nsKey} failed: ${r.status} ${r.statusText}`, body.slice(0, 200))
+    const erased = await kvRemoteEraseKey(base, nsKey)
+    if (erased) {
+      markRemoteKvKeyAbsent(nsKey)
+      writeKvTouched(nsKey, false)
+    } else {
+      console.warn(`[kvStore] erase ${nsKey} failed — cleared local mirror only`)
+      markRemoteKvKeyAbsent(nsKey)
+      writeKvTouched(nsKey, false)
     }
   } catch (e) {
-    console.warn(`[kvStore] DELETE ${nsKey} threw:`, e)
+    console.warn(`[kvStore] erase ${nsKey} threw:`, e)
   }
+  lsDelete(nsKey)
 }
 
 // ── OpenAI API key (BYOL assistant): stored at pack KV key `openaiKey` with NO
@@ -449,6 +675,77 @@ function dispatchOpenAiKeyAvailabilityChanged(): void {
 // JSON-quoted values from older app versions.
 
 const OPENAI_KV_KEY = 'openaiKey'
+const OPENAI_KEY_ABSENT_LS_KEY = `${KV_ABSENT_LS_PREFIX}${OPENAI_KV_KEY}`
+const OPENAI_KEY_TOUCHED_LS_KEY = `${KV_TOUCHED_LS_PREFIX}${OPENAI_KV_KEY}`
+let openAiKeyKnownAbsentOnServer = readOpenAiKeyPersistedAbsent()
+let probeOpenAiKeyInFlight: Promise<boolean> | null = null
+
+function readOpenAiKeyPersistedAbsent(): boolean {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return false
+  }
+  try {
+    return ls.getItem(OPENAI_KEY_ABSENT_LS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeOpenAiKeyPersistedAbsent(absent: boolean): void {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return
+  }
+  try {
+    if (absent) {
+      ls.setItem(OPENAI_KEY_ABSENT_LS_KEY, '1')
+    } else {
+      ls.removeItem(OPENAI_KEY_ABSENT_LS_KEY)
+    }
+  } catch {
+    /* ignore */
+  }
+  openAiKeyKnownAbsentOnServer = absent
+}
+
+function readOpenAiKeyTouched(): boolean {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return false
+  }
+  try {
+    return ls.getItem(OPENAI_KEY_TOUCHED_LS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeOpenAiKeyTouched(touched: boolean): void {
+  const ls = getSafeLocalStorage()
+  if (!ls) {
+    return
+  }
+  try {
+    if (touched) {
+      ls.setItem(OPENAI_KEY_TOUCHED_LS_KEY, '1')
+    } else {
+      ls.removeItem(OPENAI_KEY_TOUCHED_LS_KEY)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function shouldSkipSpeculativeOpenAiKeyProbe(): boolean {
+  if (openAiKeyKnownAbsentOnServer || readOpenAiKeyPersistedAbsent()) {
+    return true
+  }
+  if (readOpenAiKeyTouched() || probeOpenAiKeyPresentInBrowser()) {
+    return false
+  }
+  return true
+}
 
 function rawLocalStorageKey(): string {
   return `cribl-kv-raw:${OPENAI_KV_KEY}`
@@ -602,7 +899,22 @@ export async function probeOpenAiKeyPresent(): Promise<boolean> {
   if (openAiKeyUsesBrowserStorageOnly()) {
     return probeOpenAiKeyPresentInBrowser()
   }
+  if (shouldSkipSpeculativeOpenAiKeyProbe()) {
+    return false
+  }
+  if (probeOpenAiKeyInFlight) {
+    return probeOpenAiKeyInFlight
+  }
 
+  probeOpenAiKeyInFlight = probeOpenAiKeyPresentRemote()
+  try {
+    return await probeOpenAiKeyInFlight
+  } finally {
+    probeOpenAiKeyInFlight = null
+  }
+}
+
+async function probeOpenAiKeyPresentRemote(): Promise<boolean> {
   try {
     const base = criblApiBase()
     if (!base) {
@@ -611,6 +923,10 @@ export async function probeOpenAiKeyPresent(): Promise<boolean> {
     const r = await fetch(`${base}/kvstore/${OPENAI_KV_KEY}`)
     const text = await r.text().catch(() => '')
     if (!r.ok) {
+      if (r.status === 404) {
+        writeOpenAiKeyPersistedAbsent(true)
+        writeOpenAiKeyTouched(false)
+      }
       if (isKvUnknownLocalAppResponse(text)) {
         rememberOpenAiKeyBrowserOnlyAfterKvError()
         return probeOpenAiKeyPresentInBrowser()
@@ -618,10 +934,20 @@ export async function probeOpenAiKeyPresent(): Promise<boolean> {
       return false
     }
     if (!text) {
+      writeOpenAiKeyPersistedAbsent(true)
+      writeOpenAiKeyTouched(false)
       return false
     }
     const key = openAiSecretFromPackKvText(text)
-    return key != null && key.length > 0
+    const present = key != null && key.length > 0
+    if (present) {
+      writeOpenAiKeyPersistedAbsent(false)
+      writeOpenAiKeyTouched(true)
+    } else {
+      writeOpenAiKeyPersistedAbsent(true)
+      writeOpenAiKeyTouched(false)
+    }
+    return present
   } catch {
     return false
   }
@@ -704,6 +1030,8 @@ export async function kvSetOpenAiKey(apiKey: string): Promise<OpenAiKeySaveResul
       }
     }
     dispatchOpenAiKeyAvailabilityChanged()
+    writeOpenAiKeyPersistedAbsent(false)
+    writeOpenAiKeyTouched(true)
     return { ok: true }
   } catch (e) {
     console.warn(`[kvStore] PUT ${OPENAI_KV_KEY} threw:`, e)
@@ -744,16 +1072,24 @@ export async function kvClearOpenAiKey(): Promise<void> {
     return
   }
 
+  if (readOpenAiKeyPersistedAbsent()) {
+    return
+  }
+  if (!readOpenAiKeyTouched() && !probeOpenAiKeyPresentInBrowser()) {
+    writeOpenAiKeyPersistedAbsent(true)
+    return
+  }
+
   try {
-    const r = await fetch(`${base}/kvstore/${OPENAI_KV_KEY}`, {
-      method: 'DELETE',
-    })
-    if (!r.ok && r.status !== 404) {
-      const body = await r.text().catch(() => '')
-      console.warn(`[kvStore] DELETE ${OPENAI_KV_KEY} failed: ${r.status} ${r.statusText}`, body.slice(0, 200))
+    const erased = await kvRemoteEraseKey(base, OPENAI_KV_KEY)
+    if (erased) {
+      writeOpenAiKeyPersistedAbsent(true)
+      writeOpenAiKeyTouched(false)
+    } else {
+      console.warn(`[kvStore] erase ${OPENAI_KV_KEY} failed`)
     }
   } catch (e) {
-    console.warn(`[kvStore] DELETE ${OPENAI_KV_KEY} threw:`, e)
+    console.warn(`[kvStore] erase ${OPENAI_KV_KEY} threw:`, e)
   }
   } finally {
     dispatchOpenAiKeyAvailabilityChanged()

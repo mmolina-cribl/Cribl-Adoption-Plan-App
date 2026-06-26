@@ -5,7 +5,7 @@
  * `docs/tenant-import-leader-data.md` — keep that file in sync when changing harvest behavior.
  */
 import { criblGetJson, criblApiBase } from './leaderApi'
-import { isStockLeaderWorkerGroup } from './leaderStockGroups'
+import { isStockLeaderWorkerGroup, isLeaderSearchGroup } from './leaderStockGroups'
 import type { LeaderCloudInfo } from './leaderWorkerGroupMetrics'
 
 export type MasterGroupItem = {
@@ -155,10 +155,7 @@ export async function harvestTenantTopology(
     if (!g?.id) {
       return false
     }
-    if (g.id === 'default_search') {
-      return false
-    }
-    if (g.isSearch === true) {
+    if (isLeaderSearchGroup(g)) {
       return false
     }
     if (omitStock && isStockLeaderWorkerGroup(g)) {

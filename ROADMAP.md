@@ -51,6 +51,19 @@ because of a **Cribl product** release, not on every Adoption Plan app semver bu
 
 ## Recently delivered
 
+### v3.0.0 (GitHub Release)
+
+Major release: **Environment** routing visualization and import-time routing harvest.
+
+- **Environment (new nav):** Interactive routing map — sources → routes → pipelines → destinations — from tenant or diagnostic import; drill Worker Groups / Fleets → group → pack; entity detail panel; placeholders when sources or destinations are missing; read-only snapshot (plan edits do not update the map; **Reset plan** clears it).
+- **Import:** Unified **File → Import** tabs (tenant, diagnostic bundle, Excel); **overwrite review** dialog with plan + environment diff before replacing data; shared harvest options (omit stock groups, disabled inputs).
+- **Tenant harvest:** Leader topology + routing snapshot; quieter KV/API probes; pack inputs/routes/pipelines paths aligned to Leader API; pack outputs inferred from routes when list API is absent.
+- **Diagnostic harvest:** Bundle topology + environment routing (`harvestDiagEnvironment`); stock/outpost/search group filtering; user-friendly import copy.
+- **Persistence:** Environment snapshot in pack KV (`users/…/environment`); hydration via `kvGet` on refresh; import provenance sync banner when plan and snapshot diverge.
+- **Plan / UX:** Environment link in sidebar; executive readout and assistant context updates; confirm clear dialog mentions environment reset.
+- **Tests:** Vitest coverage for environment flow graph, pack entry, tenant/diag harvest, import diff, KV-adjacent helpers (158+ tests in suite at ship).
+- **Packaging:** Semver **3.0.0**; same `npm run package` / `build:standalone` flow as **v2.3.0**+.
+
 ### v2.3.2 (GitHub Release)
 
 Patch release: **Sources index UX**, **left-rail sizing**, and **popover menus** that escape overflow clipping.
@@ -159,6 +172,9 @@ Patch release: **export parity** for large per-WG source lists, plus **AI assist
   doc-driven copy changes. Also follow **Release checklist for app semver and
   docs** in that file (grep prior app version, update README / ROADMAP / examples,
   do not treat unrelated `package-lock.json` dependency versions as the app semver).
+  After **GitHub** release assets (**`.tgz` + `.html`**) are up, post a **short,
+  user-facing** internal Slack blurb from **`docs/slack-update-posts.md`** (local
+  **`docs/`** tree) and maintain that file for the next version.
 
 ## Ongoing programs (no committed finish line)
 
@@ -251,6 +267,7 @@ with a **regression fixture** so the same workbook shape stays supported.
   Summary / digest copy references the field. **v2.3.x** tenant and diag import
   do not persist Leader version yet.
 - **Diagnostic (`diag`) import support (shipped on `main`):** **File → Import** accepts a Cribl Stream/Edge **`.tar.gz` / `.tgz`** bundle and parses `groups/<id>/…/inputs.yml` (see `docs/diag-import.md` in local `docs/` tree). **Remaining:** fixture-backed tests on real bundle shapes, GNU/pax tar edge cases. **UX:** Import page and docs distinguish **Cribl.Cloud** (Leader-centric diags vs self-managed per-worker bundles; live tenant import) from **customer-managed** exports.
+- **Import privacy — omit sensitive fields (not scheduled):** Today **Environment** import (diag + live tenant) stores rich YAML on inputs, outputs, routes, and pipelines, with **key-name redaction** only (`password`, `secret`, `token`, etc. in [`environmentConfigRedact.ts`](./src/lib/environmentConfigRedact.ts)). **Hosts, URLs, buckets, route filters, pipeline function `conf`, and `sourcePath`** still enter KV / `localStorage` and appear in the Environment detail panel. **Plan** import is thinner (input `id` / `type` / `disabled` / `description` only from `inputs.yml`; descriptions copy into **Additional notes**). **Import debug → Copy full JSON** can echo raw harvest. **Proposed direction:** refactor harvest to **not import** sensitive material — prefer **structural-only** snapshots (ids, types, disabled, routing refs `pipeline` / `output`) and drop config blobs, filters, and filesystem paths; optionally tighten plan (`description` → notes) and debug payloads. **Open product choices:** keep route-filter sublabels on the map vs omit filters entirely; whether input `id` / WG labels remain (needed for planning). Docs to update: `docs/diag-import.md`, Import **Browser & privacy** copy, one-pager data-flow table. **No committed version** — park until a customer or security review asks for a stricter posture than mask-on-store.
 - **Push adoption-plan intent into the customer environment (later):**
   **materialize** what the plan describes (routes, pipelines, naming, rollout
   steps) with an **AI agent** that can read **both** the structured plan **and**

@@ -127,10 +127,6 @@ export function WorkerGroupResourceMap({
   className,
 }: Props) {
   const copy = useMemo(() => copyForKind(workerGroup.kind), [workerGroup.kind])
-  const unassignedAttachmentDisabledIds = useMemo(
-    () => new Set(unassignedSources.filter(isSourceRowAttachmentDisabled).map((r) => r.id)),
-    [unassignedSources],
-  )
   /**
    * Edge fleets get a lighter sky-blue palette across the entire
    * resource map (hub box, connector strokes, source-row icon accents,
@@ -156,6 +152,8 @@ export function WorkerGroupResourceMap({
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [branches, setBranches] = useState<Branch[]>([])
   const [hovered, setHovered] = useState<string | null>(null)
+  /** Hide Leader-disabled / attachment-disabled sources unless the user opts in. */
+  const [showDisabledInResourceMap, setShowDisabledInResourceMap] = useState(false)
   /** When false, attached sources render as one summary chip (like Plan resource map). */
   const [sourcesExpanded, setSourcesExpanded] = useState(false)
   const summaryRef = useRef<HTMLButtonElement | null>(null)
@@ -201,6 +199,30 @@ export function WorkerGroupResourceMap({
     [],
   )
 
+  const visibleSources = useMemo(
+    () =>
+      showDisabledInResourceMap
+        ? sources
+        : sources.filter((r) => !isSourceRowAttachmentDisabled(r)),
+    [sources, showDisabledInResourceMap],
+  )
+  const visibleUnassignedSources = useMemo(
+    () =>
+      showDisabledInResourceMap
+        ? unassignedSources
+        : unassignedSources.filter((r) => !isSourceRowAttachmentDisabled(r)),
+    [unassignedSources, showDisabledInResourceMap],
+  )
+  const disabledSourceCount = useMemo(
+    () =>
+      [...sources, ...unassignedSources].filter(isSourceRowAttachmentDisabled).length,
+    [sources, unassignedSources],
+  )
+  const unassignedAttachmentDisabledIds = useMemo(
+    () => new Set(visibleUnassignedSources.filter(isSourceRowAttachmentDisabled).map((r) => r.id)),
+    [visibleUnassignedSources],
+  )
+
   const beginDragFromAnchor = useCallback(
     (sourceId: string, anchor: Point) => {
       if (!interactive) return
@@ -220,7 +242,7 @@ export function WorkerGroupResourceMap({
 
   const sourceNodes = useMemo(
     () =>
-      sources.map((r) => {
+      visibleSources.map((r) => {
         const vol = parseGb(r.avgDailyGb)
         // v0.9.1 dropped Display name; the Source field IS the row's name.
         // Subtitle no longer dedupes name vs source.
@@ -235,7 +257,7 @@ export function WorkerGroupResourceMap({
           criticality: (r.dataCriticality || '').trim(),
         }
       }),
-    [sources],
+    [visibleSources],
   )
 
   const measure = useCallback(() => {
@@ -509,9 +531,23 @@ export function WorkerGroupResourceMap({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] tabular-nums text-cribl-muted">
-            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            {sourceNodes.length} {sourceNodes.length === 1 ? 'source' : 'sources'}
             {totalVolumeGb > 0 ? <> · {formatGbOrTbPerDayStr(totalVolumeGb)}</> : null}
           </span>
+          {disabledSourceCount > 0 ? (
+            <label className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-cribl-border bg-white px-2 text-[11px] text-cribl-ink/90">
+              <input
+                type="checkbox"
+                className="size-3.5 rounded border-cribl-border text-cribl-primary"
+                checked={showDisabledInResourceMap}
+                onChange={(e) => setShowDisabledInResourceMap(e.target.checked)}
+              />
+              <span>Show disabled</span>
+              {!showDisabledInResourceMap ? (
+                <span className="text-cribl-muted">({disabledSourceCount} hidden)</span>
+              ) : null}
+            </label>
+          ) : null}
           {onAddSource ? (
             <button
               type="button"
@@ -614,7 +650,7 @@ export function WorkerGroupResourceMap({
            * and dasharray as the only visibility levers.
            */}
           {branches.map((b) => {
-            const isHovered = hovered === b.id
+            const isHovered = hovered === b.id || delayedHovered === b.id
             const isSummaryBranch = b.kind === 'summary'
             const inDrawPhase = animEnabled && !entryAnimated
             const dash = inDrawPhase ? '1 1' : isSummaryBranch ? '5 5' : undefined
@@ -655,6 +691,16 @@ export function WorkerGroupResourceMap({
                   strokeLinecap="round"
                   style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
                 />
+                {b.kind === 'source' ? (
+                  <circle
+                    cx={detachX}
+                    cy={detachY}
+                    r={14}
+                    fill="transparent"
+                    style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                    aria-hidden
+                  />
+                ) : null}
                 {showDetachX ? (
                   <g
                     style={{ cursor: 'pointer' }}
@@ -1063,9 +1109,9 @@ export function WorkerGroupResourceMap({
         </div>
         </div>
 
-        {unassignedSources.length > 0 ? (
+        {visibleUnassignedSources.length > 0 ? (
           <UnassignedSection
-            sources={unassignedSources}
+            sources={visibleUnassignedSources}
             interactive={interactive}
             isDragging={isDragging}
             draggedSourceId={drag?.sourceId ?? null}

@@ -30,6 +30,16 @@ describe('topologyHarvestToPlanState — Leader source names', () => {
     expect(plan.sourceSummary[0]!.leaderImportedDisabled).not.toBe(true)
   })
 
+  it('uses Leader group id as worker group name, not description', () => {
+    const harvest: TenantHarvestResult = {
+      groups: [{ id: 'New_Hire_Bootcamp', description: 'New Hire Bootcamp' }],
+      inputsByGroup: { New_Hire_Bootcamp: [] },
+      warnings: [],
+    }
+    const plan = topologyHarvestToPlanState(harvest)
+    expect(plan.workerGroups[0]!.wg).toBe('New_Hire_Bootcamp')
+  })
+
   it('truncates base id so Source + " disabled" stays within 200 chars', () => {
     const longId = 'x'.repeat(200)
     const harvest: TenantHarvestResult = {

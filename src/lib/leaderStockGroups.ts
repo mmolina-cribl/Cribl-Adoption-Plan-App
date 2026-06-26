@@ -29,3 +29,32 @@ export function isStockLeaderWorkerGroup(g: { id: string }): boolean {
   }
   return STOCK_LEADER_WORKER_GROUP_IDS.has(id)
 }
+
+/**
+ * True for Cribl **Search** / Lakehouse engine topology — not a Stream worker group
+ * or Edge fleet for adoption-plan purposes. Diag import and tenant harvest skip these.
+ */
+export function isLeaderSearchGroup(g: { id: string; type?: string; isSearch?: boolean }): boolean {
+  const id = (g.id ?? '').trim()
+  const t = (g.type ?? '').trim().toLowerCase()
+  if (id === 'default_search' || g.isSearch === true || t === 'search') {
+    return true
+  }
+  return false
+}
+
+/**
+ * True for Cribl **Outpost** topology — not a Stream worker group or Edge fleet
+ * for adoption-plan purposes. Diag import always skips these groups.
+ */
+export function isLeaderOutpostGroup(g: { id: string; type?: string }): boolean {
+  const id = (g.id ?? '').trim()
+  const t = (g.type ?? '').trim().toLowerCase()
+  if (t === 'outpost') {
+    return true
+  }
+  if (id === 'default_outpost') {
+    return true
+  }
+  return id.toLowerCase().endsWith('_outpost')
+}

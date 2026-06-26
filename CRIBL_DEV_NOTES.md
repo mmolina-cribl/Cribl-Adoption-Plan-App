@@ -44,7 +44,7 @@ Do this whenever you bump the **shipped Adoption Plan app** version (`package.js
 
 2. **Grep for the *previous* app version** — Search the repo for the old **`X.Y.Z`** and **`vX.Y.Z`** (for example `rg '\b2\.2\.0\b'` — substitute the semver you are replacing). Prefer limiting noise:
    - **Ignore** hits that are **npm package versions**, not this app — common false positives in **`package-lock.json`** include unrelated packages whose semver **digits** match your pattern (e.g. **`lodash` `4.17.21`**, a transitive range like **`^2.0.0`**). Compare the **package name** and **`resolved`** URL to the app **`name`** in `package.json`; do not edit lockfile entries unless you intend to upgrade those dependencies.
-   - **Update** “current release” maintainer copy: **[`README.md`](./README.md)** (release blurb, example download URLs), any **tag examples** in this file, and add or extend the **new** **`### vX.Y.Z (GitHub Release)`** block in **[`ROADMAP.md`](./ROADMAP.md)** (move “Recently delivered” bullets under the new version as your convention dictates).
+   - **Update** “current release” maintainer copy: **[`README.md`](./README.md)** (release blurb, example download URLs), any **tag examples** in this file, **`docs/slack-update-posts.md`** (local `docs/` tree — short **CSE-facing** Slack blurb: install paths + a few **user-visible** bullets; link GitHub / ROADMAP for depth; omit dev-only and housekeeping), and add or extend the **new** **`### vX.Y.Z (GitHub Release)`** block in **[`ROADMAP.md`](./ROADMAP.md)** (move “Recently delivered” bullets under the new version as your convention dictates).
    - **Do not rewrite** headings or packaging lines inside **older** `### v… (GitHub Release)` sections in **`ROADMAP.md`** — those document historical tags.
    - **Packaging bullets** for the *new* release should describe build flow relative to a clear baseline (e.g. “unchanged from **v2.3.0**+”) so you do not accidentally imply a stale tag is still “current.”
 
@@ -83,13 +83,13 @@ After the tag exists (`gh release create …` or push tag), from a clean checkou
 
 1. **`npm run package`** — creates the App `.tgz` under **`build/`** (same layout Cribl **Settings → Apps → Install** expects).
 2. **`npm run build:standalone`** — creates the single-file HTML under **`dist-standalone/`**.
-3. **Upload both files** to the release as **assets** (same tag name as `package.json` version, e.g. `v2.3.2`). **`npm run release:upload-github-assets`** uploads the **`.tgz` and `.html` together** — do not skip the **`.tgz`**. After upload, open the release on GitHub and confirm **two** downloadable assets appear (**`adoption-plan-<version>.tgz`** and **`cribl-adoption-plan.html`**, excluding GitHub’s auto-generated source archives):
+3. **Upload both files** to the release as **assets** (same tag name as `package.json` version, e.g. `v3.0.0`). **`npm run release:upload-github-assets`** uploads the **`.tgz` and `.html` together** — do not skip the **`.tgz`**. After upload, open the release on GitHub and confirm **two** downloadable assets appear (**`adoption-plan-<version>.tgz`** and **`cribl-adoption-plan.html`**, excluding GitHub’s auto-generated source archives):
 
    ```bash
    npm run release:upload-github-assets
    ```
 
-   Optional explicit tag: `node scripts/upload-github-release-assets.mjs v2.3.2`
+   Optional explicit tag: `node scripts/upload-github-release-assets.mjs v3.0.0`
 
    Equivalent manual `gh` invocation:
 
@@ -100,7 +100,15 @@ After the tag exists (`gh release create …` or push tag), from a clean checkou
      --clobber
    ```
 
+4. **Internal Slack** — After both assets are visible on the release page, post a short field / internal update (pick the channel per org norms). Copy from **`docs/slack-update-posts.md`** in your local **`docs/`** tree (see repo **README**). Keep the post **CSE-facing** (install paths + a few user-visible wins); add a new **`##`** section at the top of that file for the next ship when you draft it — see the file’s intro for tone (omit dev-only / housekeeping).
+
 `build/` and `dist-standalone/` are gitignored; these files are **release assets only**.
+
+---
+
+## Slack announcements (internal)
+
+Maintainers keep **short, CSE-facing** copy in **`docs/slack-update-posts.md`** (local **`docs/`** tree — not in a bare `git clone`; see **README**): install links + a few user-visible bullets; full detail stays on **GitHub** / **ROADMAP**. See **Release checklist (GitHub — release assets)** step 4 above.
 
 ---
 
